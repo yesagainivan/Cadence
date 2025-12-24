@@ -133,10 +133,11 @@ A production-ready music programming language for chord progressions and harmoni
 |-----------|--------|
 | Core Types (Note, Chord, Progression) | ✅ Stable |
 | Audio Engine (crossfade, beat-sync) | ✅ Production-ready |
+| Master Clock (24 PPQN, multi-track sync) | ✅ New! Eliminates tempo drift |
 | Scheduler (beat tracking) | ✅ Complete |
 | REPL | ✅ Refactored with CommandRegistry |
 | Parser/AST | ✅ Separated, scripting-ready |
-| Lexer | ✅ 25 tokens + i32 numbers + newlines |
+| Lexer | ✅ 26 tokens + i32 numbers + newlines |
 | StatementParser | ✅ Unified expression parsing |
 | Environment | ✅ Thread-safe with Arc<RwLock> |
 | Interpreter | ✅ Actions-based architecture |
@@ -145,7 +146,7 @@ A production-ready music programming language for chord progressions and harmoni
 | Script Audio | ✅ play/tempo/stop trigger audio |
 | Playback Queue | ✅ FIFO queue with `try_start_next_queued()` |
 | Control Flow | ✅ `repeat`, `loop`, `break`, `continue` |
-| Multitrack | ✅ `track N { }`, 16-track limit, `tracks` command |
+| Multitrack | ✅ `track N { }` or `on N { }`, 16-track limit |
 | Voice Leading | ✅ `smooth_voice_leading()` with octave normalization |
 | Reactive Variables | ✅ Per-beat re-evaluation, live variable updates |
 | Live Coding | 🟡 Reactive variables done, hot-reload pending |

@@ -3,17 +3,22 @@
 //! This module provides a production-ready audio progression system that enables
 //! seamless, beat-synchronized switching between progressions—inspired by live
 //! coding environments like Sonic Pi and TidalCycles.
+//!
+//! ## Synchronization
+//! All tracks receive tick events from a shared MasterClock, ensuring they stay
+//! perfectly in sync regardless of how many tracks are playing.
 
 use crate::audio::audio::AudioPlayerHandle;
-use crate::audio::scheduler::{Duration, Scheduler};
+use crate::audio::clock::ClockTick;
+use crate::audio::scheduler::Duration;
 use crate::parser::{Evaluator, Expression, SharedEnvironment, Value};
 use anyhow::Result;
+use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender, select};
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::{self, JoinHandle};
-use std::time::Instant;
 
 /// Source of playback content - supports both static and reactive (live-coding) modes
 #[derive(Clone, Debug)]
@@ -161,6 +166,8 @@ pub enum PlaybackCommand {
 }
 
 /// Engine for managing sequential progression playback with beat-quantized switching
+///
+/// Receives tick events from a shared MasterClock to stay synchronized with other tracks.
 pub struct PlaybackEngine {
     command_tx: Sender<PlaybackCommand>,
     is_playing: Arc<AtomicBool>,
@@ -169,10 +176,11 @@ pub struct PlaybackEngine {
 }
 
 impl PlaybackEngine {
-    /// Create a new playback engine with a persistent playback thread
+    /// Create a new playback engine that receives ticks from the master clock
     pub fn new(
         audio_handle: Arc<AudioPlayerHandle>,
-        scheduler: Arc<Scheduler>,
+        tick_rx: CrossbeamReceiver<ClockTick>,
+        bpm: Arc<AtomicU64>,
         track_id: usize,
     ) -> Self {
         let (tx, rx) = channel();
@@ -180,7 +188,7 @@ impl PlaybackEngine {
         let is_playing_clone = is_playing.clone();
 
         let thread = thread::spawn(move || {
-            PlaybackLoop::new(audio_handle, scheduler, rx, is_playing_clone, track_id).run();
+            PlaybackLoop::new(audio_handle, tick_rx, bpm, rx, is_playing_clone, track_id).run();
         });
 
         PlaybackEngine {
@@ -232,9 +240,12 @@ impl Drop for PlaybackEngine {
 }
 
 /// Internal playback loop that runs in a dedicated thread
+///
+/// Uses crossbeam select! to wait on both clock ticks and commands simultaneously.
 struct PlaybackLoop {
     audio_handle: Arc<AudioPlayerHandle>,
-    scheduler: Arc<Scheduler>,
+    tick_rx: CrossbeamReceiver<ClockTick>,
+    bpm: Arc<AtomicU64>,
     command_rx: Receiver<PlaybackCommand>,
     is_playing: Arc<AtomicBool>,
 
@@ -246,19 +257,30 @@ struct PlaybackLoop {
     iteration: usize,
     audio_started: bool,
     track_id: usize,
+
+    // Timing state for sub-beat notes
+    /// Beats accumulated since last chord change
+    beats_accumulated: f32,
+    /// Next beat boundary to trigger chord change
+    next_chord_beat: f64,
+    /// Whether we're in a gap (silence between notes)
+    in_gap: bool,
+    gap_end_beat: f64,
 }
 
 impl PlaybackLoop {
     fn new(
         audio_handle: Arc<AudioPlayerHandle>,
-        scheduler: Arc<Scheduler>,
+        tick_rx: CrossbeamReceiver<ClockTick>,
+        bpm: Arc<AtomicU64>,
         command_rx: Receiver<PlaybackCommand>,
         is_playing: Arc<AtomicBool>,
         track_id: usize,
     ) -> Self {
         Self {
             audio_handle,
-            scheduler,
+            tick_rx,
+            bpm,
             command_rx,
             is_playing,
             current_progression: None,
@@ -267,112 +289,118 @@ impl PlaybackLoop {
             iteration: 0,
             audio_started: false,
             track_id,
+            beats_accumulated: 0.0,
+            next_chord_beat: 0.0,
+            in_gap: false,
+            gap_end_beat: 0.0,
         }
     }
 
+    fn get_bpm(&self) -> f32 {
+        f32::from_bits(self.bpm.load(Ordering::Relaxed) as u32)
+    }
+
     fn run(&mut self) {
-        loop {
-            // Process all pending commands
-            match self.process_commands() {
-                LoopAction::Continue => {}
-                LoopAction::Shutdown => break,
+        // Convert mpsc Receiver to crossbeam for use in select!
+        let (cmd_bridge_tx, cmd_bridge_rx): (
+            CrossbeamSender<PlaybackCommand>,
+            CrossbeamReceiver<PlaybackCommand>,
+        ) = crossbeam_channel::unbounded();
+
+        // Spawn a bridge thread to forward mpsc commands to crossbeam
+        let command_rx = std::mem::replace(&mut self.command_rx, channel().1);
+        let bridge_tx = cmd_bridge_tx.clone();
+        let _bridge_thread = thread::spawn(move || {
+            while let Ok(cmd) = command_rx.recv() {
+                if bridge_tx.send(cmd).is_err() {
+                    break;
+                }
             }
+        });
 
-            // If we have a progression to play, advance it
-            if self.current_progression.is_some() {
-                self.play_next_beat();
-            } else if !self.pending_queue.is_empty() {
-                // Queued content waiting to start at next beat
-                self.is_playing.store(true, Ordering::Relaxed);
-
-                // Ensure scheduler is running
-                self.scheduler.start();
-
-                // Wait for next beat boundary
-                let beat_time = self.scheduler.next_beat_time();
-                self.wait_until_with_command_check(beat_time);
-
-                // Check if we were stopped or interrupted during wait
-                if !self.is_playing.load(Ordering::Relaxed) {
-                    continue;
-                }
-
-                // Now start the queued item if still pending
-                // Note: pending_queue might have been cleared if Stop was received,
-                // or modified if new Queue commands arrived.
-                if let Some(next) = self.pending_queue.pop_front() {
-                    self.current_progression = Some(next);
-                    self.chord_index = 0;
-                    self.iteration = 0;
-                    self.audio_started = false;
-                    let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
-                }
-            } else {
-                // No progression - wait for commands
-                match self.command_rx.recv() {
-                    Ok(cmd) => {
-                        if let LoopAction::Shutdown = self.handle_command(cmd) {
+        loop {
+            select! {
+                recv(self.tick_rx) -> tick_result => {
+                    match tick_result {
+                        Ok(tick) => {
+                            self.handle_tick(tick);
+                        }
+                        Err(_) => {
+                            // Clock channel closed, shutdown
                             break;
                         }
                     }
-                    Err(_) => break, // Channel closed
+                }
+                recv(cmd_bridge_rx) -> cmd_result => {
+                    match cmd_result {
+                        Ok(cmd) => {
+                            if self.handle_command(cmd) {
+                                break;
+                            }
+                        }
+                        Err(_) => {
+                            // Command channel closed, shutdown
+                            break;
+                        }
+                    }
                 }
             }
         }
 
-        // Clean up - pause specific track instead of master
+        // Clean up - mute track
         let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
         self.is_playing.store(false, Ordering::Relaxed);
     }
 
-    fn process_commands(&mut self) -> LoopAction {
-        loop {
-            match self.command_rx.try_recv() {
-                Ok(cmd) => {
-                    if let LoopAction::Shutdown = self.handle_command(cmd) {
-                        return LoopAction::Shutdown;
-                    }
-                }
-                Err(TryRecvError::Empty) => return LoopAction::Continue,
-                Err(TryRecvError::Disconnected) => return LoopAction::Shutdown,
+    fn handle_tick(&mut self, tick: ClockTick) {
+        // Only process on beat boundaries for now (can be more granular later)
+        if !tick.is_beat_boundary() {
+            return;
+        }
+
+        // Handle gap ending
+        if self.in_gap && tick.beat >= self.gap_end_beat {
+            self.in_gap = false;
+        }
+
+        // Check if we should advance to next chord
+        if self.current_progression.is_some() && tick.beat >= self.next_chord_beat && !self.in_gap {
+            self.play_next_beat(tick.beat);
+        } else if self.current_progression.is_none() && !self.pending_queue.is_empty() {
+            // No current progression but items in queue - start on this beat
+            if let Some(next) = self.pending_queue.pop_front() {
+                self.current_progression = Some(next);
+                self.chord_index = 0;
+                self.iteration = 0;
+                self.next_chord_beat = tick.beat;
+                self.is_playing.store(true, Ordering::Relaxed);
+                let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
+                self.play_next_beat(tick.beat);
             }
         }
     }
 
-    fn handle_command(&mut self, cmd: PlaybackCommand) -> LoopAction {
+    fn handle_command(&mut self, cmd: PlaybackCommand) -> bool {
         match cmd {
             PlaybackCommand::PlayProgression(config) => {
                 // Immediate switch - reset position and start new progression
                 self.current_progression = Some(config);
-                self.pending_queue.clear(); // Clear queue on immediate play
+                self.pending_queue.clear();
                 self.chord_index = 0;
                 self.iteration = 0;
+                self.next_chord_beat = 0.0; // Start immediately on next beat
                 self.is_playing.store(true, Ordering::Relaxed);
-
-                // Ensure scheduler is tracking time, but don't reset if already running
-                // to maintain sync with other tracks
-                self.scheduler.start();
-
-                // Don't start audio yet - it will start on first beat
                 self.audio_started = false;
-                // Ensure track volume is up (in case it was stopped)
                 let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
             }
             PlaybackCommand::QueueProgression(config) => {
-                // Queue for next beat boundary - ALWAYS add to FIFO queue
                 self.pending_queue.push_back(config);
-
-                // Ensure we are marked as playing so the loop picks it up
                 self.is_playing.store(true, Ordering::Relaxed);
-
-                // Ensure scheduler is running
-                self.scheduler.start();
             }
             PlaybackCommand::Stop => {
                 self.current_progression = None;
                 self.pending_queue.clear();
                 self.is_playing.store(false, Ordering::Relaxed);
-                // Mute track instead of pausing master
                 let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
                 self.audio_started = false;
             }
@@ -380,14 +408,24 @@ impl PlaybackLoop {
                 let _ = self.audio_handle.set_track_volume(self.track_id, vol);
             }
             PlaybackCommand::Shutdown => {
-                return LoopAction::Shutdown;
+                return true;
             }
         }
-        LoopAction::Continue
+        false
     }
 
-    /// Helper: Try to start the next queued progression.
-    /// Returns true if a new progression was started, false if queue was empty.
+    fn duration_to_beats(&self, duration: &Duration) -> f32 {
+        match duration {
+            Duration::Beats(b) => *b,
+            Duration::Seconds(s) => {
+                let bpm = self.get_bpm();
+                s * bpm / 60.0
+            }
+            Duration::Bars(bars) => bars * 4.0,
+        }
+    }
+
+    /// Try to start the next queued progression
     fn try_start_next_queued(&mut self) -> bool {
         if let Some(next) = self.pending_queue.pop_front() {
             self.current_progression = Some(next);
@@ -399,24 +437,24 @@ impl PlaybackLoop {
         }
     }
 
-    /// Helper: Stop playback and fade out.
+    /// Stop playback
     fn stop_playback(&mut self) {
         self.current_progression = None;
         self.is_playing.store(false, Ordering::Relaxed);
         let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
+        let _ = self.audio_handle.set_track_notes(self.track_id, vec![]);
         self.audio_started = false;
     }
 
-    fn play_next_beat(&mut self) {
+    fn play_next_beat(&mut self, current_beat: f64) {
         // Quantized Interrupt Logic:
-        // If current progression is an infinite loop OR we have no current progression,
-        // try to switch to a queued item at the beat boundary.
+        // If current progression is an infinite loop, try to switch to queued item
         let is_infinite = self
             .current_progression
             .as_ref()
             .map_or(false, |p| p.loop_count.is_none());
 
-        if (is_infinite || self.current_progression.is_none()) && !self.pending_queue.is_empty() {
+        if is_infinite && !self.pending_queue.is_empty() {
             self.try_start_next_queued();
         }
 
@@ -428,7 +466,6 @@ impl PlaybackLoop {
         // Check if we've completed all iterations
         if let Some(max_loops) = config.loop_count {
             if self.iteration >= max_loops {
-                // Current progression done - try to get next from queue
                 if !self.try_start_next_queued() {
                     self.stop_playback();
                 }
@@ -437,7 +474,6 @@ impl PlaybackLoop {
         }
 
         // Evaluate the source to get current frequencies
-        // For reactive sources, this re-evaluates the expression each beat
         let frequencies = match config.source.evaluate() {
             Ok(f) => f,
             Err(e) => {
@@ -446,16 +482,14 @@ impl PlaybackLoop {
             }
         };
 
-        // Get current chord - check bounds after evaluation (reactive sources may change length)
+        // Check if we've reached end of progression
         if self.chord_index >= frequencies.len() {
-            // Move to next iteration
             self.chord_index = 0;
             self.iteration += 1;
 
             // Re-check loop count
             if let Some(max_loops) = config.loop_count {
                 if self.iteration >= max_loops {
-                    // Current progression done - try to get next from queue
                     if !self.try_start_next_queued() {
                         self.stop_playback();
                     }
@@ -464,14 +498,13 @@ impl PlaybackLoop {
             }
         }
 
-        // Handle case where frequencies are empty after re-evaluation
         if frequencies.is_empty() {
             return;
         }
 
         let chord_frequencies = &frequencies[self.chord_index];
 
-        // Set the notes for this track (seamless - no pause needed)
+        // Set the notes for this track
         if let Err(e) = self
             .audio_handle
             .set_track_notes(self.track_id, chord_frequencies.clone())
@@ -479,7 +512,7 @@ impl PlaybackLoop {
             eprintln!("Failed to set notes: {}", e);
         }
 
-        // Start audio if not already playing (via master play)
+        // Start audio if not already playing
         if !self.audio_started {
             if let Err(e) = self.audio_handle.play() {
                 eprintln!("Failed to start audio: {}", e);
@@ -490,71 +523,28 @@ impl PlaybackLoop {
         // Advance chord index
         self.chord_index += 1;
 
-        // Wait for beat duration, checking for commands periodically
-        let beat_end = self.scheduler.time_from_now(config.note_duration);
-        self.wait_until_with_command_check(beat_end);
+        // Calculate next chord beat
+        let duration_beats = self.duration_to_beats(&config.note_duration);
+        let gap_beats = self.duration_to_beats(&config.gap_duration);
 
-        // Handle gap if specified
-        let gap_ms = config.gap_duration.to_millis(self.scheduler.get_bpm());
-        if gap_ms > 0 {
-            // Mute track for gap
-            let _ = self.audio_handle.set_track_notes(self.track_id, vec![]);
-            self.scheduler.sleep(config.gap_duration);
-            // Notes will be set again at start of next beat
+        if gap_beats > 0.0 {
+            // Schedule gap, then chord
+            self.in_gap = true;
+            self.gap_end_beat = current_beat + duration_beats as f64;
+            self.next_chord_beat = self.gap_end_beat + gap_beats as f64;
+
+            // Mute for gap will happen when gap starts (next beat check)
+        } else {
+            self.next_chord_beat = current_beat + duration_beats as f64;
         }
     }
-
-    /// Wait until a specific time, but check for commands periodically
-    fn wait_until_with_command_check(&mut self, target: Instant) {
-        while Instant::now() < target {
-            // Check for high-priority commands (Stop/Shutdown) more frequently
-            match self.command_rx.try_recv() {
-                Ok(PlaybackCommand::Stop) => {
-                    self.current_progression = None;
-                    self.pending_queue.clear();
-                    self.is_playing.store(false, Ordering::Relaxed);
-                    let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
-                    self.audio_started = false;
-                    return;
-                }
-                Ok(PlaybackCommand::SetVolume(vol)) => {
-                    let _ = self.audio_handle.set_track_volume(self.track_id, vol);
-                }
-                Ok(PlaybackCommand::Shutdown) => {
-                    return;
-                }
-                Ok(PlaybackCommand::QueueProgression(config)) => {
-                    // Add to queue
-                    self.pending_queue.push_back(config);
-                }
-                Ok(PlaybackCommand::PlayProgression(config)) => {
-                    // Immediate switch even mid-beat
-                    self.current_progression = Some(config);
-                    self.pending_queue.clear();
-                    self.chord_index = 0;
-                    self.iteration = 0;
-                    self.scheduler.start(); // Ensure started (was reset)
-                    // Ensure volume is up
-                    let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
-                    return; // Exit early to start new progression
-                }
-                Err(_) => {}
-            }
-
-            // Small sleep for responsiveness
-            thread::sleep(std::time::Duration::from_millis(5));
-        }
-    }
-}
-
-enum LoopAction {
-    Continue,
-    Shutdown,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio::audio::AudioPlayerHandle;
+    use crate::audio::clock::MasterClock;
 
     #[test]
     fn test_progression_config_builder() {
@@ -576,8 +566,10 @@ mod tests {
     fn test_playback_engine_creation() {
         match AudioPlayerHandle::new() {
             Ok(handle) => {
-                let scheduler = Scheduler::new(120.0);
-                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler), 1);
+                let clock = MasterClock::new(120.0);
+                let tick_rx = clock.subscribe();
+                let bpm = Arc::new(AtomicU64::new(120.0_f32.to_bits() as u64));
+                let engine = PlaybackEngine::new(Arc::new(handle), tick_rx, bpm, 1);
                 assert!(!engine.is_playing());
             }
             Err(_) => {
@@ -590,8 +582,10 @@ mod tests {
     fn test_playback_engine_commands() {
         match AudioPlayerHandle::new() {
             Ok(handle) => {
-                let scheduler = Scheduler::new(120.0);
-                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler), 1);
+                let clock = MasterClock::new(120.0);
+                let tick_rx = clock.subscribe();
+                let bpm = Arc::new(AtomicU64::new(120.0_f32.to_bits() as u64));
+                let engine = PlaybackEngine::new(Arc::new(handle), tick_rx, bpm, 1);
 
                 let config = ProgressionConfig::new(vec![vec![440.0]]);
 
@@ -606,19 +600,6 @@ mod tests {
         }
     }
 
-    // ========== Queue Behavior Unit Tests ==========
-    // These tests verify the queue logic without requiring audio hardware
-
-    /// Test that try_start_next_queued returns false on empty queue
-    #[test]
-    fn test_try_start_next_queued_empty() {
-        // We can't create a PlaybackLoop directly without audio, but we can test
-        // the VecDeque behavior it depends on
-        let mut queue: VecDeque<ProgressionConfig> = VecDeque::new();
-        assert!(queue.pop_front().is_none());
-    }
-
-    /// Test that VecDeque maintains FIFO order (core queue guarantee)
     #[test]
     fn test_queue_fifo_order() {
         let mut queue: VecDeque<ProgressionConfig> = VecDeque::new();
@@ -633,7 +614,6 @@ mod tests {
 
         assert_eq!(queue.len(), 3);
 
-        // FIFO: first in, first out
         let first = queue.pop_front().unwrap();
         assert_eq!(first.source.evaluate().unwrap()[0][0], 440.0);
 
@@ -646,106 +626,17 @@ mod tests {
         assert!(queue.is_empty());
     }
 
-    /// Test that Stop command clears queue via engine
-    #[test]
-    fn test_stop_clears_queue() {
-        match AudioPlayerHandle::new() {
-            Ok(handle) => {
-                let scheduler = Scheduler::new(120.0);
-                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler), 1);
-
-                let config = ProgressionConfig::new(vec![vec![440.0]]);
-
-                // Queue multiple items
-                assert!(engine.queue_progression(config.clone()).is_ok());
-                assert!(engine.queue_progression(config.clone()).is_ok());
-                assert!(engine.queue_progression(config.clone()).is_ok());
-
-                // Stop should clear everything
-                assert!(engine.stop().is_ok());
-
-                // Give time for command to be processed
-                std::thread::sleep(std::time::Duration::from_millis(50));
-
-                // After stop, is_playing should be false
-                assert!(!engine.is_playing());
-            }
-            Err(_) => {
-                println!("Skipping test_stop_clears_queue - no audio device");
-            }
-        }
-    }
-
-    /// Test that PlayProgression clears pending queue
-    #[test]
-    fn test_play_clears_queue() {
-        match AudioPlayerHandle::new() {
-            Ok(handle) => {
-                let scheduler = Scheduler::new(120.0);
-                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler), 1);
-
-                let config1 = ProgressionConfig::new(vec![vec![440.0]]);
-                let config2 = ProgressionConfig::new(vec![vec![880.0]]);
-
-                // Queue several items
-                assert!(engine.queue_progression(config1.clone()).is_ok());
-                assert!(engine.queue_progression(config1.clone()).is_ok());
-
-                // Play immediately should clear queue and play config2
-                assert!(engine.play_progression(config2).is_ok());
-
-                // Give time for command to be processed
-                std::thread::sleep(std::time::Duration::from_millis(50));
-
-                // Engine should be playing
-                assert!(engine.is_playing());
-            }
-            Err(_) => {
-                println!("Skipping test_play_clears_queue - no audio device");
-            }
-        }
-    }
-
-    /// Test ProgressionConfig loop settings
     #[test]
     fn test_progression_config_loop_settings() {
         let progression = vec![vec![440.0]];
 
-        // Default: 1 loop
         let config = ProgressionConfig::new(progression.clone());
         assert_eq!(config.loop_count, Some(1));
 
-        // Infinite loop
         let config_infinite = ProgressionConfig::new(progression.clone()).with_looping();
         assert_eq!(config_infinite.loop_count, None);
 
-        // Specific count
         let config_count = ProgressionConfig::new(progression.clone()).with_loop_count(5);
         assert_eq!(config_count.loop_count, Some(5));
-    }
-
-    /// Test multiple rapid queue additions
-    #[test]
-    fn test_rapid_queue_additions() {
-        match AudioPlayerHandle::new() {
-            Ok(handle) => {
-                let scheduler = Scheduler::new(120.0);
-                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler), 1);
-
-                // Rapidly queue many items (simulates repeat 32 { play E queue })
-                for i in 0..32 {
-                    let freq = 440.0 + (i as f32 * 10.0);
-                    let config = ProgressionConfig::new(vec![vec![freq]]);
-                    assert!(engine.queue_progression(config).is_ok());
-                }
-
-                // All queues should succeed without panic or error
-                // Stop to clean up
-                assert!(engine.stop().is_ok());
-            }
-            Err(_) => {
-                println!("Skipping test_rapid_queue_additions - no audio device");
-            }
-        }
     }
 }

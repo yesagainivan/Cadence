@@ -1,8 +1,8 @@
 //! REPL (Read-Eval-Print Loop) for the Cadence language
 
 use crate::audio::audio::AudioPlayerHandle;
+use crate::audio::clock::MasterClock;
 use crate::audio::playback_engine::PlaybackEngine;
-use crate::audio::scheduler::Scheduler;
 use crate::commands::{CommandContext, CommandResult, create_registry};
 use crate::parser::{Interpreter, InterpreterAction, parse_statements};
 use anyhow::Result;
@@ -11,12 +11,15 @@ use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result as RustylineResult};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 /// Interactive REPL for the Cadence language
 pub struct Repl {
     editor: DefaultEditor,
     audio_handle: Arc<AudioPlayerHandle>,
-    scheduler: Arc<Scheduler>,
+    clock: Arc<MasterClock>,
+    /// Shared BPM as atomic for playback engines
+    bpm: Arc<AtomicU64>,
     // Map of track ID to playback engine
     playback_engines: HashMap<usize, Arc<PlaybackEngine>>,
     /// Interpreter for scripting constructs
@@ -29,14 +32,17 @@ impl Repl {
         let editor = DefaultEditor::new()?;
         let audio_handle =
             Arc::new(AudioPlayerHandle::new().expect("Failed to create audio player"));
-        let scheduler = Arc::new(Scheduler::new(90.0)); // Default 90 BPM
+        let clock = Arc::new(MasterClock::new(90.0)); // Default 90 BPM
+        let bpm = Arc::new(AtomicU64::new(90.0_f32.to_bits() as u64));
 
         // Initialize with default track 1
         let mut playback_engines = HashMap::new();
         let default_track = 1;
+        let tick_rx = clock.subscribe();
         let engine = Arc::new(PlaybackEngine::new(
             audio_handle.clone(),
-            scheduler.clone(),
+            tick_rx,
+            bpm.clone(),
             default_track,
         ));
         playback_engines.insert(default_track, engine);
@@ -44,7 +50,8 @@ impl Repl {
         Ok(Repl {
             editor,
             audio_handle,
-            scheduler,
+            clock,
+            bpm,
             playback_engines,
             interpreter: Interpreter::new(),
         })
@@ -74,9 +81,11 @@ impl Repl {
             return self.playback_engines.get(&1).unwrap().clone();
         }
 
+        let tick_rx = self.clock.subscribe();
         let engine = Arc::new(PlaybackEngine::new(
             self.audio_handle.clone(),
-            self.scheduler.clone(),
+            tick_rx,
+            self.bpm.clone(),
             track_id,
         ));
         self.playback_engines.insert(track_id, engine.clone());
@@ -155,6 +164,9 @@ impl Repl {
                     config = config.with_looping();
                 }
 
+                // Ensure the clock is running before starting playback
+                self.clock.start();
+
                 if queue {
                     if let Err(e) = engine.queue_progression(config) {
                         println!("{} {}", "Playback error:".red(), e);
@@ -176,7 +188,11 @@ impl Repl {
                 }
             }
             InterpreterAction::SetTempo(bpm) => {
-                self.scheduler.set_bpm(bpm);
+                self.clock.set_bpm(bpm);
+                self.bpm
+                    .store(bpm.to_bits() as u64, std::sync::atomic::Ordering::Relaxed);
+                // Also start the clock if not already running
+                self.clock.start();
                 // Already printed by interpreter
             }
             InterpreterAction::SetVolume { volume, track_id } => {
@@ -232,7 +248,7 @@ impl Repl {
         let registry = create_registry();
         let mut ctx = CommandContext::new(
             self.audio_handle.clone(),
-            self.scheduler.clone(),
+            self.clock.clone(),
             default_engine,
         );
 

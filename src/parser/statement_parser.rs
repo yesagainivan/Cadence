@@ -117,6 +117,7 @@ impl StatementParser {
             Token::Volume => self.parse_volume_statement(),
             Token::Load => self.parse_load_statement(),
             Token::Track => self.parse_track_statement(),
+            Token::On => self.parse_track_statement(), // 'on N' is alias for 'track N'
             Token::Loop => self.parse_loop_statement(),
             Token::Repeat => self.parse_repeat_statement(),
             Token::If => self.parse_if_statement(),
@@ -258,13 +259,21 @@ impl StatementParser {
     }
 
     /// Parse: track <n> <statement> (or block)
+    /// Also handles: on <n> <statement> (alias syntax)
     fn parse_track_statement(&mut self) -> Result<Statement> {
-        self.expect(&Token::Track)?;
+        // Accept either 'track' or 'on' as the prefix
+        if self.check(&Token::Track) {
+            self.advance();
+        } else if self.check(&Token::On) {
+            self.advance();
+        } else {
+            return Err(anyhow!("Expected 'track' or 'on' keyword"));
+        }
 
         let id = match self.current() {
             Token::Number(n) if *n > 0 => *n as usize,
             Token::Number(_) => return Err(anyhow!("Track ID must be positive")),
-            _ => return Err(anyhow!("Expected track number after 'track'")),
+            _ => return Err(anyhow!("Expected track number after 'track' or 'on'")),
         };
         self.advance();
 

@@ -17,15 +17,12 @@ pub fn cmd_quit(_args: &str, _ctx: &mut CommandContext) -> CommandResult {
 /// Handle `tempo [bpm]` command
 pub fn cmd_tempo(args: &str, ctx: &mut CommandContext) -> CommandResult {
     if args.is_empty() {
-        return CommandResult::Message(format!(
-            "Current tempo: {:.1} BPM",
-            ctx.scheduler.get_bpm()
-        ));
+        return CommandResult::Message(format!("Current tempo: {:.1} BPM", ctx.clock.get_bpm()));
     }
 
     match args.parse::<f32>() {
         Ok(bpm) if bpm > 0.0 && bpm <= 400.0 => {
-            ctx.scheduler.set_bpm(bpm);
+            ctx.clock.set_bpm(bpm);
             CommandResult::Message(
                 format!("🎵 Tempo set to {:.1} BPM", bpm)
                     .bright_green()

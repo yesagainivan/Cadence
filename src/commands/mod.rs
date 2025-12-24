@@ -6,8 +6,8 @@ pub mod audio;
 pub mod general;
 
 use crate::audio::audio::AudioPlayerHandle;
+use crate::audio::clock::MasterClock;
 use crate::audio::playback_engine::PlaybackEngine;
-use crate::audio::scheduler::Scheduler;
 use crate::parser::{Value, eval};
 use std::sync::Arc;
 
@@ -29,19 +29,19 @@ pub enum CommandResult {
 /// Context passed to command handlers
 pub struct CommandContext {
     pub audio_handle: Arc<AudioPlayerHandle>,
-    pub scheduler: Arc<Scheduler>,
+    pub clock: Arc<MasterClock>,
     pub playback_engine: Arc<PlaybackEngine>,
 }
 
 impl CommandContext {
     pub fn new(
         audio_handle: Arc<AudioPlayerHandle>,
-        scheduler: Arc<Scheduler>,
+        clock: Arc<MasterClock>,
         playback_engine: Arc<PlaybackEngine>,
     ) -> Self {
         Self {
             audio_handle,
-            scheduler,
+            clock,
             playback_engine,
         }
     }

@@ -90,7 +90,7 @@ pub fn cmd_audio_play_progression(args: &str, ctx: &mut CommandContext) -> Comma
                         format!(
                             "🎵 Playing progression ({} chords, {:.1} BPM)...",
                             chord_count,
-                            ctx.scheduler.get_bpm()
+                            ctx.clock.get_bpm()
                         )
                         .bright_green()
                         .to_string()
