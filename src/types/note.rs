@@ -100,6 +100,60 @@ impl Note {
         self.pitch_class
     }
 
+    /// Get the octave
+    pub fn octave(&self) -> i8 {
+        self.octave
+    }
+
+    /// Get the note name (without octave)
+    pub fn name(&self) -> String {
+        match self.pitch_class {
+            0 => "C".to_string(),
+            1 => {
+                if self.accidental_preference == AccidentalPreference::Flat {
+                    "Db".to_string()
+                } else {
+                    "C#".to_string()
+                }
+            }
+            2 => "D".to_string(),
+            3 => {
+                if self.accidental_preference == AccidentalPreference::Flat {
+                    "Eb".to_string()
+                } else {
+                    "D#".to_string()
+                }
+            }
+            4 => "E".to_string(),
+            5 => "F".to_string(),
+            6 => {
+                if self.accidental_preference == AccidentalPreference::Flat {
+                    "Gb".to_string()
+                } else {
+                    "F#".to_string()
+                }
+            }
+            7 => "G".to_string(),
+            8 => {
+                if self.accidental_preference == AccidentalPreference::Flat {
+                    "Ab".to_string()
+                } else {
+                    "G#".to_string()
+                }
+            }
+            9 => "A".to_string(),
+            10 => {
+                if self.accidental_preference == AccidentalPreference::Flat {
+                    "Bb".to_string()
+                } else {
+                    "A#".to_string()
+                }
+            }
+            11 => "B".to_string(),
+            _ => "?".to_string(),
+        }
+    }
+
     /// Check if a pitch class corresponds to a natural note (white key)
     fn is_natural_note(pitch_class: u8) -> bool {
         matches!(pitch_class, 0 | 2 | 4 | 5 | 7 | 9 | 11) // C, D, E, F, G, A, B

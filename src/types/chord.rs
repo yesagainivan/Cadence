@@ -199,27 +199,8 @@ impl Chord {
     }
 
     /// Create the first inversion of the chord
-    pub fn invert(mut self) -> Self {
-        if self.notes.len() < 2 {
-            return self;
-        }
-
-        let notes_vec = self.notes_vec();
-        let current_bass = self.bass().unwrap();
-
-        // Find the next note in pitch-class order to become the bass
-        if let Some(current_index) = notes_vec.iter().position(|&n| n == current_bass) {
-            let next_bass_index = (current_index + 1) % notes_vec.len();
-            self.bass_note = Some(notes_vec[next_bass_index]);
-
-            // Update input order to reflect the inversion
-            // Move the bass note to the front
-            let new_bass = notes_vec[next_bass_index];
-            self.input_order.retain(|n| *n != new_bass);
-            self.input_order.insert(0, new_bass);
-        }
-
-        self
+    pub fn invert(self) -> Self {
+        self.invert_n(1)
     }
 
     /// Create the nth inversion of the chord
@@ -229,27 +210,27 @@ impl Chord {
         }
 
         // Use modulo to handle cases where n > chord length
-        let effective_n = n % self.notes.len();
+        let steps = n % self.notes.len();
 
-        if effective_n == 0 {
+        if steps == 0 {
             // No inversion needed - return as is
             return self;
         }
 
-        // Create new input order by rotating the notes
-        let mut new_input_order = self.input_order.clone();
+        for _ in 0..steps {
+            if !self.input_order.is_empty() {
+                let note_to_move = self.input_order.remove(0);
+                self.notes.remove(&note_to_move);
 
-        // Rotate left by effective_n positions
-        // This moves the first effective_n notes to the end
-        new_input_order.rotate_left(effective_n);
+                let new_note = note_to_move + 12; // Transpose up 1 octave
 
-        // Update bass note to the new first note
-        if let Some(new_bass) = new_input_order.first() {
-            self.bass_note = Some(*new_bass);
+                self.input_order.push(new_note);
+                self.notes.insert(new_note);
+            }
         }
 
-        // Update input order
-        self.input_order = new_input_order;
+        // Update bass note to the new first note
+        self.bass_note = self.input_order.first().copied();
 
         self
     }
@@ -314,7 +295,7 @@ impl Chord {
                 _ => &format!("{}-note", self.len()),
             };
 
-            format!("{} {}", root, chord_quality)
+            format!("{} {}", root.name(), chord_quality)
         } else {
             format!("{}-note chord", self.len())
         }
@@ -386,7 +367,7 @@ impl Chord {
                 n => &format!(" ({}th inv)", n),
             };
 
-            format!("{} {}{}", root, chord_quality, inversion_info)
+            format!("{} {}{}", root.name(), chord_quality, inversion_info)
         } else {
             "Unknown triad".to_string()
         }
@@ -444,7 +425,7 @@ impl Chord {
                 n => &format!(" ({}th inv)", n),
             };
 
-            format!("{} {}{}", root, chord_quality, inversion_info)
+            format!("{} {}{}", root.name(), chord_quality, inversion_info)
         } else {
             "Unknown 4-note chord".to_string()
         }
@@ -522,7 +503,7 @@ impl fmt::Display for Chord {
                 bass_info,
                 "[".bright_white(),
                 notes_str.join(&format!("{} ", ",".bright_white())),
-                "]".bright_white()
+                "[".bright_white()
             )
         } else {
             write!(
@@ -694,7 +675,7 @@ mod tests {
         // Test that invert() changes the bass note
         let first_inv = c_maj.clone().invert();
         assert_ne!(first_inv.bass(), original_bass); // Bass should change
-        assert_eq!(first_inv.root(), Some("C".parse().unwrap())); // Root should stay C
+        assert_eq!(first_inv.root(), Some(Note::new_with_octave(0, 5).unwrap())); // Root should be C5
 
         // Test that inverting again changes bass again
         let second_inv = first_inv.clone().invert();
@@ -702,13 +683,13 @@ mod tests {
 
         // Should still contain the same pitch classes
         assert_eq!(first_inv.len(), 3);
-        assert!(first_inv.contains(&"C".parse().unwrap()));
+        assert!(first_inv.contains(&"C5".parse().unwrap())); // C5 now
         assert!(first_inv.contains(&"E".parse().unwrap()));
         assert!(first_inv.contains(&"G".parse().unwrap()));
 
         assert_eq!(second_inv.len(), 3);
-        assert!(second_inv.contains(&"C".parse().unwrap()));
-        assert!(second_inv.contains(&"E".parse().unwrap()));
+        assert!(second_inv.contains(&"C5".parse().unwrap()));
+        assert!(second_inv.contains(&"E5".parse().unwrap()));
         assert!(second_inv.contains(&"G".parse().unwrap()));
     }
 
@@ -788,7 +769,7 @@ mod tests {
 
         // Test inversion
         let first_inv = c_maj.invert();
-        assert_eq!(first_inv.root(), Some("C".parse().unwrap())); // Root stays the same
+        assert_eq!(first_inv.root(), Some(Note::new_with_octave(0, 5).unwrap())); // Root is C5
         assert_eq!(first_inv.bass(), Some("E".parse().unwrap())); // Bass changes
     }
 
@@ -799,6 +780,29 @@ mod tests {
         assert_eq!(empty.len(), 0);
         assert_eq!(empty.root(), None);
         assert_eq!(empty.bass(), None);
+    }
+
+    #[test]
+    fn test_physical_inversion() {
+        // C Major in root position: C4, E4, G4
+        let c_maj = Chord::from_note_strings(vec!["C4", "E4", "G4"]).unwrap();
+
+        // Invert to first inversion: E4, G4, C5
+        let inverted = c_maj.invert();
+        let notes_vec = inverted.notes_vec();
+
+        // Check ordering and octaves
+        assert_eq!(notes_vec[0].pitch_class(), 4); // E
+        assert_eq!(notes_vec[0].octave(), 4);
+
+        assert_eq!(notes_vec[1].pitch_class(), 7); // G
+        assert_eq!(notes_vec[1].octave(), 4);
+
+        assert_eq!(notes_vec[2].pitch_class(), 0); // C
+        assert_eq!(notes_vec[2].octave(), 5); // This should be C5, not C4
+
+        assert_eq!(inverted.bass().unwrap().pitch_class(), 4); // E
+        assert_eq!(inverted.bass().unwrap().octave(), 4);
     }
 
     #[test]
