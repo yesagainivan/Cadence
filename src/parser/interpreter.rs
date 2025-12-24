@@ -2,10 +2,11 @@
 //!
 //! Executes statements with side effects (audio, variable binding, control flow).
 
-use crate::parser::ast::{Program, Statement, Value};
-use crate::parser::environment::Environment;
+use crate::parser::ast::{Expression, Program, Statement, Value};
+use crate::parser::environment::{Environment, SharedEnvironment};
 use crate::parser::evaluator::Evaluator;
 use anyhow::{Result, anyhow};
+use std::sync::{Arc, RwLock};
 
 /// Control flow signals for break/continue/return
 #[derive(Debug)]
@@ -20,9 +21,9 @@ pub enum ControlFlow {
 /// The Interpreter collects these; the host decides how to execute them
 #[derive(Debug, Clone)]
 pub enum InterpreterAction {
-    /// Play a value (chord, progression, note)
-    PlayValue {
-        value: Value,
+    /// Play an expression reactively (re-evaluated each beat for live updates)
+    PlayExpression {
+        expression: Expression,
         looping: bool,
         queue: bool,
         track_id: usize,
@@ -39,8 +40,8 @@ pub enum InterpreterAction {
 pub struct Interpreter {
     /// Expression evaluator
     evaluator: Evaluator,
-    /// Variable environment
-    pub environment: Environment,
+    /// Variable environment (thread-safe for reactive playback)
+    pub environment: SharedEnvironment,
     /// Current tempo (BPM)
     pub tempo: f32,
     /// Current volume (0.0-1.0)
@@ -58,13 +59,18 @@ impl Interpreter {
     pub fn new() -> Self {
         Interpreter {
             evaluator: Evaluator::new(),
-            environment: Environment::new(),
+            environment: Arc::new(RwLock::new(Environment::new())),
             tempo: 120.0,
             volume: 0.5,
             current_track: 1,
             last_eval_result: None,
             actions: Vec::new(),
         }
+    }
+
+    /// Get a clone of the shared environment for passing to playback threads
+    pub fn shared_environment(&self) -> SharedEnvironment {
+        self.environment.clone()
     }
 
     /// Take collected actions (clears internal list)
@@ -103,14 +109,16 @@ impl Interpreter {
         match stmt {
             Statement::Let { name, value } => {
                 let val = self.eval_expression(value)?;
-                self.environment.define(name.clone(), val);
+                self.environment.write().unwrap().define(name.clone(), val);
                 Ok(ControlFlow::Normal)
             }
 
             Statement::Assign { name, value } => {
                 let val = self.eval_expression(value)?;
-                if self.environment.is_defined(name) {
+                if self.environment.read().unwrap().is_defined(name) {
                     self.environment
+                        .write()
+                        .unwrap()
                         .set(name, val)
                         .map_err(|e| anyhow!("{}", e))?;
                 } else {
@@ -172,9 +180,11 @@ impl Interpreter {
                 queue,
                 duration: _,
             } => {
+                // Validate expression can be evaluated (catch errors early)
                 let val = self.eval_expression(target)?;
-                self.actions.push(InterpreterAction::PlayValue {
-                    value: val.clone(),
+                // Store the expression for reactive evaluation in playback thread
+                self.actions.push(InterpreterAction::PlayExpression {
+                    expression: target.clone(),
                     looping: *looping,
                     queue: *queue,
                     track_id: self.current_track,
@@ -224,22 +234,22 @@ impl Interpreter {
 
             Statement::Repeat { count, body } => {
                 for _ in 0..*count {
-                    self.environment.push_scope();
+                    self.environment.write().unwrap().push_scope();
                     for stmt in body {
                         match self.run_statement(stmt)? {
                             ControlFlow::Normal => {}
                             ControlFlow::Break => {
-                                self.environment.pop_scope();
+                                self.environment.write().unwrap().pop_scope();
                                 return Ok(ControlFlow::Normal);
                             }
                             ControlFlow::Continue => break,
                             ControlFlow::Return(val) => {
-                                self.environment.pop_scope();
+                                self.environment.write().unwrap().pop_scope();
                                 return Ok(ControlFlow::Return(val));
                             }
                         }
                     }
-                    self.environment.pop_scope();
+                    self.environment.write().unwrap().pop_scope();
                 }
                 Ok(ControlFlow::Normal)
             }
@@ -264,17 +274,17 @@ impl Interpreter {
                     }
                 };
 
-                self.environment.push_scope();
+                self.environment.write().unwrap().push_scope();
                 for stmt in body {
                     match self.run_statement(stmt)? {
                         ControlFlow::Normal => {}
                         cf => {
-                            self.environment.pop_scope();
+                            self.environment.write().unwrap().pop_scope();
                             return Ok(cf);
                         }
                     }
                 }
-                self.environment.pop_scope();
+                self.environment.write().unwrap().pop_scope();
                 Ok(ControlFlow::Normal)
             }
 
@@ -291,17 +301,17 @@ impl Interpreter {
             Statement::Comment(_) => Ok(ControlFlow::Normal),
 
             Statement::Block(stmts) => {
-                self.environment.push_scope();
+                self.environment.write().unwrap().push_scope();
                 for stmt in stmts {
                     match self.run_statement(stmt)? {
                         ControlFlow::Normal => {}
                         cf => {
-                            self.environment.pop_scope();
+                            self.environment.write().unwrap().pop_scope();
                             return Ok(cf);
                         }
                     }
                 }
-                self.environment.pop_scope();
+                self.environment.write().unwrap().pop_scope();
                 Ok(ControlFlow::Normal)
             }
         }
@@ -310,8 +320,8 @@ impl Interpreter {
     /// Evaluate an expression using the environment
     fn eval_expression(&self, expr: &crate::parser::ast::Expression) -> Result<Value> {
         // Use eval_with_env to enable variable resolution
-        self.evaluator
-            .eval_with_env(expr.clone(), Some(&self.environment))
+        let env_guard = self.environment.read().unwrap();
+        self.evaluator.eval_with_env(expr.clone(), Some(&env_guard))
     }
 }
 
@@ -426,7 +436,7 @@ mod tests {
         assert_eq!(interpreter.tempo, 100.0);
 
         // Verify variable x was defined
-        assert!(interpreter.environment.is_defined("x"));
+        assert!(interpreter.environment.read().unwrap().is_defined("x"));
 
         // Cleanup
         std::fs::remove_file(temp_file).ok();
@@ -453,7 +463,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify x is now D minor
-        let val = interpreter.environment.get("x");
+        let val = interpreter.environment.read().unwrap().get("x").cloned();
         assert!(val.is_some());
     }
 
@@ -478,18 +488,22 @@ mod tests {
     fn test_action_flow_play() {
         let mut interpreter = Interpreter::new();
 
-        // Play statement should generate a PlayValue action
+        // Play statement should generate a PlayExpression action
         let program = parse_statements("play [C, E, G]").unwrap();
         let _result = interpreter.run_program(&program);
 
         let actions = interpreter.take_actions();
         assert_eq!(actions.len(), 1);
         match &actions[0] {
-            crate::parser::interpreter::InterpreterAction::PlayValue { looping, queue, .. } => {
+            crate::parser::interpreter::InterpreterAction::PlayExpression {
+                looping,
+                queue,
+                ..
+            } => {
                 assert!(!looping);
                 assert!(!queue);
             }
-            _ => panic!("Expected PlayValue action"),
+            _ => panic!("Expected PlayExpression action"),
         }
     }
 
@@ -522,14 +536,14 @@ mod tests {
         let actions = interpreter.take_actions();
         assert_eq!(actions.len(), 3);
 
-        // Should be: SetTempo, PlayValue, Stop
+        // Should be: SetTempo, PlayExpression, Stop
         assert!(matches!(
             actions[0],
             crate::parser::interpreter::InterpreterAction::SetTempo(_)
         ));
         assert!(matches!(
             actions[1],
-            crate::parser::interpreter::InterpreterAction::PlayValue { .. }
+            crate::parser::interpreter::InterpreterAction::PlayExpression { .. }
         ));
         assert!(matches!(
             actions[2],

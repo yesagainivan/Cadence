@@ -109,35 +109,37 @@ impl Repl {
     /// Execute an interpreter action (triggers actual audio/state changes)
     fn execute_action(&mut self, action: InterpreterAction, _ctx: &mut CommandContext) {
         use crate::audio::playback_engine::ProgressionConfig;
+        use crate::parser::Evaluator;
 
         match action {
-            InterpreterAction::PlayValue {
-                value,
+            InterpreterAction::PlayExpression {
+                expression,
                 looping,
                 queue,
                 track_id,
             } => {
                 let engine = self.get_engine(track_id);
 
-                // Convert value to frequencies and create config
-                let frequencies: Vec<Vec<f32>> = match value {
-                    crate::parser::Value::Chord(chord) => {
-                        vec![chord.notes().map(|n| n.frequency()).collect()]
-                    }
-                    crate::parser::Value::Progression(progression) => progression
-                        .chords()
-                        .map(|c| c.notes().map(|n| n.frequency()).collect())
-                        .collect(),
-                    crate::parser::Value::Note(note) => {
-                        vec![vec![note.frequency()]]
-                    }
-                    _ => {
-                        println!("{}", "Cannot play this value type".red());
-                        return;
+                // Get the shared environment for reactive evaluation
+                let shared_env = self.interpreter.shared_environment();
+
+                // Validate expression can be evaluated (catch errors early)
+                let evaluator = Evaluator::new();
+                let display_value = {
+                    let env_guard = shared_env.read().unwrap();
+                    match evaluator.eval_with_env(expression.clone(), Some(&env_guard)) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            println!("{} Failed to evaluate expression: {}", "Error:".red(), e);
+                            return;
+                        }
                     }
                 };
 
-                let mut config = ProgressionConfig::new(frequencies);
+                // Use reactive playback - the expression will be re-evaluated on each beat
+                // This enables live variable updates: `play a loop` then `a = E` will
+                // change the sound on the next beat!
+                let mut config = ProgressionConfig::new_reactive(expression, shared_env);
                 if looping {
                     config = config.with_looping();
                 }
@@ -146,13 +148,19 @@ impl Repl {
                     if let Err(e) = engine.queue_progression(config) {
                         println!("{} {}", "Playback error:".red(), e);
                     } else {
-                        println!("🔁 Queued for next beat... (Track {})", track_id);
+                        println!(
+                            "🔁 Queued {} for next beat... (Track {})",
+                            display_value, track_id
+                        );
                     }
                 } else {
                     if let Err(e) = engine.play_progression(config) {
                         println!("{} {}", "Playback error:".red(), e);
                     } else {
-                        println!("🔊 Audio playback started (Track {}).", track_id);
+                        println!(
+                            "🔊 Playing {} (Track {}) - live reactive!",
+                            display_value, track_id
+                        );
                     }
                 }
             }

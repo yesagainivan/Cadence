@@ -5,8 +5,15 @@
 
 use crate::parser::ast::Value;
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+
+/// Thread-safe shared environment for live-coding reactivity
+/// This allows the playback thread to read variable values that may be updated
+/// by the main thread during playback.
+pub type SharedEnvironment = Arc<RwLock<Environment>>;
 
 /// Scoped environment for variable storage
+#[derive(Debug)]
 pub struct Environment {
     /// Stack of scopes (inner scopes shadow outer ones)
     scopes: Vec<HashMap<String, Value>>,

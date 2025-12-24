@@ -6,6 +6,7 @@
 
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::scheduler::{Duration, Scheduler};
+use crate::parser::{Evaluator, Expression, SharedEnvironment, Value};
 use anyhow::Result;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -14,11 +15,66 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
+/// Source of playback content - supports both static and reactive (live-coding) modes
+#[derive(Clone, Debug)]
+pub enum PlaybackSource {
+    /// Static frequencies - already evaluated, won't change during playback
+    Static(Vec<Vec<f32>>),
+    /// Reactive expression - re-evaluated each beat for live-coding reactivity
+    /// When the variable is reassigned, the playing audio will update on the next beat
+    Reactive {
+        expression: Expression,
+        env: SharedEnvironment,
+    },
+}
+
+impl PlaybackSource {
+    /// Get the current frequencies by evaluating the source
+    /// For Static sources, returns the stored frequencies
+    /// For Reactive sources, re-evaluates the expression against the current environment
+    pub fn evaluate(&self) -> Result<Vec<Vec<f32>>> {
+        match self {
+            PlaybackSource::Static(freqs) => Ok(freqs.clone()),
+            PlaybackSource::Reactive { expression, env } => {
+                let evaluator = Evaluator::new();
+                let env_guard = env
+                    .read()
+                    .map_err(|e| anyhow::anyhow!("Environment lock poisoned: {}", e))?;
+                let value = evaluator.eval_with_env(expression.clone(), Some(&env_guard))?;
+                Self::value_to_frequencies(&value)
+            }
+        }
+    }
+
+    /// Convert a Value to a vector of frequency vectors
+    fn value_to_frequencies(value: &Value) -> Result<Vec<Vec<f32>>> {
+        match value {
+            Value::Note(note) => Ok(vec![vec![note.frequency()]]),
+            Value::Chord(chord) => Ok(vec![chord.notes().map(|n| n.frequency()).collect()]),
+            Value::Progression(prog) => Ok(prog
+                .chords()
+                .map(|c| c.notes().map(|n| n.frequency()).collect())
+                .collect()),
+            Value::Boolean(_) => Err(anyhow::anyhow!("Cannot play a boolean value")),
+        }
+    }
+
+    /// Get the number of chords in this source (evaluates if reactive)
+    pub fn len(&self) -> Result<usize> {
+        Ok(self.evaluate()?.len())
+    }
+
+    /// Check if the source is empty
+    pub fn is_empty(&self) -> Result<bool> {
+        Ok(self.evaluate()?.is_empty())
+    }
+}
+
 /// Configuration for progression playback
 #[derive(Clone, Debug)]
 pub struct ProgressionConfig {
-    /// Each chord as a vector of frequencies (Hz)
-    pub progression: Vec<Vec<f32>>,
+    /// Source of the progression (static frequencies or reactive expression)
+    pub source: PlaybackSource,
     /// How long each chord plays (in beats)
     pub note_duration: Duration,
     /// Gap between chords (default: 0, seamless transition)
@@ -28,10 +84,21 @@ pub struct ProgressionConfig {
 }
 
 impl ProgressionConfig {
-    /// Create a new progression config with default values
+    /// Create a new progression config with static frequencies (legacy API)
     pub fn new(progression: Vec<Vec<f32>>) -> Self {
         Self {
-            progression,
+            source: PlaybackSource::Static(progression),
+            note_duration: Duration::Beats(1.0),
+            gap_duration: Duration::Beats(0.0),
+            loop_count: Some(1),
+        }
+    }
+
+    /// Create a new progression config with a reactive expression
+    /// The expression will be re-evaluated on each beat, enabling live variable updates
+    pub fn new_reactive(expression: Expression, env: SharedEnvironment) -> Self {
+        Self {
+            source: PlaybackSource::Reactive { expression, env },
             note_duration: Duration::Beats(1.0),
             gap_duration: Duration::Beats(0.0),
             loop_count: Some(1),
@@ -354,8 +421,18 @@ impl PlaybackLoop {
             }
         }
 
-        // Get current chord
-        if self.chord_index >= config.progression.len() {
+        // Evaluate the source to get current frequencies
+        // For reactive sources, this re-evaluates the expression each beat
+        let frequencies = match config.source.evaluate() {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Failed to evaluate playback source: {}", e);
+                return;
+            }
+        };
+
+        // Get current chord - check bounds after evaluation (reactive sources may change length)
+        if self.chord_index >= frequencies.len() {
             // Move to next iteration
             self.chord_index = 0;
             self.iteration += 1;
@@ -372,7 +449,12 @@ impl PlaybackLoop {
             }
         }
 
-        let chord_frequencies = &config.progression[self.chord_index];
+        // Handle case where frequencies are empty after re-evaluation
+        if frequencies.is_empty() {
+            return;
+        }
+
+        let chord_frequencies = &frequencies[self.chord_index];
 
         // Set the notes for this track (seamless - no pause needed)
         if let Err(e) = self
@@ -471,7 +553,7 @@ mod tests {
             .with_gap(Duration::Beats(0.25))
             .with_looping();
 
-        assert_eq!(config.progression.len(), 2);
+        assert_eq!(config.source.evaluate().unwrap().len(), 2);
         assert!(config.loop_count.is_none());
     }
 
@@ -538,13 +620,13 @@ mod tests {
 
         // FIFO: first in, first out
         let first = queue.pop_front().unwrap();
-        assert_eq!(first.progression[0][0], 440.0);
+        assert_eq!(first.source.evaluate().unwrap()[0][0], 440.0);
 
         let second = queue.pop_front().unwrap();
-        assert_eq!(second.progression[0][0], 880.0);
+        assert_eq!(second.source.evaluate().unwrap()[0][0], 880.0);
 
         let third = queue.pop_front().unwrap();
-        assert_eq!(third.progression[0][0], 220.0);
+        assert_eq!(third.source.evaluate().unwrap()[0][0], 220.0);
 
         assert!(queue.is_empty());
     }

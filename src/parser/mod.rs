@@ -8,7 +8,7 @@ pub mod parser;
 pub mod statement_parser;
 
 pub use ast::{Expression, Program, Statement, Value};
-pub use environment::Environment;
+pub use environment::{Environment, SharedEnvironment};
 pub use evaluator::{Evaluator, eval};
 pub use interpreter::{Interpreter, InterpreterAction};
 pub use lexer::{Lexer, Token};
