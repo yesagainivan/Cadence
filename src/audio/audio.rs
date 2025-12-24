@@ -12,13 +12,16 @@ pub struct AudioState {
     pub notes: Vec<f32>,
     /// Volume level (0.0 to 1.0)
     pub volume: f32,
+    /// Whether playback is active (used for master fade in/out)
+    pub is_playing: bool,
 }
 
 impl Default for AudioState {
     fn default() -> Self {
         AudioState {
-            notes: vec![440.0], // Default to A4
-            volume: 0.2,        // Default to 20% volume
+            notes: Vec::new(), // Default to silence - no notes until explicitly set
+            volume: 0.2,       // Default to 20% volume
+            is_playing: false, // Start paused for silent startup
         }
     }
 }
@@ -139,6 +142,9 @@ impl AudioPlayerInternal {
         let mut oscillators: Vec<EnvelopedOscillator> = Vec::new();
         // Track what frequencies we're currently targeting
         let mut current_frequencies: Vec<f32> = Vec::new();
+        // Master amplitude for smooth play/pause fade (5ms fade time)
+        let mut master_amplitude: f32 = 0.0;
+        let master_fade_rate = 1.0 / (0.005 * sample_rate);
 
         let err_fn = |err| eprintln!("Audio stream error: {:?}", err);
 
@@ -161,6 +167,7 @@ impl AudioPlayerInternal {
 
                     let frequencies = &state.notes;
                     let volume = state.volume;
+                    let is_playing = state.is_playing;
 
                     // Check if frequencies changed
                     if current_frequencies.len() != frequencies.len()
@@ -185,6 +192,13 @@ impl AudioPlayerInternal {
 
                     // Generate audio samples
                     for frame in data.chunks_mut(channels) {
+                        // Update master amplitude based on is_playing (smooth fade)
+                        if is_playing {
+                            master_amplitude = (master_amplitude + master_fade_rate).min(1.0);
+                        } else {
+                            master_amplitude = (master_amplitude - master_fade_rate).max(0.0);
+                        }
+
                         let mut mixed_value = 0.0;
                         let mut active_count = 0;
 
@@ -204,8 +218,8 @@ impl AudioPlayerInternal {
                             mixed_value /= target_count as f32;
                         }
 
-                        // Apply volume
-                        mixed_value *= volume;
+                        // Apply volume and master amplitude (for fade in/out)
+                        mixed_value *= volume * master_amplitude;
 
                         // Convert to target sample format
                         let value: T = cpal::Sample::from_sample(mixed_value);
@@ -246,16 +260,29 @@ impl AudioPlayerInternal {
         Ok(())
     }
 
-    fn play(&self) -> Result<()> {
+    fn play(&mut self) -> Result<()> {
+        // Start the stream if not already running
         self.stream
             .play()
-            .map_err(|e| anyhow!("Failed to play stream: {}", e))
+            .map_err(|e| anyhow!("Failed to play stream: {}", e))?;
+        // Set is_playing flag for smooth fade in
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock audio state: {}", e))?;
+        state.is_playing = true;
+        Ok(())
     }
 
-    fn pause(&self) -> Result<()> {
-        self.stream
-            .pause()
-            .map_err(|e| anyhow!("Failed to pause stream: {}", e))
+    fn pause(&mut self) -> Result<()> {
+        // Set is_playing flag to false for smooth fade out
+        // Don't pause the stream - let it fade to silence
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock audio state: {}", e))?;
+        state.is_playing = false;
+        Ok(())
     }
 }
 

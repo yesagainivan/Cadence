@@ -149,7 +149,9 @@ A production-ready music programming language for chord progressions and harmoni
 
 ## Next Session Priorities
 
-1. **Audio Polish** - Fix click on start/stop, silent REPL startup
+1. ~~**Audio Polish** - Fix click on start/stop, silent REPL startup~~ ✅ Done
 2. **Error Line Info** - Improve error messages with line/column info
-3. **Multi-track/Voices** - Named tracks for simultaneous playback (Phase 4)
-4. **Control Flow Execution** - Make `loop {}` and `repeat {}` actually execute
+3. **Control Flow Execution** - Make `loop {}` and `repeat {}` actually execute
+4. **Multi-track/Voices** - Named tracks for simultaneous playback (Phase 4)
+   - *Inspired by TidalCycles d1/d2/d3... pattern - each track plays independently*
+   - Would require: multiple PlaybackEngines, mixer, different timbres
