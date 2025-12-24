@@ -170,8 +170,8 @@ impl Parser {
                     self.current_token = Token::Identifier(name.clone());
                     self.parse_function_call(name)
                 } else {
-                    // It's just a bare identifier - treat it as a function call with no args
-                    Ok(Expression::function_call(name, vec![]))
+                    // It's a bare identifier - treat it as a variable reference
+                    Ok(Expression::Variable(name))
                 }
             }
 
@@ -531,15 +531,14 @@ mod tests {
         // H is not a valid note (only A-G)
         let result = parse("H"); // H becomes Identifier("H")
 
-        // With our new parser logic, H gets parsed as a function call H() with no arguments
+        // With our new parser logic, H gets parsed as a variable reference
         // This should succeed at parse time, but would fail at evaluation time
         assert!(result.is_ok());
 
-        if let Ok(Expression::FunctionCall { name, args }) = result {
+        if let Ok(Expression::Variable(name)) = result {
             assert_eq!(name, "H");
-            assert!(args.is_empty());
         } else {
-            panic!("Expected H to be parsed as a function call");
+            panic!("Expected H to be parsed as a variable");
         }
     }
 

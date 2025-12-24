@@ -14,13 +14,22 @@ impl Evaluator {
         Evaluator
     }
 
-    /// Evaluate an expression and return the result
+    /// Evaluate an expression and return the result (no environment)
     pub fn eval(&self, expr: Expression) -> Result<Value> {
+        self.eval_with_env(expr, None)
+    }
+
+    /// Evaluate an expression with optional environment for variable resolution
+    pub fn eval_with_env(
+        &self,
+        expr: Expression,
+        env: Option<&crate::parser::environment::Environment>,
+    ) -> Result<Value> {
         match expr {
             Expression::Note(note) => Ok(Value::Note(note)),
             Expression::Chord(chord) => Ok(Value::Chord(chord)),
             Expression::Transpose { target, semitones } => {
-                let target_value = self.eval(*target)?;
+                let target_value = self.eval_with_env(*target, env)?;
                 match target_value {
                     Value::Note(note) => {
                         let transposed = note + semitones;
@@ -38,8 +47,8 @@ impl Evaluator {
                 }
             }
             Expression::Intersection { left, right } => {
-                let left_value = self.eval(*left)?;
-                let right_value = self.eval(*right)?;
+                let left_value = self.eval_with_env(*left, env)?;
+                let right_value = self.eval_with_env(*right, env)?;
 
                 match (left_value, right_value) {
                     (Value::Chord(left_chord), Value::Chord(right_chord)) => {
@@ -50,8 +59,8 @@ impl Evaluator {
                 }
             }
             Expression::Union { left, right } => {
-                let left_value = self.eval(*left)?;
-                let right_value = self.eval(*right)?;
+                let left_value = self.eval_with_env(*left, env)?;
+                let right_value = self.eval_with_env(*right, env)?;
 
                 match (left_value, right_value) {
                     (Value::Chord(left_chord), Value::Chord(right_chord)) => {
@@ -62,8 +71,8 @@ impl Evaluator {
                 }
             }
             Expression::Difference { left, right } => {
-                let left_value = self.eval(*left)?;
-                let right_value = self.eval(*right)?;
+                let left_value = self.eval_with_env(*left, env)?;
+                let right_value = self.eval_with_env(*right, env)?;
 
                 match (left_value, right_value) {
                     (Value::Chord(left_chord), Value::Chord(right_chord)) => {
@@ -73,23 +82,28 @@ impl Evaluator {
                     _ => Err(anyhow!("Difference only supported between chords")),
                 }
             }
-            Expression::FunctionCall { name, args } => self.eval_function(&name, args),
-            Expression::Progression(progression) => Ok(Value::Progression(progression)),
-            Expression::Variable(name) => {
-                // Variable lookup will be implemented with Environment in Phase 0.3.4
-                Err(anyhow!(
-                    "Variable '{}' not found (environment not yet implemented)",
-                    name
-                ))
+            Expression::FunctionCall { name, args } => {
+                self.eval_function_with_env(&name, args, env)
             }
+            Expression::Progression(progression) => Ok(Value::Progression(progression)),
+            Expression::Variable(name) => match env {
+                Some(e) => e
+                    .get(&name)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("Variable '{}' is not defined", name)),
+                None => Err(anyhow!(
+                    "Variable '{}' cannot be resolved (no environment)",
+                    name
+                )),
+            },
             Expression::Boolean(b) => Ok(Value::Boolean(b)),
             Expression::Comparison {
                 left,
                 right,
                 operator,
             } => {
-                let left_val = self.eval(*left)?;
-                let right_val = self.eval(*right)?;
+                let left_val = self.eval_with_env(*left, env)?;
+                let right_val = self.eval_with_env(*right, env)?;
                 let result = match operator {
                     crate::parser::ast::ComparisonOp::Equal => left_val == right_val,
                     crate::parser::ast::ComparisonOp::NotEqual => left_val != right_val,
@@ -99,8 +113,13 @@ impl Evaluator {
         }
     }
 
-    /// Evaluate a function call (enhanced version with Roman numeral support)
-    fn eval_function(&self, name: &str, args: Vec<Expression>) -> Result<Value> {
+    /// Evaluate a function call with optional environment for variable resolution
+    fn eval_function_with_env(
+        &self,
+        name: &str,
+        args: Vec<Expression>,
+        env: Option<&crate::parser::environment::Environment>,
+    ) -> Result<Value> {
         match name {
             // Enhanced progression handling with smart pattern detection
             name if CommonProgressions::is_valid_progression(name)
@@ -111,7 +130,7 @@ impl Evaluator {
                     return Err(anyhow!("Progression {} expects 1 key argument", name));
                 }
 
-                let key_value = self.eval(args[0].clone())?;
+                let key_value = self.eval_with_env(args[0].clone(), env)?;
                 if let Value::Note(key) = key_value {
                     let prog = CommonProgressions::get_progression(name, key)?;
 
@@ -137,7 +156,7 @@ impl Evaluator {
                     return Err(anyhow!("invert() expects 1 argument, got {}", args.len()));
                 }
 
-                let arg_value = self.eval(args.into_iter().next().unwrap())?;
+                let arg_value = self.eval_with_env(args.into_iter().next().unwrap(), env)?;
                 match arg_value {
                     Value::Chord(chord) => {
                         let inverted = chord.invert();
@@ -159,8 +178,8 @@ impl Evaluator {
                 let chord_expr = arg_iter.next().unwrap();
                 let n_expr = arg_iter.next().unwrap();
 
-                let chord_value = self.eval(chord_expr)?;
-                let n_value = self.eval(n_expr)?;
+                let chord_value = self.eval_with_env(chord_expr, env)?;
+                let n_value = self.eval_with_env(n_expr, env)?;
 
                 match (chord_value, n_value) {
                     (Value::Chord(chord), Value::Note(note)) => {
@@ -177,7 +196,7 @@ impl Evaluator {
                     return Err(anyhow!("root() expects 1 argument, got {}", args.len()));
                 }
 
-                let arg_value = self.eval(args.into_iter().next().unwrap())?;
+                let arg_value = self.eval_with_env(args.into_iter().next().unwrap(), env)?;
                 match arg_value {
                     Value::Chord(chord) => {
                         if let Some(root_note) = chord.root() {
@@ -195,7 +214,7 @@ impl Evaluator {
                     return Err(anyhow!("bass() expects 1 argument, got {}", args.len()));
                 }
 
-                let arg_value = self.eval(args.into_iter().next().unwrap())?;
+                let arg_value = self.eval_with_env(args.into_iter().next().unwrap(), env)?;
                 match arg_value {
                     Value::Chord(chord) => {
                         if let Some(bass_note) = chord.bass() {
@@ -216,7 +235,7 @@ impl Evaluator {
                     ));
                 }
 
-                let arg_value = self.eval(args.into_iter().next().unwrap())?;
+                let arg_value = self.eval_with_env(args.into_iter().next().unwrap(), env)?;
                 match arg_value {
                     Value::Progression(progression) => {
                         let retrograded = progression.retrograde();
@@ -235,29 +254,27 @@ impl Evaluator {
                 let function_expr = arg_iter.next().unwrap();
                 let progression_expr = arg_iter.next().unwrap();
 
-                if let Expression::FunctionCall {
-                    name,
-                    args: func_args,
-                } = function_expr
-                {
-                    if !func_args.is_empty() {
-                        return Err(anyhow!(
-                            "map() function argument must be a simple function name"
-                        ));
+                // Extract function name from either Variable or FunctionCall with no args
+                let func_name = match &function_expr {
+                    Expression::Variable(name) => name.clone(),
+                    Expression::FunctionCall {
+                        name,
+                        args: func_args,
+                    } if func_args.is_empty() => name.clone(),
+                    _ => {
+                        return Err(anyhow!("map() first argument must be a function name"));
                     }
+                };
 
-                    let progression_value = self.eval(progression_expr)?;
-                    if let Value::Progression(progression) = progression_value {
-                        let mapped = match name.as_str() {
-                            "invert" => progression.map(|chord| chord.invert()),
-                            _ => return Err(anyhow!("Unknown function for map: {}", name)),
-                        };
-                        Ok(Value::Progression(mapped))
-                    } else {
-                        Err(anyhow!("map() second argument must be a progression"))
-                    }
+                let progression_value = self.eval_with_env(progression_expr, env)?;
+                if let Value::Progression(progression) = progression_value {
+                    let mapped = match func_name.as_str() {
+                        "invert" => progression.map(|chord| chord.invert()),
+                        _ => return Err(anyhow!("Unknown function for map: {}", func_name)),
+                    };
+                    Ok(Value::Progression(mapped))
                 } else {
-                    Err(anyhow!("map() first argument must be a function"))
+                    Err(anyhow!("map() second argument must be a progression"))
                 }
             }
 
@@ -274,8 +291,8 @@ impl Evaluator {
                 let chord1_expr = arg_iter.next().unwrap();
                 let chord2_expr = arg_iter.next().unwrap();
 
-                let chord1_value = self.eval(chord1_expr)?;
-                let chord2_value = self.eval(chord2_expr)?;
+                let chord1_value = self.eval_with_env(chord1_expr, env)?;
+                let chord2_value = self.eval_with_env(chord2_expr, env)?;
 
                 match (chord1_value, chord2_value) {
                     (Value::Chord(chord1), Value::Chord(chord2)) => {
@@ -308,7 +325,7 @@ impl Evaluator {
                     ));
                 }
 
-                let arg_value = self.eval(args.into_iter().next().unwrap())?;
+                let arg_value = self.eval_with_env(args.into_iter().next().unwrap(), env)?;
                 match arg_value {
                     Value::Progression(progression) => {
                         println!("Optimizing voice leading...");
@@ -335,7 +352,7 @@ impl Evaluator {
                     ));
                 }
 
-                let arg_value = self.eval(args.into_iter().next().unwrap())?;
+                let arg_value = self.eval_with_env(args.into_iter().next().unwrap(), env)?;
                 match arg_value {
                     Value::Progression(progression) => {
                         let analysis = progression.detailed_voice_leading_analysis();
@@ -381,8 +398,8 @@ impl Evaluator {
                 let chord1_expr = arg_iter.next().unwrap();
                 let chord2_expr = arg_iter.next().unwrap();
 
-                let chord1_value = self.eval(chord1_expr)?;
-                let chord2_value = self.eval(chord2_expr)?;
+                let chord1_value = self.eval_with_env(chord1_expr, env)?;
+                let chord2_value = self.eval_with_env(chord2_expr, env)?;
 
                 match (chord1_value, chord2_value) {
                     (Value::Chord(chord1), Value::Chord(chord2)) => {
@@ -401,7 +418,7 @@ impl Evaluator {
                     ));
                 }
 
-                let arg_value = self.eval(args.into_iter().next().unwrap())?;
+                let arg_value = self.eval_with_env(args.into_iter().next().unwrap(), env)?;
                 match arg_value {
                     Value::Progression(progression) => {
                         let quality = progression.average_voice_leading_quality();
@@ -422,8 +439,8 @@ impl Evaluator {
                     return Err(anyhow!("roman_numeral() expects 2 arguments: chord, key"));
                 }
 
-                let chord_value = self.eval(args[0].clone())?;
-                let key_value = self.eval(args[1].clone())?;
+                let chord_value = self.eval_with_env(args[0].clone(), env)?;
+                let key_value = self.eval_with_env(args[1].clone(), env)?;
 
                 match (chord_value, key_value) {
                     (Value::Chord(chord), Value::Note(key)) => {
@@ -474,7 +491,7 @@ impl Evaluator {
                         _ => return Err(anyhow!("progression() expects (progression_name, key)")),
                     };
 
-                    let key_value = self.eval(args[1].clone())?;
+                    let key_value = self.eval_with_env(args[1].clone(), env)?;
                     if let Value::Note(key) = key_value {
                         // Try both underscore and dash versions, and Roman numeral versions
                         let underscore_name = prog_name.replace("-", "_");
@@ -520,8 +537,8 @@ impl Evaluator {
                     ));
                 }
 
-                let prog_value = self.eval(args[0].clone())?;
-                let key_value = self.eval(args[1].clone())?;
+                let prog_value = self.eval_with_env(args[0].clone(), env)?;
+                let key_value = self.eval_with_env(args[1].clone(), env)?;
 
                 match (prog_value, key_value) {
                     (Value::Progression(progression), Value::Note(key)) => {

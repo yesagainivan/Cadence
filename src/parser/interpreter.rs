@@ -16,6 +16,24 @@ pub enum ControlFlow {
     Return(Option<Value>),
 }
 
+/// Actions to be executed by the host (REPL)
+/// The Interpreter collects these; the host decides how to execute them
+#[derive(Debug, Clone)]
+pub enum InterpreterAction {
+    /// Play a value (chord, progression, note)
+    PlayValue {
+        value: Value,
+        looping: bool,
+        queue: bool,
+    },
+    /// Set the tempo
+    SetTempo(f32),
+    /// Set the volume (0.0-1.0)
+    SetVolume(f32),
+    /// Stop all playback
+    Stop,
+}
+
 /// Interpreter for executing Cadence statements
 pub struct Interpreter {
     /// Expression evaluator
@@ -28,6 +46,8 @@ pub struct Interpreter {
     pub volume: f32,
     /// Last evaluated expression result
     last_eval_result: Option<Value>,
+    /// Actions collected during execution (for host to execute)
+    actions: Vec<InterpreterAction>,
 }
 
 impl Interpreter {
@@ -39,7 +59,18 @@ impl Interpreter {
             tempo: 120.0,
             volume: 0.5,
             last_eval_result: None,
+            actions: Vec::new(),
         }
+    }
+
+    /// Take collected actions (clears internal list)
+    pub fn take_actions(&mut self) -> Vec<InterpreterAction> {
+        std::mem::take(&mut self.actions)
+    }
+
+    /// Clear collected actions without returning them
+    pub fn clear_actions(&mut self) {
+        self.actions.clear();
     }
 
     /// Run a complete program
@@ -81,17 +112,20 @@ impl Interpreter {
 
             Statement::Tempo(bpm) => {
                 self.tempo = *bpm;
+                self.actions.push(InterpreterAction::SetTempo(*bpm));
                 println!("Tempo set to {} BPM", bpm);
                 Ok(ControlFlow::Normal)
             }
 
             Statement::Volume(vol) => {
                 self.volume = *vol;
+                self.actions.push(InterpreterAction::SetVolume(*vol));
                 println!("Volume set to {:.0}%", vol * 100.0);
                 Ok(ControlFlow::Normal)
             }
 
             Statement::Stop => {
+                self.actions.push(InterpreterAction::Stop);
                 println!("Stopping playback");
                 Ok(ControlFlow::Normal)
             }
@@ -99,10 +133,15 @@ impl Interpreter {
             Statement::Play {
                 target,
                 looping,
-                queue: _,
+                queue,
                 duration: _,
             } => {
                 let val = self.eval_expression(target)?;
+                self.actions.push(InterpreterAction::PlayValue {
+                    value: val.clone(),
+                    looping: *looping,
+                    queue: *queue,
+                });
                 if *looping {
                     println!("Playing {} (looping)", val);
                 } else {
@@ -112,8 +151,13 @@ impl Interpreter {
             }
 
             Statement::Load(path) => {
-                println!("Loading file: {}", path);
-                // TODO: Implement file loading
+                let contents = std::fs::read_to_string(path)
+                    .map_err(|e| anyhow!("Failed to load '{}': {}", path, e))?;
+                let program = crate::parser::parse_statements(&contents)
+                    .map_err(|e| anyhow!("Parse error in '{}': {}", path, e))?;
+
+                println!("Loaded: {}", path);
+                self.run_program(&program)?;
                 Ok(ControlFlow::Normal)
             }
 
@@ -215,9 +259,9 @@ impl Interpreter {
 
     /// Evaluate an expression using the environment
     fn eval_expression(&self, expr: &crate::parser::ast::Expression) -> Result<Value> {
-        // For now, delegate to the evaluator
-        // In the future, this will handle variable lookup
-        self.evaluator.eval(expr.clone())
+        // Use eval_with_env to enable variable resolution
+        self.evaluator
+            .eval_with_env(expr.clone(), Some(&self.environment))
     }
 }
 
@@ -249,5 +293,103 @@ mod tests {
         interpreter.run_program(&program).unwrap();
 
         assert!((interpreter.volume - 0.75).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_variable_resolution() {
+        let mut interpreter = Interpreter::new();
+
+        // Define a variable with let
+        let program = parse_statements("let x = [C, E, G]").unwrap();
+        interpreter.run_program(&program).unwrap();
+
+        // Reference the variable - it should resolve from environment
+        let program2 = parse_statements("x").unwrap();
+        let result = interpreter.run_program(&program2).unwrap();
+
+        // Should return the chord value
+        assert!(result.is_some());
+        match result.unwrap() {
+            crate::parser::ast::Value::Chord(chord) => {
+                assert_eq!(chord.len(), 3);
+            }
+            _ => panic!("Expected Chord value"),
+        }
+    }
+
+    #[test]
+    fn test_undefined_variable_error() {
+        let mut interpreter = Interpreter::new();
+        let program = parse_statements("undefined_var").unwrap();
+        let result = interpreter.run_program(&program);
+
+        // Should error - variable not defined
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not defined"));
+    }
+
+    #[test]
+    fn test_variable_in_expression() {
+        let mut interpreter = Interpreter::new();
+
+        // Define and use variable in an expression
+        let program = parse_statements("let chord = [C, E, G]").unwrap();
+        interpreter.run_program(&program).unwrap();
+
+        // Use variable in a transpose operation
+        let program2 = parse_statements("chord + 2").unwrap();
+        let result = interpreter.run_program(&program2).unwrap();
+
+        // Should return transposed chord (D, F#, A)
+        assert!(result.is_some());
+        match result.unwrap() {
+            crate::parser::ast::Value::Chord(chord) => {
+                assert_eq!(chord.len(), 3);
+                // D is pitch class 2
+                let notes: Vec<_> = chord.notes().collect();
+                assert!(notes.iter().any(|n| n.pitch_class() == 2));
+            }
+            _ => panic!("Expected Chord value"),
+        }
+    }
+
+    #[test]
+    fn test_load_file() {
+        use std::io::Write;
+
+        // Create a temp file with multi-line cadence code
+        let temp_dir = std::env::temp_dir();
+        let temp_file = temp_dir.join("test_cadence.cadence");
+        {
+            let mut file = std::fs::File::create(&temp_file).unwrap();
+            // Use newlines to separate statements (multi-line file!)
+            writeln!(file, "let x = [C, E, G]").unwrap();
+            writeln!(file, "tempo 100").unwrap();
+        }
+
+        let mut interpreter = Interpreter::new();
+        let load_path = temp_file.to_str().unwrap().to_string();
+        let program = parse_statements(&format!("load \"{}\"", load_path)).unwrap();
+        interpreter.run_program(&program).unwrap();
+
+        // Verify the file was loaded: tempo should be 100
+        assert_eq!(interpreter.tempo, 100.0);
+
+        // Verify variable x was defined
+        assert!(interpreter.environment.is_defined("x"));
+
+        // Cleanup
+        std::fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
+    fn test_load_nonexistent_file() {
+        let mut interpreter = Interpreter::new();
+        let program = parse_statements("load \"nonexistent_file.cadence\"").unwrap();
+        let result = interpreter.run_program(&program);
+
+        // Should error - file doesn't exist
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to load"));
     }
 }

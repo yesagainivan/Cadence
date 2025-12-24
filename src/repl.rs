@@ -4,7 +4,7 @@ use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::playback_engine::PlaybackEngine;
 use crate::audio::scheduler::Scheduler;
 use crate::commands::{CommandContext, CommandResult, create_registry};
-use crate::parser::{Interpreter, parse_statements};
+use crate::parser::{Interpreter, InterpreterAction, parse_statements};
 use anyhow::Result;
 use colored::*;
 use rustyline::error::ReadlineError;
@@ -38,6 +38,69 @@ impl Repl {
             playback_engine,
             interpreter: Interpreter::new(),
         })
+    }
+
+    /// Execute an interpreter action (triggers actual audio/state changes)
+    fn execute_action(&self, action: InterpreterAction, _ctx: &mut CommandContext) {
+        use crate::audio::playback_engine::ProgressionConfig;
+
+        match action {
+            InterpreterAction::PlayValue {
+                value,
+                looping,
+                queue,
+            } => {
+                // Convert value to frequencies and create config
+                let frequencies: Vec<Vec<f32>> = match value {
+                    crate::parser::Value::Chord(chord) => {
+                        vec![chord.notes().map(|n| n.frequency()).collect()]
+                    }
+                    crate::parser::Value::Progression(progression) => progression
+                        .chords()
+                        .map(|c| c.notes().map(|n| n.frequency()).collect())
+                        .collect(),
+                    crate::parser::Value::Note(note) => {
+                        vec![vec![note.frequency()]]
+                    }
+                    _ => {
+                        println!("{}", "Cannot play this value type".red());
+                        return;
+                    }
+                };
+
+                let mut config = ProgressionConfig::new(frequencies);
+                if looping {
+                    config = config.with_looping();
+                }
+
+                if queue {
+                    if let Err(e) = self.playback_engine.queue_progression(config) {
+                        println!("{} {}", "Playback error:".red(), e);
+                    } else {
+                        println!("🔁 Queued for next beat...");
+                    }
+                } else {
+                    if let Err(e) = self.playback_engine.play_progression(config) {
+                        println!("{} {}", "Playback error:".red(), e);
+                    } else {
+                        println!("🔊 Audio playback started.");
+                    }
+                }
+            }
+            InterpreterAction::SetTempo(bpm) => {
+                self.scheduler.set_bpm(bpm);
+                // Already printed by interpreter
+            }
+            InterpreterAction::SetVolume(_vol) => {
+                // Volume control would go here
+            }
+            InterpreterAction::Stop => {
+                if let Err(e) = self.playback_engine.stop() {
+                    println!("{} {}", "Stop error:".red(), e);
+                }
+                // Already printed by interpreter
+            }
+        }
     }
 
     /// Start the REPL loop
@@ -99,12 +162,17 @@ impl Repl {
                                 Ok(program) => {
                                     match self.interpreter.run_program(&program) {
                                         Ok(Some(value)) => println!("{}", value),
-                                        Ok(None) => {} // Statement with no value (e.g., tempo)
+                                        Ok(None) => {} // Statement with no value
                                         Err(e) => println!(
                                             "{} {}",
                                             "Error:".bright_red().bold(),
                                             e.to_string().red()
                                         ),
+                                    }
+
+                                    // Execute collected actions
+                                    for action in self.interpreter.take_actions() {
+                                        self.execute_action(action, &mut ctx);
                                     }
                                 }
                                 Err(e) => println!(

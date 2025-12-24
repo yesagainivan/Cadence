@@ -10,7 +10,7 @@ pub mod statement_parser;
 pub use ast::{Expression, Program, Statement, Value};
 pub use environment::Environment;
 pub use evaluator::{Evaluator, eval};
-pub use interpreter::Interpreter;
+pub use interpreter::{Interpreter, InterpreterAction};
 pub use lexer::{Lexer, Token};
 pub use parser::{Parser, parse};
 pub use statement_parser::{StatementParser, parse_statements};

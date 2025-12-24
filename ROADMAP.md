@@ -25,25 +25,27 @@ A production-ready music programming language for chord progressions and harmoni
 
 ---
 
-## Phase 1: Basic Scripting *(Next)*
+## Phase 1: Basic Scripting *(In Progress)*
 
-### 1.1 File Loading
-- [ ] Implement `load "path/to/file.cadence"` in Interpreter
-- [ ] Read file contents, parse, and execute
-- [ ] Handle file errors gracefully
+### 1.1 File Loading ✅
+- [x] Implement `load "path/to/file.cadence"` in Interpreter
+- [x] Read file contents, parse, and execute
+- [x] Handle file errors gracefully
 
-### 1.2 Variables & Bindings *(Partially Done)*
+### 1.2 Variables & Bindings ✅
 - [x] `let prog = ii_V_I(C)` - parsing implemented
-- [ ] Variable resolution in Evaluator (Environment integration)
-- [ ] Variable updates: `prog = other_prog`
+- [x] Variable resolution in Evaluator (Environment integration)
+- [ ] Variable updates: `prog = other_prog` *(re-assignment)*
 
 ### 1.3 Comments & Formatting
 - [ ] Single-line comments: `// comment`
 - [ ] Multi-line comments: `/* comment */`
-- [ ] Better whitespace/newline handling as statement separators
+- [x] Better whitespace/newline handling as statement separators
+  - *Lexer now emits `Token::Newline` - multi-line files work naturally*
 
 ### 1.4 Lexer Improvements
-- [ ] Handle numbers > 127 (currently limited to i8, affects tempo values)
+- [x] Handle numbers > 127 (changed from i8 to i32 for tempo support)
+- [x] Unified expression parsing in StatementParser (no string reconstruction hack)
 - [ ] Improve error messages with line/column info
 
 ---
@@ -125,11 +127,13 @@ A production-ready music programming language for chord progressions and harmoni
 | Scheduler (beat tracking) | ✅ Complete |
 | REPL | ✅ Refactored with CommandRegistry |
 | Parser/AST | ✅ Separated, scripting-ready |
-| Lexer | ✅ 24 new tokens for scripting |
-| StatementParser | ✅ Parses let, play, if, loop, etc. |
+| Lexer | ✅ 25 tokens + i32 numbers + newlines |
+| StatementParser | ✅ Unified expression parsing |
 | Environment | ✅ Scoped variable storage |
-| Interpreter | ✅ Statement execution |
-| File Loading | ⚠️ Parsing done, execution pending |
+| Interpreter | ✅ Actions-based architecture |
+| Variable Resolution | ✅ Environment-aware evaluation |
+| File Loading | ✅ load "file.cadence" works |
+| Script Audio | ✅ play/tempo/stop trigger audio |
 | Live Coding | ❌ Not started |
 
 ---
@@ -145,5 +149,6 @@ A production-ready music programming language for chord progressions and harmoni
 
 ## Next Session Priorities
 
-1. **File Loading** - Implement `load "file.cadence"` execution
-2. **Variable Resolution** - Wire Environment into Evaluator
+1. **Comments** - Add `//` single-line and `/* */` multi-line comments
+2. **Variable Re-assignment** - Implement `prog = other_prog` (currently only `let` binding)
+3. **Error Line Info** - Improve error messages with line/column info

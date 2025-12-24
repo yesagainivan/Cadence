@@ -135,10 +135,10 @@ impl Lexer {
         self.input.get(self.position + 1).copied()
     }
 
-    /// Skip whitespace characters
-    fn skip_whitespace(&mut self) {
+    /// Skip horizontal whitespace (spaces and tabs, NOT newlines)
+    fn skip_horizontal_whitespace(&mut self) {
         while let Some(ch) = self.current_char {
-            if ch.is_whitespace() {
+            if ch == ' ' || ch == '\t' || ch == '\r' {
                 self.advance();
             } else {
                 break;
@@ -234,10 +234,16 @@ impl Lexer {
     /// Get the next token
     pub fn next_token(&mut self) -> Result<Token> {
         loop {
-            self.skip_whitespace();
+            self.skip_horizontal_whitespace();
 
             match self.current_char {
                 None => return Ok(Token::Eof),
+
+                // Newline is significant for statement separation
+                Some('\n') => {
+                    self.advance();
+                    return Ok(Token::Newline);
+                }
 
                 Some('[') => {
                     // Check if this is [[ (double bracket for progressions)
