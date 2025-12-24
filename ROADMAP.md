@@ -35,11 +35,11 @@ A production-ready music programming language for chord progressions and harmoni
 ### 1.2 Variables & Bindings ✅
 - [x] `let prog = ii_V_I(C)` - parsing implemented
 - [x] Variable resolution in Evaluator (Environment integration)
-- [ ] Variable updates: `prog = other_prog` *(re-assignment)*
+- [x] Variable updates: `prog = other_prog` *(re-assignment)*
 
-### 1.3 Comments & Formatting
-- [ ] Single-line comments: `// comment`
-- [ ] Multi-line comments: `/* comment */`
+### 1.3 Comments & Formatting ✅
+- [x] Single-line comments: `// comment`
+- [x] Multi-line comments: `/* comment */`
 - [x] Better whitespace/newline handling as statement separators
   - *Lexer now emits `Token::Newline` - multi-line files work naturally*
 
@@ -149,6 +149,6 @@ A production-ready music programming language for chord progressions and harmoni
 
 ## Next Session Priorities
 
-1. **Comments** - Add `//` single-line and `/* */` multi-line comments
-2. **Variable Re-assignment** - Implement `prog = other_prog` (currently only `let` binding)
-3. **Error Line Info** - Improve error messages with line/column info
+1. **Error Line Info** - Improve error messages with line/column info
+2. **Control Flow Execution** - Make `loop {}` and `repeat {}` actually execute
+3. **Phase 2** - Implement remaining control flow features

@@ -103,6 +103,18 @@ impl Interpreter {
                 Ok(ControlFlow::Normal)
             }
 
+            Statement::Assign { name, value } => {
+                let val = self.eval_expression(value)?;
+                if self.environment.is_defined(name) {
+                    self.environment
+                        .set(name, val)
+                        .map_err(|e| anyhow!("{}", e))?;
+                } else {
+                    return Err(anyhow!("Cannot assign to undefined variable '{}'", name));
+                }
+                Ok(ControlFlow::Normal)
+            }
+
             Statement::Expression(expr) => {
                 let val = self.eval_expression(expr)?;
                 println!("{}", val); // REPL-style: print expression results
@@ -391,5 +403,36 @@ mod tests {
         // Should error - file doesn't exist
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Failed to load"));
+    }
+
+    #[test]
+    fn test_variable_reassignment() {
+        let mut interpreter = Interpreter::new();
+
+        // Define and then reassign
+        let program = parse_statements("let x = [C, E, G]\nx = [D, F, A]").unwrap();
+        let result = interpreter.run_program(&program);
+        assert!(result.is_ok());
+
+        // Verify x is now D minor
+        let val = interpreter.environment.get("x");
+        assert!(val.is_some());
+    }
+
+    #[test]
+    fn test_assign_to_undefined_variable() {
+        let mut interpreter = Interpreter::new();
+
+        // Assign without let should fail
+        let program = parse_statements("x = [C, E, G]").unwrap();
+        let result = interpreter.run_program(&program);
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("undefined variable")
+        );
     }
 }

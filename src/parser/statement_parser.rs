@@ -113,6 +113,20 @@ impl StatementParser {
             }
             Token::Return => self.parse_return_statement(),
             Token::LeftBrace => self.parse_block_statement(),
+            Token::Identifier(name) => {
+                // Check if this is an assignment (identifier = expr)
+                // Use peek to see if next token is Equals
+                if matches!(self.peek(), Token::Equals) {
+                    self.advance(); // consume identifier
+                    self.advance(); // consume =
+                    let value = self.parse_expression()?;
+                    Ok(Statement::Assign { name, value })
+                } else {
+                    // Expression statement
+                    let expr = self.parse_expression()?;
+                    Ok(Statement::Expression(expr))
+                }
+            }
             _ => {
                 // Expression statement
                 let expr = self.parse_expression()?;

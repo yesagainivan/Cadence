@@ -39,6 +39,9 @@ pub enum Statement {
     /// Variable binding: let prog = ii_V_I(C)
     Let { name: String, value: Expression },
 
+    /// Variable re-assignment: prog = other_expr
+    Assign { name: String, value: Expression },
+
     /// Expression statement (evaluates and optionally prints): [C, E, G]
     Expression(Expression),
 
@@ -95,6 +98,7 @@ impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Statement::Let { name, value } => write!(f, "let {} = {}", name, value),
+            Statement::Assign { name, value } => write!(f, "{} = {}", name, value),
             Statement::Expression(expr) => write!(f, "{}", expr),
             Statement::Play {
                 target,

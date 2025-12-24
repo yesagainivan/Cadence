@@ -146,6 +146,37 @@ impl Lexer {
         }
     }
 
+    /// Skip a single-line comment (// to end of line)
+    fn skip_single_line_comment(&mut self) {
+        // Skip //
+        self.advance();
+        self.advance();
+        // Skip until newline or EOF
+        while let Some(ch) = self.current_char {
+            if ch == '\n' {
+                break; // Don't consume newline - let next_token handle it
+            }
+            self.advance();
+        }
+    }
+
+    /// Skip a multi-line comment (/* to */)
+    fn skip_multi_line_comment(&mut self) {
+        // Skip /*
+        self.advance();
+        self.advance();
+        // Skip until */
+        while let Some(ch) = self.current_char {
+            if ch == '*' && self.peek() == Some('/') {
+                self.advance(); // consume *
+                self.advance(); // consume /
+                return;
+            }
+            self.advance();
+        }
+        // Note: Unterminated comment - we just hit EOF
+    }
+
     /// Read a number (can be negative)
     fn read_number(&mut self) -> Result<i32> {
         let mut result = String::new();
@@ -243,6 +274,23 @@ impl Lexer {
                 Some('\n') => {
                     self.advance();
                     return Ok(Token::Newline);
+                }
+
+                // Comments
+                Some('/') => {
+                    match self.peek() {
+                        Some('/') => {
+                            self.skip_single_line_comment();
+                            continue; // Loop back to get next token
+                        }
+                        Some('*') => {
+                            self.skip_multi_line_comment();
+                            continue; // Loop back to get next token
+                        }
+                        _ => {
+                            return Err(anyhow!("Unexpected character: '/'"));
+                        }
+                    }
                 }
 
                 Some('[') => {
@@ -766,5 +814,39 @@ mod tests {
                 .to_string()
                 .contains("Unexpected character")
         );
+    }
+
+    #[test]
+    fn test_single_line_comment() {
+        let mut lexer = Lexer::new("C // this is a comment\nE");
+        let tokens = lexer.tokenize().unwrap();
+
+        // Should have C, Newline, E, Eof - comment is skipped
+        assert_eq!(tokens[0], Token::Note("C".to_string()));
+        assert_eq!(tokens[1], Token::Newline);
+        assert_eq!(tokens[2], Token::Note("E".to_string()));
+        assert_eq!(tokens[3], Token::Eof);
+    }
+
+    #[test]
+    fn test_multi_line_comment() {
+        let mut lexer = Lexer::new("C /* skip\nall\nthis */ E");
+        let tokens = lexer.tokenize().unwrap();
+
+        // Should have C, E, Eof - multi-line comment is skipped
+        assert_eq!(tokens[0], Token::Note("C".to_string()));
+        assert_eq!(tokens[1], Token::Note("E".to_string()));
+        assert_eq!(tokens[2], Token::Eof);
+    }
+
+    #[test]
+    fn test_comment_at_end_of_line() {
+        let mut lexer = Lexer::new("[C, E, G] // C major chord");
+        let tokens = lexer.tokenize().unwrap();
+
+        // Comment at end is just skipped
+        assert!(tokens.contains(&Token::LeftBracket));
+        assert!(tokens.contains(&Token::RightBracket));
+        assert_eq!(tokens.last(), Some(&Token::Eof));
     }
 }

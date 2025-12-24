@@ -1,5 +1,27 @@
+// Cadence Demo Script
+// Demonstrates all Phase 1 scripting features
+
+/* 
+   Jazz ii-V-I progression in C major
+   This is a common jazz turnaround
+*/
 let jazz = ii_V_I(C)
+
+// Pop progression in G (I-V-vi-IV)  
 let pop = I_V_vi_IV(G)
+
+// Set tempo to 120 BPM
 tempo 120
+
+// Play the jazz progression first
 play jazz
-play pop + 2
+
+// Variable re-assignment - transform in place!
+jazz = invert(jazz)
+
+// Play the inverted version
+play jazz
+
+// Transpose pop progression up 2 semitones
+pop = pop + 2
+play pop
