@@ -23,22 +23,47 @@ impl Default for AudioState {
     }
 }
 
-/// Per-note oscillator state for independent phase tracking
-struct Oscillator {
+/// Per-note oscillator state with amplitude envelope for click-free transitions
+struct EnvelopedOscillator {
     frequency: f32,
     phase: f32,
+    /// Current amplitude (0.0 to 1.0) - used for fade in/out
+    amplitude: f32,
+    /// Target amplitude (what we're fading towards)
+    target_amplitude: f32,
+    /// Fade rate per sample (how fast amplitude changes)
+    fade_rate: f32,
 }
 
-impl Oscillator {
-    fn new(frequency: f32) -> Self {
+impl EnvelopedOscillator {
+    /// Create a new oscillator that fades in from silence
+    fn new(frequency: f32, sample_rate: f32) -> Self {
+        // Fade time of ~5ms for smooth but quick transitions
+        let fade_time_seconds = 0.005;
+        let fade_rate = 1.0 / (fade_time_seconds * sample_rate);
+
         Self {
             frequency,
             phase: 0.0,
+            amplitude: 0.0,        // Start silent
+            target_amplitude: 1.0, // Fade in to full
+            fade_rate,
         }
     }
 
-    /// Generate next sample value using sine wave synthesis
+    /// Mark this oscillator for fade out (will be removed when amplitude reaches 0)
+    fn start_fade_out(&mut self) {
+        self.target_amplitude = 0.0;
+    }
+
+    /// Check if this oscillator has finished fading out
+    fn is_finished(&self) -> bool {
+        self.target_amplitude == 0.0 && self.amplitude <= 0.001
+    }
+
+    /// Generate next sample value with envelope applied
     fn next_sample(&mut self, sample_rate: f32) -> f32 {
+        // Generate sine wave
         let value = (2.0 * std::f32::consts::PI * self.phase).sin();
 
         // Update phase for next sample
@@ -49,7 +74,15 @@ impl Oscillator {
             self.phase -= 1.0;
         }
 
-        value
+        // Smoothly move amplitude towards target
+        if self.amplitude < self.target_amplitude {
+            self.amplitude = (self.amplitude + self.fade_rate).min(self.target_amplitude);
+        } else if self.amplitude > self.target_amplitude {
+            self.amplitude = (self.amplitude - self.fade_rate).max(self.target_amplitude);
+        }
+
+        // Apply envelope
+        value * self.amplitude
     }
 }
 
@@ -102,8 +135,10 @@ impl AudioPlayerInternal {
         let channels = config.channels as usize;
         let sample_rate = config.sample_rate.0 as f32;
 
-        // Per-note oscillators for independent phase tracking
-        let mut oscillators: Vec<Oscillator> = Vec::new();
+        // Active oscillators (includes fading out ones for crossfade)
+        let mut oscillators: Vec<EnvelopedOscillator> = Vec::new();
+        // Track what frequencies we're currently targeting
+        let mut current_frequencies: Vec<f32> = Vec::new();
 
         let err_fn = |err| eprintln!("Audio stream error: {:?}", err);
 
@@ -127,31 +162,46 @@ impl AudioPlayerInternal {
                     let frequencies = &state.notes;
                     let volume = state.volume;
 
-                    // Update oscillators if frequencies changed
-                    if oscillators.len() != frequencies.len()
-                        || oscillators
+                    // Check if frequencies changed
+                    if current_frequencies.len() != frequencies.len()
+                        || current_frequencies
                             .iter()
                             .zip(frequencies.iter())
-                            .any(|(osc, &freq)| (osc.frequency - freq).abs() > 0.01)
+                            .any(|(&curr, &new)| (curr - new).abs() > 0.01)
                     {
-                        oscillators = frequencies
-                            .iter()
-                            .map(|&freq| Oscillator::new(freq))
-                            .collect();
+                        // Mark all existing oscillators for fade out
+                        for osc in oscillators.iter_mut() {
+                            osc.start_fade_out();
+                        }
+
+                        // Add new oscillators that will fade in
+                        for &freq in frequencies.iter() {
+                            oscillators.push(EnvelopedOscillator::new(freq, sample_rate));
+                        }
+
+                        // Update our tracking
+                        current_frequencies = frequencies.clone();
                     }
 
                     // Generate audio samples
                     for frame in data.chunks_mut(channels) {
                         let mut mixed_value = 0.0;
+                        let mut active_count = 0;
 
-                        // Mix all oscillators together
+                        // Mix all oscillators together (including fading ones)
                         for oscillator in oscillators.iter_mut() {
-                            mixed_value += oscillator.next_sample(sample_rate);
+                            let sample = oscillator.next_sample(sample_rate);
+                            if sample.abs() > 0.0001 {
+                                mixed_value += sample;
+                                active_count += 1;
+                            }
                         }
 
-                        // Normalize by number of notes to prevent clipping
-                        if !oscillators.is_empty() {
-                            mixed_value /= oscillators.len() as f32;
+                        // Normalize by active oscillator count to prevent clipping
+                        if active_count > 0 {
+                            // Use a softer normalization to avoid volume jumps during crossfade
+                            let target_count = current_frequencies.len().max(1);
+                            mixed_value /= target_count as f32;
                         }
 
                         // Apply volume
@@ -165,6 +215,9 @@ impl AudioPlayerInternal {
                             *sample = value;
                         }
                     }
+
+                    // Remove finished oscillators (those that have faded out completely)
+                    oscillators.retain(|osc| !osc.is_finished());
                 },
                 err_fn,
                 None,
@@ -318,8 +371,8 @@ mod tests {
 
     #[test]
     fn test_oscillator_generation() {
-        let mut osc = Oscillator::new(440.0);
         let sample_rate = 44100.0;
+        let mut osc = EnvelopedOscillator::new(440.0, sample_rate);
 
         for _ in 0..1000 {
             let value = osc.next_sample(sample_rate);

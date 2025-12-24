@@ -1,16 +1,24 @@
+//! Beat-quantized progression playback engine
+//!
+//! This module provides a production-ready audio progression system that enables
+//! seamless, beat-synchronized switching between progressions—inspired by live
+//! coding environments like Sonic Pi and TidalCycles.
+
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::scheduler::{Duration, Scheduler};
 use anyhow::Result;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 /// Configuration for progression playback
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ProgressionConfig {
     /// Each chord as a vector of frequencies (Hz)
     pub progression: Vec<Vec<f32>>,
-    /// How long each chord plays
+    /// How long each chord plays (in beats)
     pub note_duration: Duration,
     /// Gap between chords (default: 0, seamless transition)
     pub gap_duration: Duration,
@@ -54,154 +62,315 @@ impl ProgressionConfig {
     }
 }
 
-/// Handle for a running playback task
-pub struct PlaybackTask {
-    id: usize,
-    running: Arc<AtomicBool>,
-    _handle: Option<JoinHandle<()>>,
+/// Commands that can be sent to the playback engine
+#[derive(Debug)]
+pub enum PlaybackCommand {
+    /// Start playing a progression immediately (interrupts current)
+    PlayProgression(ProgressionConfig),
+    /// Queue a progression to start at the next beat boundary
+    QueueProgression(ProgressionConfig),
+    /// Stop playback immediately
+    Stop,
+    /// Shutdown the playback engine
+    Shutdown,
 }
 
-impl PlaybackTask {
-    fn new(id: usize, running: Arc<AtomicBool>, handle: JoinHandle<()>) -> Self {
-        Self {
-            id,
-            running,
-            _handle: Some(handle),
-        }
-    }
-
-    /// Stop the playback task
-    pub fn stop(&self) {
-        self.running.store(false, Ordering::Relaxed);
-    }
-
-    /// Check if the task is still running
-    pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::Relaxed)
-    }
-
-    /// Get the task ID
-    pub fn id(&self) -> usize {
-        self.id
-    }
-}
-
-impl Drop for PlaybackTask {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-
-/// Engine for managing sequential progression playback
+/// Engine for managing sequential progression playback with beat-quantized switching
 pub struct PlaybackEngine {
-    audio_handle: Arc<AudioPlayerHandle>,
-    scheduler: Arc<Scheduler>,
-    current_task: Arc<std::sync::Mutex<Option<Arc<AtomicBool>>>>,
-    task_counter: Arc<AtomicUsize>,
+    command_tx: Sender<PlaybackCommand>,
+    is_playing: Arc<AtomicBool>,
+    _thread: JoinHandle<()>,
 }
 
 impl PlaybackEngine {
-    /// Create a new playback engine
+    /// Create a new playback engine with a persistent playback thread
     pub fn new(audio_handle: Arc<AudioPlayerHandle>, scheduler: Arc<Scheduler>) -> Self {
-        Self {
-            audio_handle,
-            scheduler,
-            current_task: Arc::new(std::sync::Mutex::new(None)),
-            task_counter: Arc::new(AtomicUsize::new(0)),
+        let (tx, rx) = channel();
+        let is_playing = Arc::new(AtomicBool::new(false));
+        let is_playing_clone = is_playing.clone();
+
+        let thread = thread::spawn(move || {
+            PlaybackLoop::new(audio_handle, scheduler, rx, is_playing_clone).run();
+        });
+
+        PlaybackEngine {
+            command_tx: tx,
+            is_playing,
+            _thread: thread,
         }
     }
 
-    /// Play a progression with the given configuration
-    pub fn play_progression(&self, config: ProgressionConfig) -> Result<PlaybackTask> {
-        // Stop any existing playback
-        self.stop();
+    /// Play a progression immediately (interrupts any current playback)
+    pub fn play_progression(&self, config: ProgressionConfig) -> Result<()> {
+        self.command_tx
+            .send(PlaybackCommand::PlayProgression(config))
+            .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))
+    }
 
-        // Create new task ID
-        let task_id = self.task_counter.fetch_add(1, Ordering::Relaxed);
-        let running = Arc::new(AtomicBool::new(true));
-
-        // Store the running flag
-        {
-            let mut current = self.current_task.lock().unwrap();
-            *current = Some(running.clone());
-        }
-
-        // Clone necessary data for the thread
-        let audio_handle = self.audio_handle.clone();
-        let scheduler = self.scheduler.clone();
-        let running_clone = running.clone();
-
-        // Spawn playback thread
-        let handle = thread::spawn(move || {
-            let loop_count = config.loop_count.unwrap_or(usize::MAX);
-
-            'outer: for _iteration in 0..loop_count {
-                if !running_clone.load(Ordering::Relaxed) {
-                    break;
-                }
-
-                for (i, chord_frequencies) in config.progression.iter().enumerate() {
-                    // Check if we should stop
-                    if !running_clone.load(Ordering::Relaxed) {
-                        break 'outer;
-                    }
-
-                    // Set the notes for this chord
-                    if let Err(e) = audio_handle.set_notes(chord_frequencies.clone()) {
-                        eprintln!("Failed to set notes for chord {}: {}", i, e);
-                        continue;
-                    }
-
-                    // Start playback if first chord
-                    if i == 0 {
-                        if let Err(e) = audio_handle.play() {
-                            eprintln!("Failed to start audio playback: {}", e);
-                            break 'outer;
-                        }
-                    }
-
-                    // Wait for note duration
-                    scheduler.sleep(config.note_duration);
-
-                    // Optional gap between chords
-                    if config.gap_duration.to_millis(scheduler.get_bpm()) > 0 {
-                        // Pause during gap
-                        let _ = audio_handle.pause();
-                        scheduler.sleep(config.gap_duration);
-                        let _ = audio_handle.play();
-                    }
-                }
-            }
-
-            // Stop audio when done
-            let _ = audio_handle.pause();
-            running_clone.store(false, Ordering::Relaxed);
-        });
-
-        Ok(PlaybackTask::new(task_id, running, handle))
+    /// Queue a progression to start at the next beat boundary (seamless transition)
+    pub fn queue_progression(&self, config: ProgressionConfig) -> Result<()> {
+        self.command_tx
+            .send(PlaybackCommand::QueueProgression(config))
+            .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))
     }
 
     /// Stop any currently playing progression
-    pub fn stop(&self) {
-        let mut current = self.current_task.lock().unwrap();
-        if let Some(running) = current.as_ref() {
-            running.store(false, Ordering::Relaxed);
-        }
-        *current = None;
-
-        // Also pause the audio player
-        let _ = self.audio_handle.pause();
+    pub fn stop(&self) -> Result<()> {
+        self.command_tx
+            .send(PlaybackCommand::Stop)
+            .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))
     }
 
     /// Check if a progression is currently playing
     pub fn is_playing(&self) -> bool {
-        let current = self.current_task.lock().unwrap();
-        if let Some(running) = current.as_ref() {
-            running.load(Ordering::Relaxed)
-        } else {
-            false
+        self.is_playing.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for PlaybackEngine {
+    fn drop(&mut self) {
+        let _ = self.command_tx.send(PlaybackCommand::Shutdown);
+    }
+}
+
+/// Internal playback loop that runs in a dedicated thread
+struct PlaybackLoop {
+    audio_handle: Arc<AudioPlayerHandle>,
+    scheduler: Arc<Scheduler>,
+    command_rx: Receiver<PlaybackCommand>,
+    is_playing: Arc<AtomicBool>,
+
+    // Playback state
+    current_progression: Option<ProgressionConfig>,
+    pending_progression: Option<ProgressionConfig>,
+    chord_index: usize,
+    iteration: usize,
+    audio_started: bool,
+}
+
+impl PlaybackLoop {
+    fn new(
+        audio_handle: Arc<AudioPlayerHandle>,
+        scheduler: Arc<Scheduler>,
+        command_rx: Receiver<PlaybackCommand>,
+        is_playing: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            audio_handle,
+            scheduler,
+            command_rx,
+            is_playing,
+            current_progression: None,
+            pending_progression: None,
+            chord_index: 0,
+            iteration: 0,
+            audio_started: false,
         }
     }
+
+    fn run(&mut self) {
+        loop {
+            // Process all pending commands
+            match self.process_commands() {
+                LoopAction::Continue => {}
+                LoopAction::Shutdown => break,
+            }
+
+            // If we have a progression to play, advance it
+            if self.current_progression.is_some() {
+                self.play_next_beat();
+            } else {
+                // No progression - wait for commands
+                match self.command_rx.recv() {
+                    Ok(cmd) => {
+                        if let LoopAction::Shutdown = self.handle_command(cmd) {
+                            break;
+                        }
+                    }
+                    Err(_) => break, // Channel closed
+                }
+            }
+        }
+
+        // Clean up
+        let _ = self.audio_handle.pause();
+        self.is_playing.store(false, Ordering::Relaxed);
+    }
+
+    fn process_commands(&mut self) -> LoopAction {
+        loop {
+            match self.command_rx.try_recv() {
+                Ok(cmd) => {
+                    if let LoopAction::Shutdown = self.handle_command(cmd) {
+                        return LoopAction::Shutdown;
+                    }
+                }
+                Err(TryRecvError::Empty) => return LoopAction::Continue,
+                Err(TryRecvError::Disconnected) => return LoopAction::Shutdown,
+            }
+        }
+    }
+
+    fn handle_command(&mut self, cmd: PlaybackCommand) -> LoopAction {
+        match cmd {
+            PlaybackCommand::PlayProgression(config) => {
+                // Immediate switch - reset position and start new progression
+                self.current_progression = Some(config);
+                self.pending_progression = None;
+                self.chord_index = 0;
+                self.iteration = 0;
+                self.is_playing.store(true, Ordering::Relaxed);
+
+                // Reset scheduler timing
+                self.scheduler.reset();
+
+                // Don't start audio yet - it will start on first beat
+                self.audio_started = false;
+            }
+            PlaybackCommand::QueueProgression(config) => {
+                // Queue for next beat boundary - seamless transition
+                if self.current_progression.is_some() {
+                    self.pending_progression = Some(config);
+                } else {
+                    // No current progression - start immediately
+                    self.current_progression = Some(config);
+                    self.chord_index = 0;
+                    self.iteration = 0;
+                    self.is_playing.store(true, Ordering::Relaxed);
+                    self.scheduler.reset();
+                    self.audio_started = false;
+                }
+            }
+            PlaybackCommand::Stop => {
+                self.current_progression = None;
+                self.pending_progression = None;
+                self.is_playing.store(false, Ordering::Relaxed);
+                let _ = self.audio_handle.pause();
+                self.audio_started = false;
+            }
+            PlaybackCommand::Shutdown => {
+                return LoopAction::Shutdown;
+            }
+        }
+        LoopAction::Continue
+    }
+
+    fn play_next_beat(&mut self) {
+        // Check for pending progression at beat boundary (before playing current chord)
+        if let Some(pending) = self.pending_progression.take() {
+            // Seamless switch - don't pause, just change progression
+            self.current_progression = Some(pending);
+            self.chord_index = 0;
+            self.iteration = 0;
+            // Note: we keep audio_started true for seamless transition
+        }
+
+        let config = match &self.current_progression {
+            Some(c) => c.clone(),
+            None => return,
+        };
+
+        // Check if we've completed all iterations
+        if let Some(max_loops) = config.loop_count {
+            if self.iteration >= max_loops {
+                self.current_progression = None;
+                self.is_playing.store(false, Ordering::Relaxed);
+                let _ = self.audio_handle.pause();
+                self.audio_started = false;
+                return;
+            }
+        }
+
+        // Get current chord
+        if self.chord_index >= config.progression.len() {
+            // Move to next iteration
+            self.chord_index = 0;
+            self.iteration += 1;
+
+            // Re-check loop count
+            if let Some(max_loops) = config.loop_count {
+                if self.iteration >= max_loops {
+                    self.current_progression = None;
+                    self.is_playing.store(false, Ordering::Relaxed);
+                    let _ = self.audio_handle.pause();
+                    self.audio_started = false;
+                    return;
+                }
+            }
+        }
+
+        let chord_frequencies = &config.progression[self.chord_index];
+
+        // Set the notes (seamless - no pause needed)
+        if let Err(e) = self.audio_handle.set_notes(chord_frequencies.clone()) {
+            eprintln!("Failed to set notes: {}", e);
+        }
+
+        // Start audio if not already playing
+        if !self.audio_started {
+            if let Err(e) = self.audio_handle.play() {
+                eprintln!("Failed to start audio: {}", e);
+            }
+            self.audio_started = true;
+        }
+
+        // Advance chord index
+        self.chord_index += 1;
+
+        // Wait for beat duration, checking for commands periodically
+        let beat_end = self.scheduler.time_from_now(config.note_duration);
+        self.wait_until_with_command_check(beat_end);
+
+        // Handle gap if specified
+        let gap_ms = config.gap_duration.to_millis(self.scheduler.get_bpm());
+        if gap_ms > 0 {
+            let _ = self.audio_handle.pause();
+            self.scheduler.sleep(config.gap_duration);
+            let _ = self.audio_handle.play();
+        }
+    }
+
+    /// Wait until a specific time, but check for commands periodically
+    fn wait_until_with_command_check(&mut self, target: Instant) {
+        while Instant::now() < target {
+            // Check for high-priority commands (Stop/Shutdown) more frequently
+            match self.command_rx.try_recv() {
+                Ok(PlaybackCommand::Stop) => {
+                    self.current_progression = None;
+                    self.pending_progression = None;
+                    self.is_playing.store(false, Ordering::Relaxed);
+                    let _ = self.audio_handle.pause();
+                    self.audio_started = false;
+                    return;
+                }
+                Ok(PlaybackCommand::Shutdown) => {
+                    return;
+                }
+                Ok(PlaybackCommand::QueueProgression(config)) => {
+                    // Queue for next beat
+                    self.pending_progression = Some(config);
+                }
+                Ok(PlaybackCommand::PlayProgression(config)) => {
+                    // Immediate switch even mid-beat
+                    self.current_progression = Some(config);
+                    self.pending_progression = None;
+                    self.chord_index = 0;
+                    self.iteration = 0;
+                    self.scheduler.reset();
+                    return; // Exit early to start new progression
+                }
+                Err(_) => {}
+            }
+
+            // Small sleep for responsiveness
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+}
+
+enum LoopAction {
+    Continue,
+    Shutdown,
 }
 
 #[cfg(test)]
@@ -225,20 +394,6 @@ mod tests {
     }
 
     #[test]
-    fn test_playback_task_running() {
-        let running = Arc::new(AtomicBool::new(true));
-        let handle = thread::spawn(|| {
-            thread::sleep(std::time::Duration::from_millis(10));
-        });
-
-        let task = PlaybackTask::new(1, running.clone(), handle);
-        assert!(task.is_running());
-
-        task.stop();
-        assert!(!task.is_running());
-    }
-
-    #[test]
     fn test_playback_engine_creation() {
         match AudioPlayerHandle::new() {
             Ok(handle) => {
@@ -248,6 +403,26 @@ mod tests {
             }
             Err(_) => {
                 println!("Skipping playback engine test - no audio device");
+            }
+        }
+    }
+
+    #[test]
+    fn test_playback_engine_commands() {
+        match AudioPlayerHandle::new() {
+            Ok(handle) => {
+                let scheduler = Scheduler::new(120.0);
+                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler));
+
+                let config = ProgressionConfig::new(vec![vec![440.0]]);
+
+                // Test that commands don't panic
+                assert!(engine.play_progression(config.clone()).is_ok());
+                assert!(engine.queue_progression(config.clone()).is_ok());
+                assert!(engine.stop().is_ok());
+            }
+            Err(_) => {
+                println!("Skipping command test - no audio device");
             }
         }
     }

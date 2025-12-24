@@ -30,10 +30,11 @@ impl Duration {
     }
 }
 
-/// High-precision scheduler for musical timing
+/// High-precision scheduler for musical timing with beat position tracking
 pub struct Scheduler {
     bpm: Arc<AtomicU64>, // Store as bits for atomic operations
     running: Arc<AtomicBool>,
+    start_time: Arc<std::sync::Mutex<Option<Instant>>>,
     _handle: Option<JoinHandle<()>>,
 }
 
@@ -46,8 +47,23 @@ impl Scheduler {
         Scheduler {
             bpm: bpm_atomic,
             running,
+            start_time: Arc::new(std::sync::Mutex::new(None)),
             _handle: None,
         }
+    }
+
+    /// Start the scheduler (marks the start time for beat tracking)
+    pub fn start(&self) {
+        let mut start = self.start_time.lock().unwrap();
+        if start.is_none() {
+            *start = Some(Instant::now());
+        }
+    }
+
+    /// Reset the scheduler (resets start time)
+    pub fn reset(&self) {
+        let mut start = self.start_time.lock().unwrap();
+        *start = Some(Instant::now());
     }
 
     /// Set the BPM (tempo)
@@ -64,6 +80,46 @@ impl Scheduler {
     pub fn beat_duration_ms(&self) -> u64 {
         let bpm = self.get_bpm();
         (60000.0 / bpm) as u64
+    }
+
+    /// Get the current beat position (fractional beats since start)
+    pub fn current_beat(&self) -> f64 {
+        let start = self.start_time.lock().unwrap();
+        if let Some(start_time) = *start {
+            let elapsed = start_time.elapsed();
+            let bpm = self.get_bpm() as f64;
+            let beats_per_sec = bpm / 60.0;
+            elapsed.as_secs_f64() * beats_per_sec
+        } else {
+            0.0
+        }
+    }
+
+    /// Get the time until the next beat boundary
+    pub fn time_to_next_beat(&self) -> StdDuration {
+        let current = self.current_beat();
+        let next_beat = current.ceil();
+        let beats_until_next = next_beat - current;
+
+        let bpm = self.get_bpm() as f64;
+        let seconds_per_beat = 60.0 / bpm;
+        let seconds_to_next = beats_until_next * seconds_per_beat;
+
+        StdDuration::from_secs_f64(seconds_to_next.max(0.001)) // At least 1ms
+    }
+
+    /// Get the Instant when the next beat will occur
+    pub fn next_beat_time(&self) -> Instant {
+        Instant::now() + self.time_to_next_beat()
+    }
+
+    /// Wait until the next beat boundary
+    pub fn wait_for_next_beat(&self) -> bool {
+        if !self.running.load(Ordering::Relaxed) {
+            return false;
+        }
+        thread::sleep(self.time_to_next_beat());
+        true
     }
 
     /// Create a future time instant based on a duration
@@ -86,9 +142,14 @@ impl Scheduler {
                 return false; // Interrupted
             }
             // Sleep in small increments for responsiveness
-            thread::sleep(StdDuration::from_millis(10));
+            thread::sleep(StdDuration::from_millis(5));
         }
         true // Completed sleep
+    }
+
+    /// Check if scheduler is running
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::Relaxed)
     }
 }
 

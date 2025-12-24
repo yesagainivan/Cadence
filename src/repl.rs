@@ -1,5 +1,5 @@
 use crate::audio::audio::AudioPlayerHandle;
-use crate::audio::playback_engine::{PlaybackEngine, PlaybackTask, ProgressionConfig};
+use crate::audio::playback_engine::{PlaybackEngine, ProgressionConfig};
 use crate::audio::scheduler::{Duration, Scheduler};
 use crate::parser::{Value, eval};
 use anyhow::Result;
@@ -14,7 +14,6 @@ pub struct Repl {
     audio_handle: Arc<AudioPlayerHandle>,
     scheduler: Arc<Scheduler>,
     playback_engine: Arc<PlaybackEngine>,
-    current_task: Option<PlaybackTask>,
 }
 
 impl Repl {
@@ -23,7 +22,7 @@ impl Repl {
         let editor = DefaultEditor::new()?;
         let audio_handle =
             Arc::new(AudioPlayerHandle::new().expect("Failed to create audio player"));
-        let scheduler = Arc::new(Scheduler::new(120.0)); // Default 120 BPM
+        let scheduler = Arc::new(Scheduler::new(90.0)); // Default 120 BPM
         let playback_engine =
             Arc::new(PlaybackEngine::new(audio_handle.clone(), scheduler.clone()));
 
@@ -32,7 +31,6 @@ impl Repl {
             audio_handle,
             scheduler,
             playback_engine,
-            current_task: None,
         })
     }
 
@@ -71,14 +69,23 @@ impl Repl {
                     if line.starts_with("audio play progression") {
                         let mut rest = line.trim_start_matches("audio play progression").trim();
 
-                        // Parse for 'loop' or 'duration <n>' modifiers from the end
+                        // Parse for 'loop', 'queue', or 'duration <n>' modifiers from the end
+                        // These can appear in any order, so we loop until no more are found
                         let mut loop_enabled = false;
+                        let mut queue_enabled = false;
                         let mut duration_beats = 1.0;
 
-                        // Check for 'loop' at the end
-                        if rest.ends_with(" loop") {
-                            loop_enabled = true;
-                            rest = rest.trim_end_matches(" loop").trim();
+                        // Parse modifiers in any order
+                        loop {
+                            if rest.ends_with(" loop") {
+                                loop_enabled = true;
+                                rest = rest.trim_end_matches(" loop").trim();
+                            } else if rest.ends_with(" queue") {
+                                queue_enabled = true;
+                                rest = rest.trim_end_matches(" queue").trim();
+                            } else {
+                                break;
+                            }
                         }
 
                         // Check for 'duration <n>' at the end
@@ -120,14 +127,23 @@ impl Repl {
                                         config = config.with_looping();
                                     }
 
-                                    // Start playback
-                                    match self.playback_engine.play_progression(config) {
-                                        Ok(task) => {
-                                            let chord_count = prog.chords().count();
-                                            self.current_task = Some(task);
+                                    let chord_count = prog.chords().count();
 
-                                            if loop_enabled {
+                                    // Start playback (queue for beat-synced, immediate otherwise)
+                                    let result = if queue_enabled {
+                                        self.playback_engine.queue_progression(config)
+                                    } else {
+                                        self.playback_engine.play_progression(config)
+                                    };
+
+                                    match result {
+                                        Ok(_) => {
+                                            if loop_enabled && queue_enabled {
+                                                println!("{}", "🔁 Queued looping progression for next beat... (use 'audio stop' to stop)".bright_green());
+                                            } else if loop_enabled {
                                                 println!("{}", "🔁 Looping progression... (use 'audio stop' to stop)".bright_green());
+                                            } else if queue_enabled {
+                                                println!("{}", format!("🎵 Queued progression ({} chords) for next beat...", chord_count).bright_green());
                                             } else {
                                                 println!("{}", format!("🎵 Playing progression ({} chords, {:.1} BPM)...", chord_count, self.scheduler.get_bpm()).bright_green());
                                             }
@@ -197,6 +213,8 @@ impl Repl {
                             }
                         }
                     } else if line == "audio stop" {
+                        // Stop both progression playback and direct audio
+                        let _ = self.playback_engine.stop();
                         if let Err(e) = self.audio_handle.pause() {
                             println!(
                                 "{}",
@@ -257,8 +275,11 @@ impl Repl {
                                 }
                             }
                         }
+                    } else if line == "help" {
                         self.print_help();
                         continue;
+                    } else if line == "quit" || line == "exit" {
+                        break;
                     } else {
                         // Evaluate the expression
                         match self.evaluate_expression(line) {
