@@ -20,6 +20,7 @@
 //!   logic and operations.
 
 pub mod audio;
+pub mod commands;
 pub mod parser;
 pub mod repl;
 pub mod types;
