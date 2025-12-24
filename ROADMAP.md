@@ -71,17 +71,22 @@ A production-ready music programming language for chord progressions and harmoni
 
 ## Phase 3: Live Coding (TidalCycles-inspired)
 
-### 3.1 Live Reload
+### 3.1 Reactive Variables ✅
+- [x] Thread-safe Environment (`Arc<RwLock<Environment>>`)
+- [x] Per-beat expression re-evaluation in PlaybackLoop
+- [x] Variable updates affect playing audio: `play a loop` then `a = E`
+
+### 3.2 Live Reload
 - [ ] File watch with hot-reload
 - [ ] Changes apply at next beat/bar boundary
 - [ ] Error recovery without stopping playback
 
-### 3.2 Pattern System
+### 3.3 Pattern System
 - [ ] Cycle-based patterns: `"C E G _"` (underscore = rest)
 - [ ] Pattern operators: `fast`, `slow`, `rev`, `every`
 - [ ] Mini-notation parser
 
-### 3.3 Multiple Voices
+### 3.4 Multiple Voices
 - [x] Named tracks/voices (`track N { ... }`)
 - [x] Parallel execution (multiple PlaybackEngines)
 - [x] Per-voice volume (`track N { volume 50 }`)
@@ -133,7 +138,7 @@ A production-ready music programming language for chord progressions and harmoni
 | Parser/AST | ✅ Separated, scripting-ready |
 | Lexer | ✅ 25 tokens + i32 numbers + newlines |
 | StatementParser | ✅ Unified expression parsing |
-| Environment | ✅ Scoped variable storage |
+| Environment | ✅ Thread-safe with Arc<RwLock> |
 | Interpreter | ✅ Actions-based architecture |
 | Variable Resolution | ✅ Environment-aware evaluation |
 | File Loading | ✅ load "file.cadence" works |
@@ -142,7 +147,8 @@ A production-ready music programming language for chord progressions and harmoni
 | Control Flow | ✅ `repeat`, `loop`, `break`, `continue` |
 | Multitrack | ✅ `track N { }`, 16-track limit, `tracks` command |
 | Voice Leading | ✅ `smooth_voice_leading()` with octave normalization |
-| Live Coding | ❌ Not started |
+| Reactive Variables | ✅ Per-beat re-evaluation, live variable updates |
+| Live Coding | 🟡 Reactive variables done, hot-reload pending |
 
 ---
 
@@ -151,7 +157,7 @@ A production-ready music programming language for chord progressions and harmoni
 | File | Purpose |
 |------|---------|
 | `src/parser/statement_parser.rs` | Parses scripting statements |
-| `src/parser/environment.rs` | Scoped variable storage |
+| `src/parser/environment.rs` | Thread-safe scoped variable storage |
 | `src/parser/interpreter.rs` | Statement execution |
 | `src/commands/` | Command registry pattern for REPL |
 
@@ -161,4 +167,7 @@ A production-ready music programming language for chord progressions and harmoni
 2. ~~**Control Flow Execution** - Make `loop {}` and `repeat {}` actually execute~~ ✅ Done
 3. ~~**Error Line Info** - Improve error messages with line/column info~~ ✅ Done
 4. ~~**Multi-track/Voices** - Named tracks for simultaneous playback~~ ✅ Done
-5. **Live Coding** - File watch, hot-reload, pattern system (Phase 3)
+5. ~~**Reactive Variables** - Variable updates affect playing audio~~ ✅ Done
+6. **Pattern System** - Mini-notation, cycle-based patterns, operators
+7. **Live Reload** - File watch with hot-reload at beat boundaries
+8. **ADSR Envelopes** - Configurable attack/decay/sustain/release
