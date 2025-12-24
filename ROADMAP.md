@@ -47,6 +47,7 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] Handle numbers > 127 (changed from i8 to i32 for tempo support)
 - [x] Unified expression parsing in StatementParser (no string reconstruction hack)
 - [x] Improve error messages with line/column info
+  - *Note: `parser.rs` still uses plain `Token`. Full migration would add spans to all ~15 error messages.*
 
 ---
 
