@@ -11,7 +11,7 @@ let jazz = ii_V_I(C)
 let pop = I_V_vi_IV(G)
 
 // Set tempo to 120 BPM
-tempo 120
+tempo 80
 
 // Play the jazz progression first
 play jazz
@@ -20,8 +20,8 @@ play jazz
 jazz = invert(jazz)
 
 // Play the inverted version
-play jazz
+play jazz loop
 
 // Transpose pop progression up 2 semitones
-pop = pop + 2
-play pop
+// pop = pop + 2
+// play pop

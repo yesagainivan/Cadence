@@ -435,4 +435,67 @@ mod tests {
                 .contains("undefined variable")
         );
     }
+
+    #[test]
+    fn test_action_flow_play() {
+        let mut interpreter = Interpreter::new();
+
+        // Play statement should generate a PlayValue action
+        let program = parse_statements("play [C, E, G]").unwrap();
+        let _result = interpreter.run_program(&program);
+
+        let actions = interpreter.take_actions();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            crate::parser::interpreter::InterpreterAction::PlayValue { looping, queue, .. } => {
+                assert!(!looping);
+                assert!(!queue);
+            }
+            _ => panic!("Expected PlayValue action"),
+        }
+    }
+
+    #[test]
+    fn test_action_flow_tempo() {
+        let mut interpreter = Interpreter::new();
+
+        // Tempo statement should generate a SetTempo action
+        let program = parse_statements("tempo 90").unwrap();
+        let _result = interpreter.run_program(&program);
+
+        let actions = interpreter.take_actions();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            crate::parser::interpreter::InterpreterAction::SetTempo(bpm) => {
+                assert_eq!(*bpm, 90.0);
+            }
+            _ => panic!("Expected SetTempo action"),
+        }
+    }
+
+    #[test]
+    fn test_action_flow_multiple() {
+        let mut interpreter = Interpreter::new();
+
+        // Multiple statements should generate multiple actions
+        let program = parse_statements("tempo 100\nplay [C, E, G]\nstop").unwrap();
+        let _result = interpreter.run_program(&program);
+
+        let actions = interpreter.take_actions();
+        assert_eq!(actions.len(), 3);
+
+        // Should be: SetTempo, PlayValue, Stop
+        assert!(matches!(
+            actions[0],
+            crate::parser::interpreter::InterpreterAction::SetTempo(_)
+        ));
+        assert!(matches!(
+            actions[1],
+            crate::parser::interpreter::InterpreterAction::PlayValue { .. }
+        ));
+        assert!(matches!(
+            actions[2],
+            crate::parser::interpreter::InterpreterAction::Stop
+        ));
+    }
 }

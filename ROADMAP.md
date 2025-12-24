@@ -25,7 +25,7 @@ A production-ready music programming language for chord progressions and harmoni
 
 ---
 
-## Phase 1: Basic Scripting *(In Progress)*
+## Phase 1: Basic Scripting ✅ *Complete*
 
 ### 1.1 File Loading ✅
 - [x] Implement `load "path/to/file.cadence"` in Interpreter
@@ -149,6 +149,7 @@ A production-ready music programming language for chord progressions and harmoni
 
 ## Next Session Priorities
 
-1. **Error Line Info** - Improve error messages with line/column info
-2. **Control Flow Execution** - Make `loop {}` and `repeat {}` actually execute
-3. **Phase 2** - Implement remaining control flow features
+1. **Audio Polish** - Fix click on start/stop, silent REPL startup
+2. **Error Line Info** - Improve error messages with line/column info
+3. **Multi-track/Voices** - Named tracks for simultaneous playback (Phase 4)
+4. **Control Flow Execution** - Make `loop {}` and `repeat {}` actually execute

@@ -162,7 +162,12 @@ impl Evaluator {
                         let inverted = chord.invert();
                         Ok(Value::Chord(inverted))
                     }
-                    _ => Err(anyhow!("invert() only works on chords")),
+                    Value::Progression(progression) => {
+                        // Apply invert to each chord in the progression
+                        let inverted = progression.map(|chord| chord.invert());
+                        Ok(Value::Progression(inverted))
+                    }
+                    _ => Err(anyhow!("invert() only works on chords or progressions")),
                 }
             }
 
@@ -930,5 +935,19 @@ mod evaluator_numeric_tests {
                 .to_string()
                 .contains("Invalid scale degree")
         );
+    }
+
+    #[test]
+    fn test_eval_invert_progression() {
+        // Test that invert works on progressions
+        let expr = parse("invert([[C, E, G], [F, A, C]])").unwrap();
+        let result = Evaluator::new().eval(expr).unwrap();
+
+        match result {
+            Value::Progression(prog) => {
+                assert_eq!(prog.len(), 2);
+            }
+            _ => panic!("Expected Progression value"),
+        }
     }
 }
