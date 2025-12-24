@@ -147,4 +147,3 @@ A production-ready music programming language for chord progressions and harmoni
 
 1. **File Loading** - Implement `load "file.cadence"` execution
 2. **Variable Resolution** - Wire Environment into Evaluator
-3. **Tempo fix** - Handle numbers > 127 in Lexer (i16 or Float)
