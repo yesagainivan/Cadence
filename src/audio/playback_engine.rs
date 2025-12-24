@@ -199,6 +199,32 @@ impl PlaybackLoop {
             // If we have a progression to play, advance it
             if self.current_progression.is_some() {
                 self.play_next_beat();
+            } else if !self.pending_queue.is_empty() {
+                // Queued content waiting to start at next beat
+                self.is_playing.store(true, Ordering::Relaxed);
+
+                // Ensure scheduler is running
+                self.scheduler.start();
+
+                // Wait for next beat boundary
+                let beat_time = self.scheduler.next_beat_time();
+                self.wait_until_with_command_check(beat_time);
+
+                // Check if we were stopped or interrupted during wait
+                if !self.is_playing.load(Ordering::Relaxed) {
+                    continue;
+                }
+
+                // Now start the queued item if still pending
+                // Note: pending_queue might have been cleared if Stop was received,
+                // or modified if new Queue commands arrived.
+                if let Some(next) = self.pending_queue.pop_front() {
+                    self.current_progression = Some(next);
+                    self.chord_index = 0;
+                    self.iteration = 0;
+                    self.audio_started = false;
+                    let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
+                }
             } else {
                 // No progression - wait for commands
                 match self.command_rx.recv() {
@@ -241,8 +267,9 @@ impl PlaybackLoop {
                 self.iteration = 0;
                 self.is_playing.store(true, Ordering::Relaxed);
 
-                // Reset scheduler timing
-                self.scheduler.reset();
+                // Ensure scheduler is tracking time, but don't reset if already running
+                // to maintain sync with other tracks
+                self.scheduler.start();
 
                 // Don't start audio yet - it will start on first beat
                 self.audio_started = false;
@@ -250,19 +277,14 @@ impl PlaybackLoop {
                 let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
             }
             PlaybackCommand::QueueProgression(config) => {
-                // Queue for next beat boundary - add to FIFO queue
-                if self.current_progression.is_some() {
-                    self.pending_queue.push_back(config);
-                } else {
-                    // No current progression - start immediately
-                    self.current_progression = Some(config);
-                    self.chord_index = 0;
-                    self.iteration = 0;
-                    self.is_playing.store(true, Ordering::Relaxed);
-                    self.scheduler.reset();
-                    self.audio_started = false;
-                    let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
-                }
+                // Queue for next beat boundary - ALWAYS add to FIFO queue
+                self.pending_queue.push_back(config);
+
+                // Ensure we are marked as playing so the loop picks it up
+                self.is_playing.store(true, Ordering::Relaxed);
+
+                // Ensure scheduler is running
+                self.scheduler.start();
             }
             PlaybackCommand::Stop => {
                 self.current_progression = None;
@@ -408,7 +430,7 @@ impl PlaybackLoop {
                     self.pending_queue.clear();
                     self.chord_index = 0;
                     self.iteration = 0;
-                    self.scheduler.reset();
+                    self.scheduler.start(); // Ensure started (was reset)
                     // Ensure volume is up
                     let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
                     return; // Exit early to start new progression
