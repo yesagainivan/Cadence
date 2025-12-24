@@ -1,25 +1,38 @@
-use crate::audio::audio::AudioPlayer;
+use crate::audio::audio::AudioPlayerHandle;
+use crate::audio::playback_engine::{PlaybackEngine, PlaybackTask, ProgressionConfig};
+use crate::audio::scheduler::{Duration, Scheduler};
 use crate::parser::{Value, eval};
 use anyhow::Result;
 use colored::*;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result as RustylineResult};
-// use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Interactive REPL for the Cadence language
 pub struct Repl {
     editor: DefaultEditor,
-    audio_player: AudioPlayer,
+    audio_handle: Arc<AudioPlayerHandle>,
+    scheduler: Arc<Scheduler>,
+    playback_engine: Arc<PlaybackEngine>,
+    current_task: Option<PlaybackTask>,
 }
 
 impl Repl {
     /// Create a new REPL instance
     pub fn new() -> RustylineResult<Self> {
         let editor = DefaultEditor::new()?;
-        let audio_player = AudioPlayer::new().expect("Failed to create audio player");
+        let audio_handle =
+            Arc::new(AudioPlayerHandle::new().expect("Failed to create audio player"));
+        let scheduler = Arc::new(Scheduler::new(120.0)); // Default 120 BPM
+        let playback_engine =
+            Arc::new(PlaybackEngine::new(audio_handle.clone(), scheduler.clone()));
+
         Ok(Repl {
             editor,
-            audio_player,
+            audio_handle,
+            scheduler,
+            playback_engine,
+            current_task: None,
         })
     }
 
@@ -54,7 +67,88 @@ impl Repl {
                     self.editor.add_history_entry(line.to_owned())?;
 
                     // Check for commands
-                    if line.starts_with("audio play") {
+                    // Check for progression playback FIRST (more specific)
+                    if line.starts_with("audio play progression") {
+                        let mut rest = line.trim_start_matches("audio play progression").trim();
+
+                        // Parse for 'loop' or 'duration <n>' modifiers from the end
+                        let mut loop_enabled = false;
+                        let mut duration_beats = 1.0;
+
+                        // Check for 'loop' at the end
+                        if rest.ends_with(" loop") {
+                            loop_enabled = true;
+                            rest = rest.trim_end_matches(" loop").trim();
+                        }
+
+                        // Check for 'duration <n>' at the end
+                        if let Some(duration_pos) = rest.rfind(" duration ") {
+                            let duration_str = &rest[duration_pos + 10..]; // Skip " duration "
+                            if let Ok(dur) = duration_str.trim().parse::<f32>() {
+                                duration_beats = dur;
+                                rest = &rest[..duration_pos];
+                            }
+                        }
+
+                        let expr_str = rest;
+
+                        if expr_str.is_empty() {
+                            println!(
+                                "{}",
+                                "Error: No expression provided after 'audio play progression'"
+                                    .bright_red()
+                            );
+                            continue;
+                        }
+
+                        match self.evaluate_expression(&expr_str) {
+                            Ok(value) => {
+                                if let Value::Progression(prog) = value {
+                                    // Convert progression to frequencies
+                                    let mut frequencies_vec = Vec::new();
+                                    for chord in prog.chords() {
+                                        let freqs: Vec<f32> =
+                                            chord.notes().map(|n| n.frequency()).collect();
+                                        frequencies_vec.push(freqs);
+                                    }
+
+                                    // Create progression config
+                                    let mut config = ProgressionConfig::new(frequencies_vec)
+                                        .with_duration(Duration::Beats(duration_beats));
+
+                                    if loop_enabled {
+                                        config = config.with_looping();
+                                    }
+
+                                    // Start playback
+                                    match self.playback_engine.play_progression(config) {
+                                        Ok(task) => {
+                                            let chord_count = prog.chords().count();
+                                            self.current_task = Some(task);
+
+                                            if loop_enabled {
+                                                println!("{}", "🔁 Looping progression... (use 'audio stop' to stop)".bright_green());
+                                            } else {
+                                                println!("{}", format!("🎵 Playing progression ({} chords, {:.1} BPM)...", chord_count, self.scheduler.get_bpm()).bright_green());
+                                            }
+                                        }
+                                        Err(e) => {
+                                            println!("{}", format!("Error: Failed to start progression playback: {}", e).bright_red());
+                                        }
+                                    }
+                                } else {
+                                    println!(
+                                        "{}",
+                                        "Error: Expression is not a progression".bright_red()
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                println!("{}", format!("Error: {}", e).bright_red());
+                            }
+                        }
+                    // Now check for generic audio play (less specific)
+                    } else if line.starts_with("audio play") {
                         let expr_str = line.trim_start_matches("audio play").trim();
                         if expr_str.is_empty() {
                             println!(
@@ -70,7 +164,7 @@ impl Repl {
                                 match get_frequencies_from_value(&value) {
                                     Ok(frequencies) => {
                                         // Set notes BEFORE starting playback
-                                        if let Err(e) = self.audio_player.set_notes(frequencies) {
+                                        if let Err(e) = self.audio_handle.set_notes(frequencies) {
                                             println!(
                                                 "{}",
                                                 format!("Error: Failed to set notes: {}", e)
@@ -80,7 +174,7 @@ impl Repl {
                                         }
 
                                         // Now start playback
-                                        if let Err(e) = self.audio_player.play() {
+                                        if let Err(e) = self.audio_handle.play() {
                                             println!(
                                                 "{}",
                                                 format!("Error: Failed to start playback: {}", e)
@@ -103,7 +197,7 @@ impl Repl {
                             }
                         }
                     } else if line == "audio stop" {
-                        if let Err(e) = self.audio_player.pause() {
+                        if let Err(e) = self.audio_handle.pause() {
                             println!(
                                 "{}",
                                 format!("Error: Failed to stop audio playback: {}", e).bright_red()
@@ -114,17 +208,14 @@ impl Repl {
                     } else if line.starts_with("audio volume") {
                         let volume_str = line.trim_start_matches("audio volume").trim();
                         if volume_str.is_empty() {
-                            // Show current volume
-                            match self.audio_player.get_volume() {
-                                Ok(vol) => println!("Current volume: {:.0}%", vol * 100.0),
-                                Err(e) => println!("{}", format!("Error: {}", e).bright_red()),
-                            }
+                            // Show current volume - not yet supported by AudioPlayerHandle
+                            println!("{}", "Volume control: use 'audio volume <0-100>'");
                         } else {
                             // Set volume
                             match volume_str.parse::<f32>() {
                                 Ok(vol) => {
                                     let normalized_vol = if vol > 1.0 { vol / 100.0 } else { vol };
-                                    if let Err(e) = self.audio_player.set_volume(normalized_vol) {
+                                    if let Err(e) = self.audio_handle.set_volume(normalized_vol) {
                                         println!("{}", format!("Error: {}", e).bright_red());
                                     } else {
                                         println!(
@@ -142,9 +233,30 @@ impl Repl {
                                 }
                             }
                         }
-                    } else if line == "quit" || line == "exit" {
-                        break;
-                    } else if line == "help" {
+                    } else if line.starts_with("tempo") {
+                        let tempo_str = line.trim_start_matches("tempo").trim();
+                        if tempo_str.is_empty() {
+                            // Show current tempo
+                            println!("Current tempo: {:.1} BPM", self.scheduler.get_bpm());
+                        } else {
+                            // Set tempo
+                            match tempo_str.parse::<f32>() {
+                                Ok(bpm) if bpm > 0.0 && bpm <= 400.0 => {
+                                    self.scheduler.set_bpm(bpm);
+                                    println!(
+                                        "{}",
+                                        format!("🎵 Tempo set to {:.1} BPM", bpm).bright_green()
+                                    );
+                                }
+                                _ => {
+                                    println!(
+                                        "{}",
+                                        "Error: Invalid tempo. Use a value between 1-400 BPM"
+                                            .bright_red()
+                                    );
+                                }
+                            }
+                        }
                         self.print_help();
                         continue;
                     } else {

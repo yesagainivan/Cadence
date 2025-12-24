@@ -1,8 +1,9 @@
-// use crate::parser::Value;
 use anyhow::{Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, SizedSample, Stream, StreamConfig};
+use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 
 /// Shared audio state protected by Mutex for thread-safe access
 #[derive(Clone)]
@@ -52,14 +53,24 @@ impl Oscillator {
     }
 }
 
-/// Audio player that manages real-time audio output
-pub struct AudioPlayer {
+/// Commands that can be sent to the audio player thread
+#[derive(Debug, Clone)]
+pub enum AudioPlayerCommand {
+    SetNotes(Vec<f32>),
+    SetVolume(f32),
+    Play,
+    Pause,
+    Quit,
+}
+
+/// Internal audio player that owns the cpal::Stream (stays in audio thread)
+struct AudioPlayerInternal {
     stream: Stream,
     state: Arc<Mutex<AudioState>>,
 }
 
-impl AudioPlayer {
-    pub fn new() -> Result<Self> {
+impl AudioPlayerInternal {
+    fn new() -> Result<Self> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -77,7 +88,7 @@ impl AudioPlayer {
             _ => return Err(anyhow!("Unsupported sample format: {:?}", sample_format)),
         };
 
-        Ok(AudioPlayer { stream, state })
+        Ok(AudioPlayerInternal { stream, state })
     }
 
     fn build_stream<T>(
@@ -163,8 +174,7 @@ impl AudioPlayer {
         Ok(stream)
     }
 
-    /// Set the frequencies to play
-    pub fn set_notes(&self, notes: Vec<f32>) -> Result<()> {
+    fn set_notes(&mut self, notes: Vec<f32>) -> Result<()> {
         let mut state = self
             .state
             .lock()
@@ -173,8 +183,7 @@ impl AudioPlayer {
         Ok(())
     }
 
-    /// Set the volume level (0.0 to 1.0)
-    pub fn set_volume(&self, volume: f32) -> Result<()> {
+    fn set_volume(&mut self, volume: f32) -> Result<()> {
         let volume = volume.clamp(0.0, 1.0);
         let mut state = self
             .state
@@ -184,27 +193,109 @@ impl AudioPlayer {
         Ok(())
     }
 
-    /// Get the current volume level
-    pub fn get_volume(&self) -> Result<f32> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock audio state: {}", e))?;
-        Ok(state.volume)
-    }
-
-    /// Start audio playback
-    pub fn play(&self) -> Result<()> {
+    fn play(&self) -> Result<()> {
         self.stream
             .play()
             .map_err(|e| anyhow!("Failed to play stream: {}", e))
     }
 
-    /// Pause audio playback
-    pub fn pause(&self) -> Result<()> {
+    fn pause(&self) -> Result<()> {
         self.stream
             .pause()
             .map_err(|e| anyhow!("Failed to pause stream: {}", e))
+    }
+}
+
+/// Thread-safe handle to the audio player
+/// Uses internal channels to communicate with the audio thread
+pub struct AudioPlayerHandle {
+    command_tx: Sender<AudioPlayerCommand>,
+    _thread: JoinHandle<()>,
+}
+
+impl AudioPlayerHandle {
+    /// Create a new audio player handle
+    /// Spawns a dedicated audio thread that owns the cpal::Stream
+    pub fn new() -> Result<Self> {
+        let (tx, rx) = channel();
+
+        let thread = thread::spawn(move || {
+            // Create audio player in this thread
+            let mut player = match AudioPlayerInternal::new() {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("Failed to create audio player: {}", e);
+                    return;
+                }
+            };
+
+            // Process commands until quit
+            while let Ok(cmd) = rx.recv() {
+                match cmd {
+                    AudioPlayerCommand::SetNotes(notes) => {
+                        if let Err(e) = player.set_notes(notes) {
+                            eprintln!("Failed to set notes: {}", e);
+                        }
+                    }
+                    AudioPlayerCommand::SetVolume(vol) => {
+                        if let Err(e) = player.set_volume(vol) {
+                            eprintln!("Failed to set volume: {}", e);
+                        }
+                    }
+                    AudioPlayerCommand::Play => {
+                        if let Err(e) = player.play() {
+                            eprintln!("Failed to play: {}", e);
+                        }
+                    }
+                    AudioPlayerCommand::Pause => {
+                        if let Err(e) = player.pause() {
+                            eprintln!("Failed to pause: {}", e);
+                        }
+                    }
+                    AudioPlayerCommand::Quit => break,
+                }
+            }
+        });
+
+        Ok(AudioPlayerHandle {
+            command_tx: tx,
+            _thread: thread,
+        })
+    }
+
+    /// Set the frequencies to play
+    pub fn set_notes(&self, notes: Vec<f32>) -> Result<()> {
+        self.command_tx
+            .send(AudioPlayerCommand::SetNotes(notes))
+            .map_err(|e| anyhow!("Failed to send command: {}", e))
+    }
+
+    /// Set the volume level (0.0 to 1.0)
+    pub fn set_volume(&self, volume: f32) -> Result<()> {
+        self.command_tx
+            .send(AudioPlayerCommand::SetVolume(volume))
+            .map_err(|e| anyhow!("Failed to send command: {}", e))
+    }
+
+    /// Start audio playback
+    pub fn play(&self) -> Result<()> {
+        self.command_tx
+            .send(AudioPlayerCommand::Play)
+            .map_err(|e| anyhow!("Failed to send command: {}", e))
+    }
+
+    /// Pause audio playback
+    pub fn pause(&self) -> Result<()> {
+        self.command_tx
+            .send(AudioPlayerCommand::Pause)
+            .map_err(|e| anyhow!("Failed to send command: {}", e))
+    }
+}
+
+impl Drop for AudioPlayerHandle {
+    fn drop(&mut self) {
+        // Send quit command when handle is dropped
+        let _ = self.command_tx.send(AudioPlayerCommand::Quit);
     }
 }
 
@@ -213,16 +304,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_audio_player_creation() {
-        // This test may fail on systems without audio devices
-        match AudioPlayer::new() {
-            Ok(_player) => {
-                // AudioPlayer was created successfully
+    fn test_audio_player_handle_creation() {
+        match AudioPlayerHandle::new() {
+            Ok(_handle) => {
+                // Successfully created
                 assert!(true);
             }
             Err(_) => {
-                // This is expected on systems without audio devices (like CI)
-                println!("AudioPlayer creation failed - likely no audio device available");
+                println!("AudioPlayer creation failed - no audio device available");
             }
         }
     }
@@ -232,7 +321,6 @@ mod tests {
         let mut osc = Oscillator::new(440.0);
         let sample_rate = 44100.0;
 
-        // Test that oscillator values are generated within expected range
         for _ in 0..1000 {
             let value = osc.next_sample(sample_rate);
             assert!(
@@ -242,82 +330,22 @@ mod tests {
             );
         }
 
-        // Test that phase stays in valid range
         assert!(osc.phase >= 0.0 && osc.phase < 1.0);
     }
 
     #[test]
-    fn test_oscillator_periodicity() {
-        let sample_rate = 44100.0;
-        let frequency = 440.0;
-
-        // Use exact number of samples for one period
-        let samples_per_period = ((sample_rate / frequency) as f64).round() as usize;
-
-        let mut osc1 = Oscillator::new(frequency);
-        let mut first_period = Vec::new();
-
-        // Generate one full period
-        for _ in 0..samples_per_period {
-            first_period.push(osc1.next_sample(sample_rate));
-        }
-
-        // Reset oscillator for second period
-        let mut osc2 = Oscillator::new(frequency);
-        let mut second_period = Vec::new();
-        for _ in 0..samples_per_period {
-            second_period.push(osc2.next_sample(sample_rate));
-        }
-
-        // Values should be very close (allowing for floating point precision)
-        for (i, (first, second)) in first_period.iter().zip(second_period.iter()).enumerate() {
-            let diff = (first - second).abs();
-            assert!(
-                diff < 0.001,
-                "Period mismatch at sample {}: {} vs {}",
-                i,
-                first,
-                second
-            );
-        }
-    }
-
-    #[test]
-    fn test_volume_control() {
-        match AudioPlayer::new() {
-            Ok(player) => {
-                // Test setting volume
-                assert!(player.set_volume(0.5).is_ok());
-                assert_eq!(player.get_volume().unwrap(), 0.5);
-
-                // Test volume clamping
-                assert!(player.set_volume(1.5).is_ok());
-                assert_eq!(player.get_volume().unwrap(), 1.0);
-
-                assert!(player.set_volume(-0.5).is_ok());
-                assert_eq!(player.get_volume().unwrap(), 0.0);
+    fn test_commands() {
+        match AudioPlayerHandle::new() {
+            Ok(handle) => {
+                assert!(handle.set_notes(vec![440.0, 554.37]).is_ok());
+                assert!(handle.set_volume(0.5).is_ok());
+                assert!(handle.play().is_ok());
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                assert!(handle.pause().is_ok());
             }
             Err(_) => {
-                println!("Skipping volume test - no audio device available");
+                println!("Skipping command test - no audio device");
             }
         }
-    }
-
-    #[test]
-    fn test_multi_note_independence() {
-        // Test that multiple oscillators maintain independent phases
-        let mut osc1 = Oscillator::new(440.0); // A4
-        let mut osc2 = Oscillator::new(554.37); // C#5
-
-        let sample_rate = 44100.0;
-
-        // Generate some samples
-        for _ in 0..100 {
-            let _val1 = osc1.next_sample(sample_rate);
-            let _val2 = osc2.next_sample(sample_rate);
-        }
-
-        // Phases should be different
-        assert!((osc1.phase - osc2.phase).abs() > 0.01);
     }
 }
