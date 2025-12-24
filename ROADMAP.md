@@ -82,9 +82,12 @@ A production-ready music programming language for chord progressions and harmoni
 - [ ] Mini-notation parser
 
 ### 3.3 Multiple Voices
-- [ ] Named tracks/voices
-- [ ] Parallel execution
-- [ ] Per-voice volume/effects
+- [x] Named tracks/voices (`track N { ... }`)
+- [x] Parallel execution (multiple PlaybackEngines)
+- [x] Per-voice volume (`track N { volume 50 }`)
+- [x] `tracks` command to list active tracks
+- [x] 16-track limit with graceful fallback
+- [x] `stop` stops all tracks, `track N stop` stops specific
 
 ---
 
@@ -135,8 +138,10 @@ A production-ready music programming language for chord progressions and harmoni
 | Variable Resolution | ✅ Environment-aware evaluation |
 | File Loading | ✅ load "file.cadence" works |
 | Script Audio | ✅ play/tempo/stop trigger audio |
-| Playback Queue | ✅ FIFO queue for `play X queue` |
+| Playback Queue | ✅ FIFO queue with `try_start_next_queued()` |
 | Control Flow | ✅ `repeat`, `loop`, `break`, `continue` |
+| Multitrack | ✅ `track N { }`, 16-track limit, `tracks` command |
+| Voice Leading | ✅ `smooth_voice_leading()` with octave normalization |
 | Live Coding | ❌ Not started |
 
 ---
@@ -155,6 +160,5 @@ A production-ready music programming language for chord progressions and harmoni
 1. ~~**Audio Polish** - Fix click on start/stop, silent REPL startup~~ ✅ Done
 2. ~~**Control Flow Execution** - Make `loop {}` and `repeat {}` actually execute~~ ✅ Done
 3. ~~**Error Line Info** - Improve error messages with line/column info~~ ✅ Done
-4. **Multi-track/Voices** - Named tracks for simultaneous playback (Phase 4)
-   - *Inspired by TidalCycles d1/d2/d3... pattern - each track plays independently*
-   - Would require: multiple PlaybackEngines, mixer, different timbres
+4. ~~**Multi-track/Voices** - Named tracks for simultaneous playback~~ ✅ Done
+5. **Live Coding** - File watch, hot-reload, pattern system (Phase 3)

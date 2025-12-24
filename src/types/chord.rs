@@ -198,6 +198,25 @@ impl Chord {
         }
     }
 
+    /// Normalize the chord to a target octave (default: 4)
+    ///
+    /// This shifts all notes so the bass note is in the target octave,
+    /// preserving the relative positions of all voices.
+    /// Useful after inversions to prevent octave drift.
+    pub fn normalize_octave(self, target_octave: i8) -> Self {
+        if let Some(bass) = self.bass_note {
+            let current_octave = bass.octave();
+            let shift = (target_octave - current_octave) * 12;
+            self.transpose(shift)
+        } else if let Some(first) = self.input_order.first() {
+            let current_octave = first.octave();
+            let shift = (target_octave - current_octave) * 12;
+            self.transpose(shift)
+        } else {
+            self
+        }
+    }
+
     /// Create the first inversion of the chord
     pub fn invert(self) -> Self {
         self.invert_n(1)

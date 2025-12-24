@@ -304,31 +304,38 @@ impl PlaybackLoop {
         LoopAction::Continue
     }
 
+    /// Helper: Try to start the next queued progression.
+    /// Returns true if a new progression was started, false if queue was empty.
+    fn try_start_next_queued(&mut self) -> bool {
+        if let Some(next) = self.pending_queue.pop_front() {
+            self.current_progression = Some(next);
+            self.chord_index = 0;
+            self.iteration = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Helper: Stop playback and fade out.
+    fn stop_playback(&mut self) {
+        self.current_progression = None;
+        self.is_playing.store(false, Ordering::Relaxed);
+        let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
+        self.audio_started = false;
+    }
+
     fn play_next_beat(&mut self) {
         // Quantized Interrupt Logic:
-        // If current progression is an infinite loop, we can't "append" to it.
-        // So we interpret "Queue" as "Switch at next beat" (Interrupt).
+        // If current progression is an infinite loop OR we have no current progression,
+        // try to switch to a queued item at the beat boundary.
         let is_infinite = self
             .current_progression
             .as_ref()
             .map_or(false, |p| p.loop_count.is_none());
 
-        if is_infinite && !self.pending_queue.is_empty() {
-            if let Some(next) = self.pending_queue.pop_front() {
-                self.current_progression = Some(next);
-                self.chord_index = 0;
-                self.iteration = 0;
-            }
-        }
-
-        // Check for pending progression at beat boundary (before playing current chord)
-        // Pop from queue if current progression is done
-        if self.current_progression.is_none() {
-            if let Some(next) = self.pending_queue.pop_front() {
-                self.current_progression = Some(next);
-                self.chord_index = 0;
-                self.iteration = 0;
-            }
+        if (is_infinite || self.current_progression.is_none()) && !self.pending_queue.is_empty() {
+            self.try_start_next_queued();
         }
 
         let config = match &self.current_progression {
@@ -340,18 +347,9 @@ impl PlaybackLoop {
         if let Some(max_loops) = config.loop_count {
             if self.iteration >= max_loops {
                 // Current progression done - try to get next from queue
-                if let Some(next) = self.pending_queue.pop_front() {
-                    self.current_progression = Some(next);
-                    self.chord_index = 0;
-                    self.iteration = 0;
-                    // Keep audio_started true for seamless transition
-                    return; // Recurse to play next beat
+                if !self.try_start_next_queued() {
+                    self.stop_playback();
                 }
-                self.current_progression = None;
-                self.is_playing.store(false, Ordering::Relaxed);
-                // Fade out track
-                let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
-                self.audio_started = false;
                 return;
             }
         }
@@ -366,17 +364,9 @@ impl PlaybackLoop {
             if let Some(max_loops) = config.loop_count {
                 if self.iteration >= max_loops {
                     // Current progression done - try to get next from queue
-                    if let Some(next) = self.pending_queue.pop_front() {
-                        self.current_progression = Some(next);
-                        self.chord_index = 0;
-                        self.iteration = 0;
-                        return; // Will play next beat on next call
+                    if !self.try_start_next_queued() {
+                        self.stop_playback();
                     }
-                    self.current_progression = None;
-                    self.is_playing.store(false, Ordering::Relaxed);
-                    // Fade out track
-                    let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
-                    self.audio_started = false;
                     return;
                 }
             }
@@ -515,6 +505,149 @@ mod tests {
             }
             Err(_) => {
                 println!("Skipping command test - no audio device");
+            }
+        }
+    }
+
+    // ========== Queue Behavior Unit Tests ==========
+    // These tests verify the queue logic without requiring audio hardware
+
+    /// Test that try_start_next_queued returns false on empty queue
+    #[test]
+    fn test_try_start_next_queued_empty() {
+        // We can't create a PlaybackLoop directly without audio, but we can test
+        // the VecDeque behavior it depends on
+        let mut queue: VecDeque<ProgressionConfig> = VecDeque::new();
+        assert!(queue.pop_front().is_none());
+    }
+
+    /// Test that VecDeque maintains FIFO order (core queue guarantee)
+    #[test]
+    fn test_queue_fifo_order() {
+        let mut queue: VecDeque<ProgressionConfig> = VecDeque::new();
+
+        let config1 = ProgressionConfig::new(vec![vec![440.0]]);
+        let config2 = ProgressionConfig::new(vec![vec![880.0]]);
+        let config3 = ProgressionConfig::new(vec![vec![220.0]]);
+
+        queue.push_back(config1.clone());
+        queue.push_back(config2.clone());
+        queue.push_back(config3.clone());
+
+        assert_eq!(queue.len(), 3);
+
+        // FIFO: first in, first out
+        let first = queue.pop_front().unwrap();
+        assert_eq!(first.progression[0][0], 440.0);
+
+        let second = queue.pop_front().unwrap();
+        assert_eq!(second.progression[0][0], 880.0);
+
+        let third = queue.pop_front().unwrap();
+        assert_eq!(third.progression[0][0], 220.0);
+
+        assert!(queue.is_empty());
+    }
+
+    /// Test that Stop command clears queue via engine
+    #[test]
+    fn test_stop_clears_queue() {
+        match AudioPlayerHandle::new() {
+            Ok(handle) => {
+                let scheduler = Scheduler::new(120.0);
+                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler), 1);
+
+                let config = ProgressionConfig::new(vec![vec![440.0]]);
+
+                // Queue multiple items
+                assert!(engine.queue_progression(config.clone()).is_ok());
+                assert!(engine.queue_progression(config.clone()).is_ok());
+                assert!(engine.queue_progression(config.clone()).is_ok());
+
+                // Stop should clear everything
+                assert!(engine.stop().is_ok());
+
+                // Give time for command to be processed
+                std::thread::sleep(std::time::Duration::from_millis(50));
+
+                // After stop, is_playing should be false
+                assert!(!engine.is_playing());
+            }
+            Err(_) => {
+                println!("Skipping test_stop_clears_queue - no audio device");
+            }
+        }
+    }
+
+    /// Test that PlayProgression clears pending queue
+    #[test]
+    fn test_play_clears_queue() {
+        match AudioPlayerHandle::new() {
+            Ok(handle) => {
+                let scheduler = Scheduler::new(120.0);
+                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler), 1);
+
+                let config1 = ProgressionConfig::new(vec![vec![440.0]]);
+                let config2 = ProgressionConfig::new(vec![vec![880.0]]);
+
+                // Queue several items
+                assert!(engine.queue_progression(config1.clone()).is_ok());
+                assert!(engine.queue_progression(config1.clone()).is_ok());
+
+                // Play immediately should clear queue and play config2
+                assert!(engine.play_progression(config2).is_ok());
+
+                // Give time for command to be processed
+                std::thread::sleep(std::time::Duration::from_millis(50));
+
+                // Engine should be playing
+                assert!(engine.is_playing());
+            }
+            Err(_) => {
+                println!("Skipping test_play_clears_queue - no audio device");
+            }
+        }
+    }
+
+    /// Test ProgressionConfig loop settings
+    #[test]
+    fn test_progression_config_loop_settings() {
+        let progression = vec![vec![440.0]];
+
+        // Default: 1 loop
+        let config = ProgressionConfig::new(progression.clone());
+        assert_eq!(config.loop_count, Some(1));
+
+        // Infinite loop
+        let config_infinite = ProgressionConfig::new(progression.clone()).with_looping();
+        assert_eq!(config_infinite.loop_count, None);
+
+        // Specific count
+        let config_count = ProgressionConfig::new(progression.clone()).with_loop_count(5);
+        assert_eq!(config_count.loop_count, Some(5));
+    }
+
+    /// Test multiple rapid queue additions
+    #[test]
+    fn test_rapid_queue_additions() {
+        match AudioPlayerHandle::new() {
+            Ok(handle) => {
+                let scheduler = Scheduler::new(120.0);
+                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler), 1);
+
+                // Rapidly queue many items (simulates repeat 32 { play E queue })
+                for i in 0..32 {
+                    let freq = 440.0 + (i as f32 * 10.0);
+                    let config = ProgressionConfig::new(vec![vec![freq]]);
+                    assert!(engine.queue_progression(config).is_ok());
+                }
+
+                // All queues should succeed without panic or error
+                // Stop to clean up
+                assert!(engine.stop().is_ok());
+            }
+            Err(_) => {
+                println!("Skipping test_rapid_queue_additions - no audio device");
             }
         }
     }

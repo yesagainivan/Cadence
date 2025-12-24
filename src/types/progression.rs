@@ -185,9 +185,17 @@ impl Progression {
         let mut best_chord = target_chord.clone();
         let mut best_score = f32::INFINITY;
 
+        // Get the target octave from the from_chord's bass (to keep progression in same range)
+        let target_octave = from_chord.bass().map(|b| b.octave()).unwrap_or(4);
+
         // Try root position and all inversions
         for inversion in 0..target_chord.len() {
-            let test_chord = target_chord.clone().invert_n(inversion);
+            // Invert and normalize to the target octave to prevent drift
+            let test_chord = target_chord
+                .clone()
+                .invert_n(inversion)
+                .normalize_octave(target_octave);
+
             let voice_leading = VoiceLeading::analyze(from_chord, &test_chord);
             let score = voice_leading.smoothness_score();
 
@@ -1049,9 +1057,10 @@ mod tests {
         let inverted_prog = prog.map(|chord| chord.invert());
 
         // First chord should be C major first inversion
+        // Compare pitch_class because octave changes during inversion
         let first_chord = &inverted_prog[0];
-        assert_eq!(first_chord.bass(), Some("E".parse().unwrap()));
-        assert_eq!(first_chord.root(), Some("C".parse().unwrap()));
+        assert_eq!(first_chord.bass().unwrap().pitch_class(), 4); // E in bass
+        assert_eq!(first_chord.root().unwrap().pitch_class(), 0); // C still root
     }
 
     #[test]

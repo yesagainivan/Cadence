@@ -50,10 +50,28 @@ impl Repl {
         })
     }
 
+    /// Maximum number of tracks allowed
+    const MAX_TRACKS: usize = 16;
+
     /// Get or create a playback engine for a specific track
     fn get_engine(&mut self, track_id: usize) -> Arc<PlaybackEngine> {
         if let Some(engine) = self.playback_engines.get(&track_id) {
             return engine.clone();
+        }
+
+        // Check track limit before creating new track
+        if self.playback_engines.len() >= Self::MAX_TRACKS {
+            println!(
+                "{}",
+                format!(
+                    "⚠️  Maximum {} tracks reached. Cannot create track {}.",
+                    Self::MAX_TRACKS,
+                    track_id
+                )
+                .bright_yellow()
+            );
+            // Return track 1 as fallback
+            return self.playback_engines.get(&1).unwrap().clone();
         }
 
         let engine = Arc::new(PlaybackEngine::new(
@@ -63,6 +81,29 @@ impl Repl {
         ));
         self.playback_engines.insert(track_id, engine.clone());
         engine
+    }
+
+    /// List all active tracks and their status
+    pub fn list_tracks(&self) -> String {
+        let mut track_ids: Vec<_> = self.playback_engines.keys().collect();
+        track_ids.sort();
+
+        let mut output = format!(
+            "🎛️  Active Tracks ({}/{}):\n",
+            track_ids.len(),
+            Self::MAX_TRACKS
+        );
+        for &id in &track_ids {
+            if let Some(engine) = self.playback_engines.get(id) {
+                let status = if engine.is_playing() {
+                    "▶ playing".bright_green()
+                } else {
+                    "⏹ stopped".bright_black()
+                };
+                output.push_str(&format!("  Track {}: {}\n", id, status));
+            }
+        }
+        output
     }
 
     /// Execute an interpreter action (triggers actual audio/state changes)
@@ -185,6 +226,12 @@ impl Repl {
                         continue;
                     }
                     self.editor.add_history_entry(line.to_owned())?;
+
+                    // Handle REPL-specific commands (needs access to playback_engines)
+                    if line == "tracks" {
+                        println!("{}", self.list_tracks());
+                        continue;
+                    }
 
                     // Try to execute as a command
                     match registry.execute(line, &mut ctx) {

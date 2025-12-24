@@ -749,9 +749,10 @@ mod tests {
         match result {
             Value::Progression(progression) => {
                 assert_eq!(progression.len(), 2);
-                // First chord should be C major first inversion (E in bass)
-                assert_eq!(progression[0].bass(), Some("E".parse().unwrap()));
-                assert_eq!(progression[0].root(), Some("C".parse().unwrap()));
+                // First chord should be C major first inversion (E in bass, C root)
+                // Compare pitch_class because octave changes during inversion
+                assert_eq!(progression[0].bass().unwrap().pitch_class(), 4); // E
+                assert_eq!(progression[0].root().unwrap().pitch_class(), 0); // C
             }
             _ => panic!("Expected progression value"),
         }
@@ -796,8 +797,10 @@ mod tests {
 
         match result {
             Value::Chord(chord) => {
-                assert_eq!(chord.bass(), Some("E".parse().unwrap())); // E in bass
-                assert_eq!(chord.root(), Some("C".parse().unwrap())); // C still root
+                // After inversion, bass becomes E (pitch class 4), root is still C (pitch class 0)
+                // We compare pitch_class because the octave changes during inversion
+                assert_eq!(chord.bass().unwrap().pitch_class(), 4); // E in bass
+                assert_eq!(chord.root().unwrap().pitch_class(), 0); // C still root
             }
             _ => panic!("Expected chord value"),
         }

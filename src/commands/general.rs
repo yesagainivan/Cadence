@@ -186,6 +186,10 @@ fn print_help() {
     println!("  {}    - Set tempo", "tempo <bpm>".cyan());
     println!();
     println!("{}", "Other Commands:".green());
+    println!(
+        "  {}            - List active tracks",
+        "tracks".bright_green()
+    );
     println!("  {}              - Show this help", "help".bright_green());
     println!("  {}              - Exit the REPL", "quit".bright_red());
 }
