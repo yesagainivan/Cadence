@@ -4,7 +4,7 @@ use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::playback_engine::PlaybackEngine;
 use crate::audio::scheduler::Scheduler;
 use crate::commands::{CommandContext, CommandResult, create_registry};
-use crate::parser::eval;
+use crate::parser::{Interpreter, parse_statements};
 use anyhow::Result;
 use colored::*;
 use rustyline::error::ReadlineError;
@@ -17,6 +17,8 @@ pub struct Repl {
     audio_handle: Arc<AudioPlayerHandle>,
     scheduler: Arc<Scheduler>,
     playback_engine: Arc<PlaybackEngine>,
+    /// Interpreter for scripting constructs
+    interpreter: Interpreter,
 }
 
 impl Repl {
@@ -34,6 +36,7 @@ impl Repl {
             audio_handle,
             scheduler,
             playback_engine,
+            interpreter: Interpreter::new(),
         })
     }
 
@@ -91,18 +94,24 @@ impl Repl {
                             println!("{} {}", "Error:".bright_red().bold(), e.red());
                         }
                         CommandResult::NotACommand => {
-                            // Not a command, try evaluating as expression
-                            match eval(line) {
-                                Ok(value) => {
-                                    println!("{}", value);
+                            // Parse and execute as statement(s)
+                            match parse_statements(line) {
+                                Ok(program) => {
+                                    match self.interpreter.run_program(&program) {
+                                        Ok(Some(value)) => println!("{}", value),
+                                        Ok(None) => {} // Statement with no value (e.g., tempo)
+                                        Err(e) => println!(
+                                            "{} {}",
+                                            "Error:".bright_red().bold(),
+                                            e.to_string().red()
+                                        ),
+                                    }
                                 }
-                                Err(e) => {
-                                    println!(
-                                        "{} {}",
-                                        "Error:".bright_red().bold(),
-                                        e.to_string().red()
-                                    );
-                                }
+                                Err(e) => println!(
+                                    "{} {}",
+                                    "Parse error:".bright_red().bold(),
+                                    e.to_string().red()
+                                ),
                             }
                         }
                     }
@@ -152,56 +161,66 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    fn run_statement(input: &str) -> bool {
+        let program = parse_statements(input);
+        if program.is_err() {
+            return false;
+        }
+        let mut interpreter = Interpreter::new();
+        interpreter.run_program(&program.unwrap()).is_ok()
+    }
+
     #[test]
     fn test_evaluate_expression() {
         // Test basic note evaluation
-        let result = eval("C");
-        assert!(result.is_ok());
+        assert!(run_statement("C"));
 
         // Test chord evaluation
-        let result = eval("[C, E, G]");
-        assert!(result.is_ok());
+        assert!(run_statement("[C, E, G]"));
 
         // Test arithmetic
-        let result = eval("[C, E, G] + 2");
-        assert!(result.is_ok());
+        assert!(run_statement("[C, E, G] + 2"));
 
         // Test function call
-        let result = eval("invert([C, E, G])");
-        assert!(result.is_ok());
+        assert!(run_statement("invert([C, E, G])"));
 
         // Test error handling
-        let result = eval("invalid syntax @#$");
-        assert!(result.is_err());
+        assert!(!run_statement("invalid syntax @#$"));
     }
 
     #[test]
     fn test_evaluate_set_operations() {
         // Test intersection
-        let result = eval("[C, E, G] & [A, C, E]");
-        assert!(result.is_ok());
+        assert!(run_statement("[C, E, G] & [A, C, E]"));
 
         // Test union
-        let result = eval("[C, E, G] | [F, A, C]");
-        assert!(result.is_ok());
+        assert!(run_statement("[C, E, G] | [F, A, C]"));
 
         // Test difference
-        let result = eval("[C, E, G] ^ [A, C, E]");
-        assert!(result.is_ok());
+        assert!(run_statement("[C, E, G] ^ [A, C, E]"));
     }
 
     #[test]
     fn test_evaluate_complex_expressions() {
         // Test nested operations
-        let result = eval("invert([C, E, G] + 2)");
-        assert!(result.is_ok());
+        assert!(run_statement("invert([C, E, G] + 2)"));
 
         // Test function composition
-        let result = eval("bass(invert([C, E, G]))");
-        assert!(result.is_ok());
+        assert!(run_statement("bass(invert([C, E, G]))"));
 
         // Test complex set operations
-        let result = eval("[C, E, G] + 2 & [A, C, E]");
-        assert!(result.is_ok());
+        assert!(run_statement("[C, E, G] + 2 & [A, C, E]"));
+    }
+
+    #[test]
+    fn test_scripting_statements() {
+        // Test tempo
+        assert!(run_statement("tempo 120"));
+
+        // Test stop
+        assert!(run_statement("stop"));
+
+        // Test let (basic parsing)
+        assert!(run_statement("let x = [C, E, G]"));
     }
 }
