@@ -305,6 +305,22 @@ impl PlaybackLoop {
     }
 
     fn play_next_beat(&mut self) {
+        // Quantized Interrupt Logic:
+        // If current progression is an infinite loop, we can't "append" to it.
+        // So we interpret "Queue" as "Switch at next beat" (Interrupt).
+        let is_infinite = self
+            .current_progression
+            .as_ref()
+            .map_or(false, |p| p.loop_count.is_none());
+
+        if is_infinite && !self.pending_queue.is_empty() {
+            if let Some(next) = self.pending_queue.pop_front() {
+                self.current_progression = Some(next);
+                self.chord_index = 0;
+                self.iteration = 0;
+            }
+        }
+
         // Check for pending progression at beat boundary (before playing current chord)
         // Pop from queue if current progression is done
         if self.current_progression.is_none() {
