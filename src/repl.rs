@@ -9,6 +9,7 @@ use anyhow::Result;
 use colored::*;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result as RustylineResult};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Interactive REPL for the Cadence language
@@ -16,7 +17,8 @@ pub struct Repl {
     editor: DefaultEditor,
     audio_handle: Arc<AudioPlayerHandle>,
     scheduler: Arc<Scheduler>,
-    playback_engine: Arc<PlaybackEngine>,
+    // Map of track ID to playback engine
+    playback_engines: HashMap<usize, Arc<PlaybackEngine>>,
     /// Interpreter for scripting constructs
     interpreter: Interpreter,
 }
@@ -28,20 +30,43 @@ impl Repl {
         let audio_handle =
             Arc::new(AudioPlayerHandle::new().expect("Failed to create audio player"));
         let scheduler = Arc::new(Scheduler::new(90.0)); // Default 90 BPM
-        let playback_engine =
-            Arc::new(PlaybackEngine::new(audio_handle.clone(), scheduler.clone()));
+
+        // Initialize with default track 1
+        let mut playback_engines = HashMap::new();
+        let default_track = 1;
+        let engine = Arc::new(PlaybackEngine::new(
+            audio_handle.clone(),
+            scheduler.clone(),
+            default_track,
+        ));
+        playback_engines.insert(default_track, engine);
 
         Ok(Repl {
             editor,
             audio_handle,
             scheduler,
-            playback_engine,
+            playback_engines,
             interpreter: Interpreter::new(),
         })
     }
 
+    /// Get or create a playback engine for a specific track
+    fn get_engine(&mut self, track_id: usize) -> Arc<PlaybackEngine> {
+        if let Some(engine) = self.playback_engines.get(&track_id) {
+            return engine.clone();
+        }
+
+        let engine = Arc::new(PlaybackEngine::new(
+            self.audio_handle.clone(),
+            self.scheduler.clone(),
+            track_id,
+        ));
+        self.playback_engines.insert(track_id, engine.clone());
+        engine
+    }
+
     /// Execute an interpreter action (triggers actual audio/state changes)
-    fn execute_action(&self, action: InterpreterAction, _ctx: &mut CommandContext) {
+    fn execute_action(&mut self, action: InterpreterAction, _ctx: &mut CommandContext) {
         use crate::audio::playback_engine::ProgressionConfig;
 
         match action {
@@ -49,7 +74,10 @@ impl Repl {
                 value,
                 looping,
                 queue,
+                track_id,
             } => {
+                let engine = self.get_engine(track_id);
+
                 // Convert value to frequencies and create config
                 let frequencies: Vec<Vec<f32>> = match value {
                     crate::parser::Value::Chord(chord) => {
@@ -74,16 +102,16 @@ impl Repl {
                 }
 
                 if queue {
-                    if let Err(e) = self.playback_engine.queue_progression(config) {
+                    if let Err(e) = engine.queue_progression(config) {
                         println!("{} {}", "Playback error:".red(), e);
                     } else {
-                        println!("🔁 Queued for next beat...");
+                        println!("🔁 Queued for next beat... (Track {})", track_id);
                     }
                 } else {
-                    if let Err(e) = self.playback_engine.play_progression(config) {
+                    if let Err(e) = engine.play_progression(config) {
                         println!("{} {}", "Playback error:".red(), e);
                     } else {
-                        println!("🔊 Audio playback started.");
+                        println!("🔊 Audio playback started (Track {}).", track_id);
                     }
                 }
             }
@@ -91,14 +119,29 @@ impl Repl {
                 self.scheduler.set_bpm(bpm);
                 // Already printed by interpreter
             }
-            InterpreterAction::SetVolume(_vol) => {
-                // Volume control would go here
-            }
-            InterpreterAction::Stop => {
-                if let Err(e) = self.playback_engine.stop() {
-                    println!("{} {}", "Stop error:".red(), e);
+            InterpreterAction::SetVolume { volume, track_id } => {
+                let engine = self.get_engine(track_id);
+                if let Err(e) = engine.set_volume(volume) {
+                    println!("{} {} (Track {})", "Volume error:".red(), e, track_id);
                 }
-                // Already printed by interpreter
+            }
+            InterpreterAction::Stop { track_id } => {
+                match track_id {
+                    Some(id) => {
+                        let engine = self.get_engine(id);
+                        if let Err(e) = engine.stop() {
+                            println!("{} {} (Track {})", "Stop error:".red(), e, id);
+                        }
+                    }
+                    None => {
+                        // Stop all tracks
+                        for (id, engine) in &self.playback_engines {
+                            if let Err(e) = engine.stop() {
+                                println!("{} {} (Track {})", "Stop error:".red(), e, id);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -124,11 +167,13 @@ impl Repl {
         );
 
         // Create command registry and context
+        // Use track 1 engine for global context for now
+        let default_engine = self.get_engine(1);
         let registry = create_registry();
         let mut ctx = CommandContext::new(
             self.audio_handle.clone(),
             self.scheduler.clone(),
-            self.playback_engine.clone(),
+            default_engine,
         );
 
         loop {

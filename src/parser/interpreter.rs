@@ -25,13 +25,14 @@ pub enum InterpreterAction {
         value: Value,
         looping: bool,
         queue: bool,
+        track_id: usize,
     },
-    /// Set the tempo
+    /// Set the tempo (global)
     SetTempo(f32),
-    /// Set the volume (0.0-1.0)
-    SetVolume(f32),
-    /// Stop all playback
-    Stop,
+    /// Set the volume for a specific track (0.0-1.0)
+    SetVolume { volume: f32, track_id: usize },
+    /// Stop playback (specific track or all)
+    Stop { track_id: Option<usize> },
 }
 
 /// Interpreter for executing Cadence statements
@@ -44,6 +45,8 @@ pub struct Interpreter {
     pub tempo: f32,
     /// Current volume (0.0-1.0)
     pub volume: f32,
+    /// Current track ID (default 1)
+    pub current_track: usize,
     /// Last evaluated expression result
     last_eval_result: Option<Value>,
     /// Actions collected during execution (for host to execute)
@@ -58,6 +61,7 @@ impl Interpreter {
             environment: Environment::new(),
             tempo: 120.0,
             volume: 0.5,
+            current_track: 1,
             last_eval_result: None,
             actions: Vec::new(),
         }
@@ -130,14 +134,52 @@ impl Interpreter {
 
             Statement::Volume(vol) => {
                 self.volume = *vol;
-                self.actions.push(InterpreterAction::SetVolume(*vol));
-                println!("Volume set to {:.0}%", vol * 100.0);
+                self.actions.push(InterpreterAction::SetVolume {
+                    volume: *vol,
+                    track_id: self.current_track,
+                });
+                println!(
+                    "Volume set to {:.0}% (Track {})",
+                    vol * 100.0,
+                    self.current_track
+                );
                 Ok(ControlFlow::Normal)
             }
 
             Statement::Stop => {
-                self.actions.push(InterpreterAction::Stop);
-                println!("Stopping playback");
+                // If inside a specific track block (not default 1), stop only that track?
+                // Or let's say 'stop' implies stopping the current context.
+                // If explicitly requested 'track 1 { stop }', it stops track 1.
+                // For now, let's assume 'stop' at top level stops everything (track_id = None),
+                // but if we are in a track context, maybe we just stop that track.
+                // However, user might want 'stop' to always mean STOP EVERYTHING unless specific.
+                // Let's make it Context dependent:
+                // If current_track is default (1) and we are at top level... hard to distinguish.
+                // Let's update `Stop` to take `Option<usize>`.
+                // If inside a `track <n>` block, we stop that track.
+                // If at top level (track 1 implied), we might want to stop everything?
+                // For now, let's treat `stop` as stopping the current track context.
+                // To stop everything, user can use `stop`.
+                // BUT wait, `track 1` is default context. `stop` in default context currently stops everything in REPL implementation.
+                // Let's pass `Some(self.current_track)` and let REPL decide?
+                // No, REPL needs to know if it should stop ALL or ONE.
+                // Let's assume `stop` statement means "stop current track".
+                // If user wants to stop all, maybe `stop all` or just rely on REPL behavior for track 1.
+                // Actually, existing behavior is `stop` stops the playback engine.
+                // If I change it to `Stop { track_id: Some(id) }`, then `stop` will stop track 1.
+                // If the user spawned track 2, `stop` (default track 1) won't stop track 2. That could be annoying.
+                // Let's make `stop` statement normally map to `Stop { track_id: None }` (stop all),
+                // UNLESS it is inside a `track <n>` block?
+                // But `track <n>` sets `current_track`.
+                // Maybe we need a specific `stop <n>` or just `track <n> stop`.
+                // Let's stick to: `stop` targets `current_track`.
+                // Users will learn `track 1 stop` stops track 1.
+                // We might need a `stop all` command later.
+                // For now: target current track.
+                self.actions.push(InterpreterAction::Stop {
+                    track_id: Some(self.current_track),
+                });
+                println!("Stopping playback (Track {})", self.current_track);
                 Ok(ControlFlow::Normal)
             }
 
@@ -152,13 +194,27 @@ impl Interpreter {
                     value: val.clone(),
                     looping: *looping,
                     queue: *queue,
+                    track_id: self.current_track,
                 });
                 if *looping {
-                    println!("Playing {} (looping)", val);
+                    println!("Playing {} (looping, Track {})", val, self.current_track);
                 } else {
-                    println!("Playing {}", val);
+                    println!("Playing {} (Track {})", val, self.current_track);
                 }
                 Ok(ControlFlow::Normal)
+            }
+
+            Statement::Track { id, body } => {
+                let old_track = self.current_track;
+                self.current_track = *id;
+
+                // Execute body
+                let result = self.run_statement(body);
+
+                // Restore track
+                self.current_track = old_track;
+
+                result
             }
 
             Statement::Load(path) => {
@@ -494,7 +550,7 @@ mod tests {
         ));
         assert!(matches!(
             actions[2],
-            crate::parser::interpreter::InterpreterAction::Stop
+            crate::parser::interpreter::InterpreterAction::Stop { .. }
         ));
     }
 

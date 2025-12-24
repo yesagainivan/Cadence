@@ -116,6 +116,7 @@ impl StatementParser {
             Token::Tempo => self.parse_tempo_statement(),
             Token::Volume => self.parse_volume_statement(),
             Token::Load => self.parse_load_statement(),
+            Token::Track => self.parse_track_statement(),
             Token::Loop => self.parse_loop_statement(),
             Token::Repeat => self.parse_repeat_statement(),
             Token::If => self.parse_if_statement(),
@@ -254,6 +255,25 @@ impl StatementParser {
         self.advance();
 
         Ok(Statement::Load(path))
+    }
+
+    /// Parse: track <n> <statement> (or block)
+    fn parse_track_statement(&mut self) -> Result<Statement> {
+        self.expect(&Token::Track)?;
+
+        let id = match self.current() {
+            Token::Number(n) if *n > 0 => *n as usize,
+            Token::Number(_) => return Err(anyhow!("Track ID must be positive")),
+            _ => return Err(anyhow!("Expected track number after 'track'")),
+        };
+        self.advance();
+
+        let body = self.parse_statement()?;
+
+        Ok(Statement::Track {
+            id,
+            body: Box::new(body),
+        })
     }
 
     /// Parse: loop { statements }

@@ -92,6 +92,9 @@ pub enum Statement {
 
     /// Block of statements: { stmt1; stmt2; }
     Block(Vec<Statement>),
+
+    /// Track selector: track 1 { ... } or track 1 play ...
+    Track { id: usize, body: Box<Statement> },
 }
 
 impl fmt::Display for Statement {
@@ -131,6 +134,7 @@ impl fmt::Display for Statement {
             Statement::Load(path) => write!(f, "load \"{}\"", path),
             Statement::Comment(text) => write!(f, "// {}", text),
             Statement::Block(_) => write!(f, "{{ ... }}"),
+            Statement::Track { id, body } => write!(f, "track {} {}", id, body),
         }
     }
 }

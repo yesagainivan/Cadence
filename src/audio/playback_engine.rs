@@ -72,6 +72,8 @@ pub enum PlaybackCommand {
     QueueProgression(ProgressionConfig),
     /// Stop playback immediately
     Stop,
+    /// Set volume for this track
+    SetVolume(f32),
     /// Shutdown the playback engine
     Shutdown,
 }
@@ -81,23 +83,29 @@ pub struct PlaybackEngine {
     command_tx: Sender<PlaybackCommand>,
     is_playing: Arc<AtomicBool>,
     _thread: JoinHandle<()>,
+    pub track_id: usize,
 }
 
 impl PlaybackEngine {
     /// Create a new playback engine with a persistent playback thread
-    pub fn new(audio_handle: Arc<AudioPlayerHandle>, scheduler: Arc<Scheduler>) -> Self {
+    pub fn new(
+        audio_handle: Arc<AudioPlayerHandle>,
+        scheduler: Arc<Scheduler>,
+        track_id: usize,
+    ) -> Self {
         let (tx, rx) = channel();
         let is_playing = Arc::new(AtomicBool::new(false));
         let is_playing_clone = is_playing.clone();
 
         let thread = thread::spawn(move || {
-            PlaybackLoop::new(audio_handle, scheduler, rx, is_playing_clone).run();
+            PlaybackLoop::new(audio_handle, scheduler, rx, is_playing_clone, track_id).run();
         });
 
         PlaybackEngine {
             command_tx: tx,
             is_playing,
             _thread: thread,
+            track_id,
         }
     }
 
@@ -119,6 +127,13 @@ impl PlaybackEngine {
     pub fn stop(&self) -> Result<()> {
         self.command_tx
             .send(PlaybackCommand::Stop)
+            .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))
+    }
+
+    /// Set volume for this track
+    pub fn set_volume(&self, volume: f32) -> Result<()> {
+        self.command_tx
+            .send(PlaybackCommand::SetVolume(volume))
             .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))
     }
 
@@ -148,6 +163,7 @@ struct PlaybackLoop {
     chord_index: usize,
     iteration: usize,
     audio_started: bool,
+    track_id: usize,
 }
 
 impl PlaybackLoop {
@@ -156,6 +172,7 @@ impl PlaybackLoop {
         scheduler: Arc<Scheduler>,
         command_rx: Receiver<PlaybackCommand>,
         is_playing: Arc<AtomicBool>,
+        track_id: usize,
     ) -> Self {
         Self {
             audio_handle,
@@ -167,6 +184,7 @@ impl PlaybackLoop {
             chord_index: 0,
             iteration: 0,
             audio_started: false,
+            track_id,
         }
     }
 
@@ -194,8 +212,8 @@ impl PlaybackLoop {
             }
         }
 
-        // Clean up
-        let _ = self.audio_handle.pause();
+        // Clean up - pause specific track instead of master
+        let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
         self.is_playing.store(false, Ordering::Relaxed);
     }
 
@@ -228,6 +246,8 @@ impl PlaybackLoop {
 
                 // Don't start audio yet - it will start on first beat
                 self.audio_started = false;
+                // Ensure track volume is up (in case it was stopped)
+                let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
             }
             PlaybackCommand::QueueProgression(config) => {
                 // Queue for next beat boundary - add to FIFO queue
@@ -241,14 +261,19 @@ impl PlaybackLoop {
                     self.is_playing.store(true, Ordering::Relaxed);
                     self.scheduler.reset();
                     self.audio_started = false;
+                    let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
                 }
             }
             PlaybackCommand::Stop => {
                 self.current_progression = None;
                 self.pending_queue.clear();
                 self.is_playing.store(false, Ordering::Relaxed);
-                let _ = self.audio_handle.pause();
+                // Mute track instead of pausing master
+                let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
                 self.audio_started = false;
+            }
+            PlaybackCommand::SetVolume(vol) => {
+                let _ = self.audio_handle.set_track_volume(self.track_id, vol);
             }
             PlaybackCommand::Shutdown => {
                 return LoopAction::Shutdown;
@@ -286,7 +311,8 @@ impl PlaybackLoop {
                 }
                 self.current_progression = None;
                 self.is_playing.store(false, Ordering::Relaxed);
-                let _ = self.audio_handle.pause();
+                // Fade out track
+                let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
                 self.audio_started = false;
                 return;
             }
@@ -310,7 +336,8 @@ impl PlaybackLoop {
                     }
                     self.current_progression = None;
                     self.is_playing.store(false, Ordering::Relaxed);
-                    let _ = self.audio_handle.pause();
+                    // Fade out track
+                    let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
                     self.audio_started = false;
                     return;
                 }
@@ -319,12 +346,15 @@ impl PlaybackLoop {
 
         let chord_frequencies = &config.progression[self.chord_index];
 
-        // Set the notes (seamless - no pause needed)
-        if let Err(e) = self.audio_handle.set_notes(chord_frequencies.clone()) {
+        // Set the notes for this track (seamless - no pause needed)
+        if let Err(e) = self
+            .audio_handle
+            .set_track_notes(self.track_id, chord_frequencies.clone())
+        {
             eprintln!("Failed to set notes: {}", e);
         }
 
-        // Start audio if not already playing
+        // Start audio if not already playing (via master play)
         if !self.audio_started {
             if let Err(e) = self.audio_handle.play() {
                 eprintln!("Failed to start audio: {}", e);
@@ -342,9 +372,10 @@ impl PlaybackLoop {
         // Handle gap if specified
         let gap_ms = config.gap_duration.to_millis(self.scheduler.get_bpm());
         if gap_ms > 0 {
-            let _ = self.audio_handle.pause();
+            // Mute track for gap
+            let _ = self.audio_handle.set_track_notes(self.track_id, vec![]);
             self.scheduler.sleep(config.gap_duration);
-            let _ = self.audio_handle.play();
+            // Notes will be set again at start of next beat
         }
     }
 
@@ -357,9 +388,12 @@ impl PlaybackLoop {
                     self.current_progression = None;
                     self.pending_queue.clear();
                     self.is_playing.store(false, Ordering::Relaxed);
-                    let _ = self.audio_handle.pause();
+                    let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
                     self.audio_started = false;
                     return;
+                }
+                Ok(PlaybackCommand::SetVolume(vol)) => {
+                    let _ = self.audio_handle.set_track_volume(self.track_id, vol);
                 }
                 Ok(PlaybackCommand::Shutdown) => {
                     return;
@@ -375,6 +409,8 @@ impl PlaybackLoop {
                     self.chord_index = 0;
                     self.iteration = 0;
                     self.scheduler.reset();
+                    // Ensure volume is up
+                    let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
                     return; // Exit early to start new progression
                 }
                 Err(_) => {}
@@ -416,7 +452,7 @@ mod tests {
         match AudioPlayerHandle::new() {
             Ok(handle) => {
                 let scheduler = Scheduler::new(120.0);
-                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler));
+                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler), 1);
                 assert!(!engine.is_playing());
             }
             Err(_) => {
@@ -430,7 +466,7 @@ mod tests {
         match AudioPlayerHandle::new() {
             Ok(handle) => {
                 let scheduler = Scheduler::new(120.0);
-                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler));
+                let engine = PlaybackEngine::new(Arc::new(handle), Arc::new(scheduler), 1);
 
                 let config = ProgressionConfig::new(vec![vec![440.0]]);
 

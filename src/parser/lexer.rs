@@ -49,6 +49,7 @@ pub enum Token {
     Volume,   // volume
     Queue,    // queue
     Load,     // load
+    Track,    // track
 
     // Identifiers (for function names and variables)
     Identifier(String), // invert, transpose, prog, etc.
@@ -98,6 +99,7 @@ impl fmt::Display for Token {
             Token::Volume => write!(f, "volume"),
             Token::Queue => write!(f, "queue"),
             Token::Load => write!(f, "load"),
+            Token::Track => write!(f, "track"),
             Token::Identifier(name) => write!(f, "{}", name),
             Token::Eof => write!(f, "EOF"),
         }
@@ -517,6 +519,7 @@ impl Lexer {
                         "volume" => Token::Volume,
                         "queue" => Token::Queue,
                         "load" => Token::Load,
+                        "track" => Token::Track,
                         "true" => Token::Boolean(true),
                         "false" => Token::Boolean(false),
                         _ => {

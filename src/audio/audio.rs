@@ -5,86 +5,97 @@ use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-/// Shared audio state protected by Mutex for thread-safe access
-#[derive(Clone)]
-pub struct AudioState {
+use std::collections::HashMap;
+
+/// State for a single audio track
+#[derive(Clone, Debug)]
+pub struct TrackState {
     /// List of frequencies to play (in Hz)
     pub notes: Vec<f32>,
     /// Volume level (0.0 to 1.0)
     pub volume: f32,
-    /// Whether playback is active (used for master fade in/out)
+    /// Whether this specific track is playing (not currently used for master pause)
+    pub is_playing: bool,
+}
+
+impl Default for TrackState {
+    fn default() -> Self {
+        TrackState {
+            notes: Vec::new(),
+            volume: 1.0, // Individual tracks default to full volume (master mixer handles global)
+            is_playing: true,
+        }
+    }
+}
+
+/// Shared audio state protected by Mutex for thread-safe access
+#[derive(Clone)]
+pub struct AudioState {
+    /// Map of track ID to track state
+    pub tracks: HashMap<usize, TrackState>,
+    /// Master volume level (0.0 to 1.0)
+    pub volume: f32,
+    /// Master playback status
     pub is_playing: bool,
 }
 
 impl Default for AudioState {
     fn default() -> Self {
         AudioState {
-            notes: Vec::new(), // Default to silence - no notes until explicitly set
-            volume: 0.2,       // Default to 20% volume
-            is_playing: false, // Start paused for silent startup
+            tracks: HashMap::new(),
+            volume: 0.2,       // Default to 20% master volume
+            is_playing: false, // Start paused
         }
     }
 }
 
-/// Per-note oscillator state with amplitude envelope for click-free transitions
+/// Per-note oscillator state with amplitude envelope
 struct EnvelopedOscillator {
     frequency: f32,
     phase: f32,
-    /// Current amplitude (0.0 to 1.0) - used for fade in/out
     amplitude: f32,
-    /// Target amplitude (what we're fading towards)
     target_amplitude: f32,
-    /// Fade rate per sample (how fast amplitude changes)
     fade_rate: f32,
+    /// Which track this oscillator belongs to
+    track_id: usize,
 }
 
 impl EnvelopedOscillator {
-    /// Create a new oscillator that fades in from silence
-    fn new(frequency: f32, sample_rate: f32) -> Self {
-        // Fade time of ~5ms for smooth but quick transitions
+    fn new(frequency: f32, sample_rate: f32, track_id: usize) -> Self {
         let fade_time_seconds = 0.005;
         let fade_rate = 1.0 / (fade_time_seconds * sample_rate);
 
         Self {
             frequency,
             phase: 0.0,
-            amplitude: 0.0,        // Start silent
-            target_amplitude: 1.0, // Fade in to full
+            amplitude: 0.0,
+            target_amplitude: 1.0,
             fade_rate,
+            track_id,
         }
     }
 
-    /// Mark this oscillator for fade out (will be removed when amplitude reaches 0)
     fn start_fade_out(&mut self) {
         self.target_amplitude = 0.0;
     }
 
-    /// Check if this oscillator has finished fading out
     fn is_finished(&self) -> bool {
         self.target_amplitude == 0.0 && self.amplitude <= 0.001
     }
 
-    /// Generate next sample value with envelope applied
     fn next_sample(&mut self, sample_rate: f32) -> f32 {
-        // Generate sine wave
         let value = (2.0 * std::f32::consts::PI * self.phase).sin();
-
-        // Update phase for next sample
         self.phase += self.frequency / sample_rate;
-
-        // Keep phase in [0, 1) range to prevent floating point drift
         if self.phase >= 1.0 {
             self.phase -= 1.0;
         }
 
-        // Smoothly move amplitude towards target
         if self.amplitude < self.target_amplitude {
             self.amplitude = (self.amplitude + self.fade_rate).min(self.target_amplitude);
         } else if self.amplitude > self.target_amplitude {
             self.amplitude = (self.amplitude - self.fade_rate).max(self.target_amplitude);
         }
 
-        // Apply envelope
         value * self.amplitude
     }
 }
@@ -92,14 +103,15 @@ impl EnvelopedOscillator {
 /// Commands that can be sent to the audio player thread
 #[derive(Debug, Clone)]
 pub enum AudioPlayerCommand {
-    SetNotes(Vec<f32>),
-    SetVolume(f32),
+    SetTrackNotes(usize, Vec<f32>),
+    SetTrackVolume(usize, f32),
+    SetMasterVolume(f32),
     Play,
     Pause,
     Quit,
 }
 
-/// Internal audio player that owns the cpal::Stream (stays in audio thread)
+/// Internal audio player that owns the cpal::Stream
 struct AudioPlayerInternal {
     stream: Stream,
     state: Arc<Mutex<AudioState>>,
@@ -138,11 +150,10 @@ impl AudioPlayerInternal {
         let channels = config.channels as usize;
         let sample_rate = config.sample_rate.0 as f32;
 
-        // Active oscillators (includes fading out ones for crossfade)
         let mut oscillators: Vec<EnvelopedOscillator> = Vec::new();
-        // Track what frequencies we're currently targeting
-        let mut current_frequencies: Vec<f32> = Vec::new();
-        // Master amplitude for smooth play/pause fade (5ms fade time)
+        // Track current frequencies per track: Map<TrackId, Vec<Freq>>
+        let mut track_frequencies: HashMap<usize, Vec<f32>> = HashMap::new();
+
         let mut master_amplitude: f32 = 0.0;
         let master_fade_rate = 1.0 / (0.005 * sample_rate);
 
@@ -152,12 +163,10 @@ impl AudioPlayerInternal {
             .build_output_stream(
                 config,
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-                    // Try to lock the state, fallback to silence on error
                     let state = match state.lock() {
                         Ok(s) => s,
                         Err(e) => {
                             eprintln!("Failed to lock audio state: {}", e);
-                            // Output silence on error
                             for sample in data.iter_mut() {
                                 *sample = T::from_sample(0.0);
                             }
@@ -165,34 +174,42 @@ impl AudioPlayerInternal {
                         }
                     };
 
-                    let frequencies = &state.notes;
-                    let volume = state.volume;
+                    let master_volume = state.volume;
                     let is_playing = state.is_playing;
 
-                    // Check if frequencies changed
-                    if current_frequencies.len() != frequencies.len()
-                        || current_frequencies
-                            .iter()
-                            .zip(frequencies.iter())
-                            .any(|(&curr, &new)| (curr - new).abs() > 0.01)
-                    {
-                        // Mark all existing oscillators for fade out
-                        for osc in oscillators.iter_mut() {
-                            osc.start_fade_out();
-                        }
+                    // 1. Sync oscillators with state
+                    // Check for changes in each track
+                    for (track_id, track_state) in &state.tracks {
+                        let current = track_frequencies.entry(*track_id).or_default();
 
-                        // Add new oscillators that will fade in
-                        for &freq in frequencies.iter() {
-                            oscillators.push(EnvelopedOscillator::new(freq, sample_rate));
-                        }
+                        // If notes changed for this track
+                        if current.len() != track_state.notes.len()
+                            || current
+                                .iter()
+                                .zip(track_state.notes.iter())
+                                .any(|(a, b)| (a - b).abs() > 0.01)
+                        {
+                            // Fade out old oscillators for this track
+                            for osc in oscillators.iter_mut().filter(|o| o.track_id == *track_id) {
+                                osc.start_fade_out();
+                            }
 
-                        // Update our tracking
-                        current_frequencies = frequencies.clone();
+                            // Add new oscillators
+                            for &freq in &track_state.notes {
+                                oscillators.push(EnvelopedOscillator::new(
+                                    freq,
+                                    sample_rate,
+                                    *track_id,
+                                ));
+                            }
+
+                            // Update cache
+                            *current = track_state.notes.clone();
+                        }
                     }
 
-                    // Generate audio samples
+                    // 2. Generate audio
                     for frame in data.chunks_mut(channels) {
-                        // Update master amplitude based on is_playing (smooth fade)
                         if is_playing {
                             master_amplitude = (master_amplitude + master_fade_rate).min(1.0);
                         } else {
@@ -202,35 +219,47 @@ impl AudioPlayerInternal {
                         let mut mixed_value = 0.0;
                         let mut active_count = 0;
 
-                        // Mix all oscillators together (including fading ones)
+                        // Sum all oscillators
+                        // Note: We need to consider track volume here too
                         for oscillator in oscillators.iter_mut() {
+                            let track_vol = state
+                                .tracks
+                                .get(&oscillator.track_id)
+                                .map(|t| t.volume)
+                                .unwrap_or(1.0);
+
                             let sample = oscillator.next_sample(sample_rate);
                             if sample.abs() > 0.0001 {
-                                mixed_value += sample;
+                                mixed_value += sample * track_vol;
                                 active_count += 1;
                             }
                         }
 
-                        // Normalize by active oscillator count to prevent clipping
+                        // Normalize?
+                        // Simple normalization strategy:
+                        // Use tanh or soft clipping to handle summing,
+                        // or just scale down by a constant factor assuming max polyphony.
+                        // Let's try soft clipping for now (tanh-like behavior) to prevent harsh digital clipping
+                        // but allow loudness.
+                        // Actually, let's stick to safe scaling for now:
                         if active_count > 0 {
-                            // Use a softer normalization to avoid volume jumps during crossfade
-                            let target_count = current_frequencies.len().max(1);
-                            mixed_value /= target_count as f32;
+                            // Rough heuristic: assume typical play is 3-6 notes.
+                            // Don't divide linearly by count or it gets too quiet with many notes.
+                            // Divide by sqrt(count) for better power preservation, or just a fixed headroom.
+                            mixed_value *= 0.3;
                         }
 
-                        // Apply volume and master amplitude (for fade in/out)
-                        mixed_value *= volume * master_amplitude;
+                        // Hard limiter just in case
+                        mixed_value = mixed_value.clamp(-1.0, 1.0);
 
-                        // Convert to target sample format
+                        mixed_value *= master_volume * master_amplitude;
+
                         let value: T = cpal::Sample::from_sample(mixed_value);
-
-                        // Write to all channels (mono to stereo/multi-channel)
                         for sample in frame.iter_mut() {
                             *sample = value;
                         }
                     }
 
-                    // Remove finished oscillators (those that have faded out completely)
                     oscillators.retain(|osc| !osc.is_finished());
                 },
                 err_fn,
@@ -241,46 +270,52 @@ impl AudioPlayerInternal {
         Ok(stream)
     }
 
-    fn set_notes(&mut self, notes: Vec<f32>) -> Result<()> {
+    fn set_track_notes(&mut self, track_id: usize, notes: Vec<f32>) -> Result<()> {
         let mut state = self
             .state
             .lock()
-            .map_err(|e| anyhow!("Failed to lock audio state: {}", e))?;
-        state.notes = notes;
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
+        let track = state.tracks.entry(track_id).or_default();
+        track.notes = notes;
         Ok(())
     }
 
-    fn set_volume(&mut self, volume: f32) -> Result<()> {
-        let volume = volume.clamp(0.0, 1.0);
+    fn set_track_volume(&mut self, track_id: usize, volume: f32) -> Result<()> {
         let mut state = self
             .state
             .lock()
-            .map_err(|e| anyhow!("Failed to lock audio state: {}", e))?;
-        state.volume = volume;
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
+        let track = state.tracks.entry(track_id).or_default();
+        track.volume = volume.clamp(0.0, 1.0);
+        Ok(())
+    }
+
+    fn set_master_volume(&mut self, volume: f32) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
+        state.volume = volume.clamp(0.0, 1.0);
         Ok(())
     }
 
     fn play(&mut self) -> Result<()> {
-        // Start the stream if not already running
         self.stream
             .play()
-            .map_err(|e| anyhow!("Failed to play stream: {}", e))?;
-        // Set is_playing flag for smooth fade in
+            .map_err(|e| anyhow!("Failed to play: {}", e))?;
         let mut state = self
             .state
             .lock()
-            .map_err(|e| anyhow!("Failed to lock audio state: {}", e))?;
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
         state.is_playing = true;
         Ok(())
     }
 
     fn pause(&mut self) -> Result<()> {
-        // Set is_playing flag to false for smooth fade out
-        // Don't pause the stream - let it fade to silence
         let mut state = self
             .state
             .lock()
-            .map_err(|e| anyhow!("Failed to lock audio state: {}", e))?;
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
         state.is_playing = false;
         Ok(())
     }
@@ -312,14 +347,19 @@ impl AudioPlayerHandle {
             // Process commands until quit
             while let Ok(cmd) = rx.recv() {
                 match cmd {
-                    AudioPlayerCommand::SetNotes(notes) => {
-                        if let Err(e) = player.set_notes(notes) {
-                            eprintln!("Failed to set notes: {}", e);
+                    AudioPlayerCommand::SetTrackNotes(track_id, notes) => {
+                        if let Err(e) = player.set_track_notes(track_id, notes) {
+                            eprintln!("Failed to set track notes: {}", e);
                         }
                     }
-                    AudioPlayerCommand::SetVolume(vol) => {
-                        if let Err(e) = player.set_volume(vol) {
-                            eprintln!("Failed to set volume: {}", e);
+                    AudioPlayerCommand::SetTrackVolume(track_id, vol) => {
+                        if let Err(e) = player.set_track_volume(track_id, vol) {
+                            eprintln!("Failed to set track volume: {}", e);
+                        }
+                    }
+                    AudioPlayerCommand::SetMasterVolume(vol) => {
+                        if let Err(e) = player.set_master_volume(vol) {
+                            eprintln!("Failed to set master volume: {}", e);
                         }
                     }
                     AudioPlayerCommand::Play => {
@@ -343,18 +383,35 @@ impl AudioPlayerHandle {
         })
     }
 
-    /// Set the frequencies to play
-    pub fn set_notes(&self, notes: Vec<f32>) -> Result<()> {
+    /// Set the frequencies to play for a specific track
+    pub fn set_track_notes(&self, track_id: usize, notes: Vec<f32>) -> Result<()> {
         self.command_tx
-            .send(AudioPlayerCommand::SetNotes(notes))
+            .send(AudioPlayerCommand::SetTrackNotes(track_id, notes))
             .map_err(|e| anyhow!("Failed to send command: {}", e))
     }
 
-    /// Set the volume level (0.0 to 1.0)
-    pub fn set_volume(&self, volume: f32) -> Result<()> {
+    /// Set the frequencies to play (default track 1)
+    pub fn set_notes(&self, notes: Vec<f32>) -> Result<()> {
+        self.set_track_notes(1, notes)
+    }
+
+    /// Set the volume level for a specific track
+    pub fn set_track_volume(&self, track_id: usize, volume: f32) -> Result<()> {
         self.command_tx
-            .send(AudioPlayerCommand::SetVolume(volume))
+            .send(AudioPlayerCommand::SetTrackVolume(track_id, volume))
             .map_err(|e| anyhow!("Failed to send command: {}", e))
+    }
+
+    /// Set master volume
+    pub fn set_master_volume(&self, volume: f32) -> Result<()> {
+        self.command_tx
+            .send(AudioPlayerCommand::SetMasterVolume(volume))
+            .map_err(|e| anyhow!("Failed to send command: {}", e))
+    }
+
+    /// Set the volume level (global/master for backward compatibility)
+    pub fn set_volume(&self, volume: f32) -> Result<()> {
+        self.set_master_volume(volume)
     }
 
     /// Start audio playback
@@ -399,7 +456,7 @@ mod tests {
     #[test]
     fn test_oscillator_generation() {
         let sample_rate = 44100.0;
-        let mut osc = EnvelopedOscillator::new(440.0, sample_rate);
+        let mut osc = EnvelopedOscillator::new(440.0, sample_rate, 1);
 
         for _ in 0..1000 {
             let value = osc.next_sample(sample_rate);
@@ -418,6 +475,7 @@ mod tests {
         match AudioPlayerHandle::new() {
             Ok(handle) => {
                 assert!(handle.set_notes(vec![440.0, 554.37]).is_ok());
+                assert!(handle.set_track_notes(2, vec![330.0]).is_ok());
                 assert!(handle.set_volume(0.5).is_ok());
                 assert!(handle.play().is_ok());
                 std::thread::sleep(std::time::Duration::from_millis(100));
