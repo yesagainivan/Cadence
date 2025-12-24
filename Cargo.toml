@@ -1,0 +1,13 @@
+[package]
+name = "cadence"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cpal = "0.15.2"
+anyhow = "1.0.98"
+clap = "4.5.41"
+colored = "3.0.0"
+# pest = "2.8.1"
+# pest_derive = "2.8.1"
+rustyline = "16.0.0"
