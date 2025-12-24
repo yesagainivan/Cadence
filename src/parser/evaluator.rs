@@ -863,6 +863,7 @@ mod evaluator_numeric_tests {
 
     #[test]
     fn test_eval_numeric_progression() {
+        // 251(C) now works again - parser treats Number+LeftParen as function call
         let expr = parse("251(C)").unwrap();
         let result = Evaluator::new().eval(expr).unwrap();
 

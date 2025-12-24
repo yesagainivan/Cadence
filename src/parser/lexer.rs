@@ -6,7 +6,7 @@ use std::fmt;
 pub enum Token {
     // Literals
     Note(String),          // C, F#, Bb
-    Number(i8),            // 2, -5, 12
+    Number(i32),           // 2, -5, 140, etc. (i32 for tempo support)
     Float(f32),            // 120.0 for tempo
     StringLiteral(String), // "path/to/file.cadence"
     Boolean(bool),         // true, false
@@ -147,7 +147,7 @@ impl Lexer {
     }
 
     /// Read a number (can be negative)
-    fn read_number(&mut self) -> Result<i8> {
+    fn read_number(&mut self) -> Result<i32> {
         let mut result = String::new();
 
         // Handle negative numbers
@@ -171,7 +171,7 @@ impl Lexer {
         }
 
         result
-            .parse::<i8>()
+            .parse::<i32>()
             .map_err(|_| anyhow!("Number out of range: {}", result))
     }
 
@@ -389,7 +389,7 @@ impl Lexer {
                             if let Ok(num) = identifier.parse::<f32>() {
                                 return Ok(Token::Float(num));
                             }
-                        } else if let Ok(num) = identifier.parse::<i8>() {
+                        } else if let Ok(num) = identifier.parse::<i32>() {
                             return Ok(Token::Number(num));
                         } else {
                             // Number too large, treat as identifier

@@ -108,7 +108,12 @@ impl Parser {
 
             if let Token::Number(semitones) = self.current_token {
                 self.advance();
-                let semitones = if is_plus { semitones } else { -semitones };
+                // Cast to i8 - semitones are typically small values (-12 to +12)
+                let semitones = if is_plus {
+                    semitones as i8
+                } else {
+                    -(semitones as i8)
+                };
                 expr = Expression::transpose(expr, semitones);
             } else {
                 return Err(anyhow!("Expected number after +/- operator"));
@@ -133,6 +138,26 @@ impl Parser {
             Token::LeftBracket => self.parse_chord(),
 
             Token::LeftDoubleBracket => self.parse_progression(),
+
+            // Handle numeric function calls like 251(C) for jazz progressions
+            Token::Number(num) => {
+                let name = num.to_string();
+                self.advance();
+
+                // If followed by LeftParen, it's a function call
+                if matches!(self.current_token, Token::LeftParen) {
+                    // Back up and parse as function call (parse_function_call expects to be on the name)
+                    self.position -= 1;
+                    self.current_token = Token::Identifier(name.clone());
+                    self.parse_function_call(name)
+                } else {
+                    Err(anyhow!(
+                        "Unexpected number: {} (did you mean {}(key)?)",
+                        name,
+                        name
+                    ))
+                }
+            }
 
             Token::Identifier(name) => {
                 let name = name.clone();
