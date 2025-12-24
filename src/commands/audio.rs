@@ -187,6 +187,9 @@ fn get_frequencies_from_value(value: &Value) -> anyhow::Result<Vec<f32>> {
         Value::Boolean(_) => {
             return Err(anyhow::anyhow!("Cannot play a boolean value"));
         }
+        Value::Pattern(_) => {
+            return Err(anyhow::anyhow!("Use 'play' for patterns"));
+        }
     }
     Ok(frequencies)
 }

@@ -426,7 +426,7 @@ impl StatementParser {
         Ok(expr)
     }
 
-    /// Parse primary expressions (notes, chords, progressions, function calls)
+    /// Parse primary expressions (notes, chords, progressions, function calls, patterns)
     fn parse_primary_expression(&mut self) -> Result<Expression> {
         match self.current().clone() {
             Token::Note(note_str) => {
@@ -435,6 +435,14 @@ impl StatementParser {
                     .map_err(|e| anyhow!("Invalid note '{}': {}", note_str, e))?;
                 self.advance();
                 Ok(Expression::Note(note))
+            }
+
+            Token::StringLiteral(pattern_str) => {
+                // Parse string literalpri as a pattern: "C E G _"
+                let pattern = crate::types::Pattern::parse(&pattern_str)
+                    .map_err(|e| anyhow!("Invalid pattern '{}': {}", pattern_str, e))?;
+                self.advance();
+                Ok(Expression::Pattern(pattern))
             }
 
             Token::LeftBracket => self.parse_expr_chord(),

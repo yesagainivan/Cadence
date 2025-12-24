@@ -140,6 +140,17 @@ impl Repl {
                 // This enables live variable updates: `play a loop` then `a = E` will
                 // change the sound on the next beat!
                 let mut config = ProgressionConfig::new_reactive(expression, shared_env);
+
+                // For patterns, set the note duration based on the pattern's step timing
+                // Each step gets an equal share of the cycle (default 4 beats)
+                if let crate::parser::Value::Pattern(ref pattern) = display_value {
+                    let step_beats = pattern.step_beats();
+                    if step_beats > 0.0 {
+                        config = config
+                            .with_duration(crate::audio::scheduler::Duration::Beats(step_beats));
+                    }
+                }
+
                 if looping {
                     config = config.with_looping();
                 }

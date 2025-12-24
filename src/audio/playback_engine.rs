@@ -56,6 +56,21 @@ impl PlaybackSource {
                 .map(|c| c.notes().map(|n| n.frequency()).collect())
                 .collect()),
             Value::Boolean(_) => Err(anyhow::anyhow!("Cannot play a boolean value")),
+            Value::Pattern(pattern) => {
+                // Convert pattern to frequencies, preserving rests as empty vectors
+                // Each event becomes one "chord" in the playback
+                Ok(pattern
+                    .to_events()
+                    .into_iter()
+                    .map(|(freqs, _, is_rest)| {
+                        if is_rest {
+                            vec![] // Empty = silence for this step
+                        } else {
+                            freqs
+                        }
+                    })
+                    .collect())
+            }
         }
     }
 

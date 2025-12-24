@@ -1,4 +1,4 @@
-use crate::types::{chord::Chord, note::Note, progression::Progression};
+use crate::types::{chord::Chord, note::Note, pattern::Pattern, progression::Progression};
 use std::fmt;
 
 // ============================================================================
@@ -203,6 +203,9 @@ pub enum Expression {
         right: Box<Expression>,
         operator: ComparisonOp,
     },
+
+    /// Pattern literal: "C E G _"
+    Pattern(Pattern),
 }
 
 /// Comparison operators
@@ -220,6 +223,7 @@ pub enum Value {
     Chord(Chord),
     Progression(Progression),
     Boolean(bool),
+    Pattern(Pattern),
 }
 
 impl fmt::Display for Expression {
@@ -267,6 +271,7 @@ impl fmt::Display for Expression {
                 };
                 write!(f, "{} {} {}", left, op_str, right)
             }
+            Expression::Pattern(pattern) => write!(f, "{}", pattern),
         }
     }
 }
@@ -278,6 +283,7 @@ impl fmt::Display for Value {
             Value::Chord(chord) => write!(f, "{}", chord),
             Value::Progression(progression) => write!(f, "{}", progression),
             Value::Boolean(b) => write!(f, "{}", b),
+            Value::Pattern(pattern) => write!(f, "{}", pattern),
         }
     }
 }

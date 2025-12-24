@@ -1,57 +1,54 @@
-// ============================================================
-// Cadence Demo Script
-// Demonstrates scripting with control flow and queue playback
-// ============================================================
+// ============================================
+// Cadence Pattern Demo 🎵
+// ============================================
+// Run with: cargo run --release
+// Then: load "demo.cadence"
 
-/*
-   This demo showcases:
-   - Variable bindings (let)
-   - Control flow (repeat, loop with break)
-   - Queue-based sequential playback
-   - Transposition transformations
-*/
-
-// Set a moderate tempo
+// Set a comfortable tempo
 tempo 90
 
-// --------------------------
-// Part 1: Rising Modulation
-// --------------------------
-// Play ii-V-I progression starting in C, modulating up
+// ============================================
+// Basic Pattern - 4 notes in a cycle
+// ============================================
+let melody = "C E G E"
 
-let prog = I_I_bVII_IV(C)
+// ============================================  
+// Pattern with rests - creates rhythm
+// ============================================
+let rhythm = "C _ E _ G _ E _"
 
-repeat 4 {
-  play prog queue      // Queue for seamless playback
-  prog = prog + 3      // Transpose up 3 semitones (whole step)
-}
+// ============================================
+// Bass line with octaves
+// ============================================
+let bass = "C3 _ G2 _ A2 _ E2 _"
 
-// Result: Plays ii-V-I in C, D, E, F# sequentially!
+// ============================================
+// Chord hits with rests
+// ============================================
+let chords = "[C, E, G] _ _ _ [F, A, C] _ _ _"
 
-// --------------------------
-// Part 2: Circle of Fifths
-// --------------------------
-// Descend through the circle of fifths
+// ============================================
+// Fast arpeggio using groups
+// ============================================
+let arp = "[C E G] [E G C5] [G C5 E5] [C5 E5 G5]"
 
-let circle = I_I_bVII_IV(C)
+// ============================================
+// Syncopated pattern with repeats
+// ============================================
+let synth = "C*2 E G*2 E"
 
-repeat 4 {
-  play circle queue
-  circle = circle + 7  // Up a fifth (7 semitones = down a fourth)
-}
+// ============================================
+// Play individual patterns:
+// ============================================
+// play melody loop
+// play rhythm loop
+// play bass loop
 
-// Result: C -> G -> D -> A
+// ============================================
+// Multi-track arrangement:
+// ============================================
+// track 1 play melody loop
+// track 2 volume 30; track 2 play bass loop
+// track 3 volume 20; track 3 play chords loop
 
-// --------------------------
-// Part 3: Inverted Variations
-// --------------------------
-// Same progression with different inversions
-
-let base = I_I_bVII_IV(C)
-play base queue
-
-let inverted = map(invert, base)
-play inverted queue
-
-let double_inverted = map(invert, inverted)
-play double_inverted queue
+// Stop all: stop

@@ -28,6 +28,7 @@ impl Evaluator {
         match expr {
             Expression::Note(note) => Ok(Value::Note(note)),
             Expression::Chord(chord) => Ok(Value::Chord(chord)),
+            Expression::Pattern(pattern) => Ok(Value::Pattern(pattern)),
             Expression::Transpose { target, semitones } => {
                 let target_value = self.eval_with_env(*target, env)?;
                 match target_value {
@@ -44,6 +45,7 @@ impl Evaluator {
                         Ok(Value::Progression(transposed))
                     }
                     Value::Boolean(_) => Err(anyhow!("Cannot transpose a boolean value")),
+                    Value::Pattern(_) => Err(anyhow!("Cannot transpose a pattern directly")),
                 }
             }
             Expression::Intersection { left, right } => {
