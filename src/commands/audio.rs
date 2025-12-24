@@ -184,6 +184,9 @@ fn get_frequencies_from_value(value: &Value) -> anyhow::Result<Vec<f32>> {
                 "Use 'audio play progression' for progressions"
             ));
         }
+        Value::Boolean(_) => {
+            return Err(anyhow::anyhow!("Cannot play a boolean value"));
+        }
     }
     Ok(frequencies)
 }

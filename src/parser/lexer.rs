@@ -5,8 +5,11 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     // Literals
-    Note(String), // C, F#, Bb
-    Number(i8),   // 2, -5, 12
+    Note(String),          // C, F#, Bb
+    Number(i8),            // 2, -5, 12
+    Float(f32),            // 120.0 for tempo
+    StringLiteral(String), // "path/to/file.cadence"
+    Boolean(bool),         // true, false
 
     // Delimiters
     LeftBracket,        // [
@@ -15,17 +18,40 @@ pub enum Token {
     RightDoubleBracket, // ]]
     LeftParen,          // (
     RightParen,         // )
+    LeftBrace,          // {
+    RightBrace,         // }
     Comma,              // ,
+    Semicolon,          // ;
+    Newline,            // significant newline (for statement separation)
 
     // Operators
-    Plus,      // +
-    Minus,     // -
-    Ampersand, // &
-    Pipe,      // |
-    Caret,     // ^
+    Plus,         // +
+    Minus,        // -
+    Ampersand,    // &
+    Pipe,         // |
+    Caret,        // ^
+    Equals,       // =
+    DoubleEquals, // ==
+    NotEquals,    // !=
 
-    // Identifiers (for function names)
-    Identifier(String), // invert, transpose, etc.
+    // Keywords
+    Let,      // let
+    Loop,     // loop
+    Repeat,   // repeat
+    If,       // if
+    Else,     // else
+    Break,    // break
+    Continue, // continue
+    Return,   // return
+    Play,     // play
+    Stop,     // stop
+    Tempo,    // tempo
+    Volume,   // volume
+    Queue,    // queue
+    Load,     // load
+
+    // Identifiers (for function names and variables)
+    Identifier(String), // invert, transpose, prog, etc.
 
     // End of input
     Eof,
@@ -36,18 +62,42 @@ impl fmt::Display for Token {
         match self {
             Token::Note(note) => write!(f, "{}", note),
             Token::Number(num) => write!(f, "{}", num),
+            Token::Float(num) => write!(f, "{}", num),
+            Token::StringLiteral(s) => write!(f, "\"{}\"", s),
+            Token::Boolean(b) => write!(f, "{}", b),
             Token::LeftBracket => write!(f, "["),
             Token::RightBracket => write!(f, "]"),
             Token::LeftDoubleBracket => write!(f, "[["),
             Token::RightDoubleBracket => write!(f, "]]"),
             Token::LeftParen => write!(f, "("),
             Token::RightParen => write!(f, ")"),
+            Token::LeftBrace => write!(f, "{{"),
+            Token::RightBrace => write!(f, "}}"),
             Token::Comma => write!(f, ","),
+            Token::Semicolon => write!(f, ";"),
+            Token::Newline => write!(f, "\\n"),
             Token::Plus => write!(f, "+"),
             Token::Minus => write!(f, "-"),
             Token::Ampersand => write!(f, "&"),
             Token::Pipe => write!(f, "|"),
             Token::Caret => write!(f, "^"),
+            Token::Equals => write!(f, "="),
+            Token::DoubleEquals => write!(f, "=="),
+            Token::NotEquals => write!(f, "!="),
+            Token::Let => write!(f, "let"),
+            Token::Loop => write!(f, "loop"),
+            Token::Repeat => write!(f, "repeat"),
+            Token::If => write!(f, "if"),
+            Token::Else => write!(f, "else"),
+            Token::Break => write!(f, "break"),
+            Token::Continue => write!(f, "continue"),
+            Token::Return => write!(f, "return"),
+            Token::Play => write!(f, "play"),
+            Token::Stop => write!(f, "stop"),
+            Token::Tempo => write!(f, "tempo"),
+            Token::Volume => write!(f, "volume"),
+            Token::Queue => write!(f, "queue"),
+            Token::Load => write!(f, "load"),
             Token::Identifier(name) => write!(f, "{}", name),
             Token::Eof => write!(f, "EOF"),
         }
@@ -282,13 +332,64 @@ impl Lexer {
                     return Ok(Token::Caret);
                 }
 
+                Some('{') => {
+                    self.advance();
+                    return Ok(Token::LeftBrace);
+                }
+
+                Some('}') => {
+                    self.advance();
+                    return Ok(Token::RightBrace);
+                }
+
+                Some(';') => {
+                    self.advance();
+                    return Ok(Token::Semicolon);
+                }
+
+                Some('=') => {
+                    self.advance();
+                    if self.current_char == Some('=') {
+                        self.advance();
+                        return Ok(Token::DoubleEquals);
+                    }
+                    return Ok(Token::Equals);
+                }
+
+                Some('!') => {
+                    self.advance();
+                    if self.current_char == Some('=') {
+                        self.advance();
+                        return Ok(Token::NotEquals);
+                    }
+                    return Err(anyhow!("Expected '=' after '!'"));
+                }
+
+                Some('"') => {
+                    self.advance(); // consume opening quote
+                    let mut s = String::new();
+                    while let Some(ch) = self.current_char {
+                        if ch == '"' {
+                            self.advance(); // consume closing quote
+                            return Ok(Token::StringLiteral(s));
+                        }
+                        s.push(ch);
+                        self.advance();
+                    }
+                    return Err(anyhow!("Unterminated string literal"));
+                }
+
                 // Handle any alphanumeric character (including digits)
-                Some(ch) if ch.is_alphanumeric() => {
+                Some(ch) if ch.is_alphanumeric() || ch == '_' => {
                     let identifier = self.read_identifier();
 
-                    // Check if it's a pure number
-                    if identifier.chars().all(|c| c.is_ascii_digit()) {
-                        if let Ok(num) = identifier.parse::<i8>() {
+                    // Check if it's a pure number (possibly float)
+                    if identifier.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                        if identifier.contains('.') {
+                            if let Ok(num) = identifier.parse::<f32>() {
+                                return Ok(Token::Float(num));
+                            }
+                        } else if let Ok(num) = identifier.parse::<i8>() {
                             return Ok(Token::Number(num));
                         } else {
                             // Number too large, treat as identifier
@@ -296,12 +397,34 @@ impl Lexer {
                         }
                     }
 
-                    // Check if it's a note
-                    if Self::is_note(&identifier) {
-                        return Ok(Token::Note(identifier));
-                    } else {
-                        return Ok(Token::Identifier(identifier));
-                    }
+                    // Check for keywords
+                    let token = match identifier.as_str() {
+                        "let" => Token::Let,
+                        "loop" => Token::Loop,
+                        "repeat" => Token::Repeat,
+                        "if" => Token::If,
+                        "else" => Token::Else,
+                        "break" => Token::Break,
+                        "continue" => Token::Continue,
+                        "return" => Token::Return,
+                        "play" => Token::Play,
+                        "stop" => Token::Stop,
+                        "tempo" => Token::Tempo,
+                        "volume" => Token::Volume,
+                        "queue" => Token::Queue,
+                        "load" => Token::Load,
+                        "true" => Token::Boolean(true),
+                        "false" => Token::Boolean(false),
+                        _ => {
+                            // Check if it's a note
+                            if Self::is_note(&identifier) {
+                                Token::Note(identifier)
+                            } else {
+                                Token::Identifier(identifier)
+                            }
+                        }
+                    };
+                    return Ok(token);
                 }
 
                 Some(ch) => {

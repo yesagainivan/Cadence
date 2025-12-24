@@ -34,6 +34,7 @@ impl Evaluator {
                         let transposed = progression + semitones;
                         Ok(Value::Progression(transposed))
                     }
+                    Value::Boolean(_) => Err(anyhow!("Cannot transpose a boolean value")),
                 }
             }
             Expression::Intersection { left, right } => {
@@ -74,6 +75,27 @@ impl Evaluator {
             }
             Expression::FunctionCall { name, args } => self.eval_function(&name, args),
             Expression::Progression(progression) => Ok(Value::Progression(progression)),
+            Expression::Variable(name) => {
+                // Variable lookup will be implemented with Environment in Phase 0.3.4
+                Err(anyhow!(
+                    "Variable '{}' not found (environment not yet implemented)",
+                    name
+                ))
+            }
+            Expression::Boolean(b) => Ok(Value::Boolean(b)),
+            Expression::Comparison {
+                left,
+                right,
+                operator,
+            } => {
+                let left_val = self.eval(*left)?;
+                let right_val = self.eval(*right)?;
+                let result = match operator {
+                    crate::parser::ast::ComparisonOp::Equal => left_val == right_val,
+                    crate::parser::ast::ComparisonOp::NotEqual => left_val != right_val,
+                };
+                Ok(Value::Boolean(result))
+            }
         }
     }
 

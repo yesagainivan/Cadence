@@ -1,6 +1,149 @@
 use crate::types::{chord::Chord, note::Note, progression::Progression};
 use std::fmt;
 
+// ============================================================================
+// Program and Statement AST (for scripting)
+// ============================================================================
+
+/// A program is a sequence of statements
+#[derive(Debug, Clone, PartialEq)]
+pub struct Program {
+    pub statements: Vec<Statement>,
+}
+
+impl Program {
+    pub fn new() -> Self {
+        Program {
+            statements: Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self, stmt: Statement) {
+        self.statements.push(stmt);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.statements.is_empty()
+    }
+}
+
+impl Default for Program {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Statement types for scripting
+#[derive(Debug, Clone, PartialEq)]
+pub enum Statement {
+    /// Variable binding: let prog = ii_V_I(C)
+    Let { name: String, value: Expression },
+
+    /// Expression statement (evaluates and optionally prints): [C, E, G]
+    Expression(Expression),
+
+    /// Play command with options: play progression loop queue
+    Play {
+        target: Expression,
+        looping: bool,
+        queue: bool,
+        duration: Option<f32>,
+    },
+
+    /// Stop playback
+    Stop,
+
+    /// Set tempo: tempo 120
+    Tempo(f32),
+
+    /// Set volume: volume 0.5
+    Volume(f32),
+
+    /// Infinite loop: loop { ... }
+    Loop { body: Vec<Statement> },
+
+    /// Repeat n times: repeat 4 { ... }
+    Repeat { count: u32, body: Vec<Statement> },
+
+    /// Conditional: if condition { ... } else { ... }
+    If {
+        condition: Expression,
+        then_body: Vec<Statement>,
+        else_body: Option<Vec<Statement>>,
+    },
+
+    /// Break out of loop
+    Break,
+
+    /// Continue to next iteration
+    Continue,
+
+    /// Return a value (for functions)
+    Return(Option<Expression>),
+
+    /// Load a file: load "path/to/file.cadence"
+    Load(String),
+
+    /// Comment (preserved for tooling/pretty-printing)
+    Comment(String),
+
+    /// Block of statements: { stmt1; stmt2; }
+    Block(Vec<Statement>),
+}
+
+impl fmt::Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Statement::Let { name, value } => write!(f, "let {} = {}", name, value),
+            Statement::Expression(expr) => write!(f, "{}", expr),
+            Statement::Play {
+                target,
+                looping,
+                queue,
+                duration,
+            } => {
+                write!(f, "play {}", target)?;
+                if *looping {
+                    write!(f, " loop")?;
+                }
+                if *queue {
+                    write!(f, " queue")?;
+                }
+                if let Some(d) = duration {
+                    write!(f, " duration {}", d)?;
+                }
+                Ok(())
+            }
+            Statement::Stop => write!(f, "stop"),
+            Statement::Tempo(bpm) => write!(f, "tempo {}", bpm),
+            Statement::Volume(vol) => write!(f, "volume {}", vol),
+            Statement::Loop { .. } => write!(f, "loop {{ ... }}"),
+            Statement::Repeat { count, .. } => write!(f, "repeat {} {{ ... }}", count),
+            Statement::If { .. } => write!(f, "if ... {{ ... }}"),
+            Statement::Break => write!(f, "break"),
+            Statement::Continue => write!(f, "continue"),
+            Statement::Return(Some(expr)) => write!(f, "return {}", expr),
+            Statement::Return(None) => write!(f, "return"),
+            Statement::Load(path) => write!(f, "load \"{}\"", path),
+            Statement::Comment(text) => write!(f, "// {}", text),
+            Statement::Block(_) => write!(f, "{{ ... }}"),
+        }
+    }
+}
+
+impl fmt::Display for Program {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for stmt in &self.statements {
+            writeln!(f, "{}", stmt)?;
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Expression AST (existing, unchanged)
+// ============================================================================
+
 /// Represents different types of expressions in the Cadence language
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
@@ -12,6 +155,9 @@ pub enum Expression {
 
     /// A progression literal: [[C, E, G], [F, A, C], [G, B, D]]
     Progression(Progression),
+
+    /// Variable reference: prog (lookup in environment)
+    Variable(String),
 
     /// Arithmetic operation: [C, E, G] + 2, [[C, E, G], [F, A, C]] + 2
     Transpose {
@@ -39,6 +185,24 @@ pub enum Expression {
 
     /// Function call: invert([C, E, G]), map(invert, [[C, E, G], [F, A, C]])
     FunctionCall { name: String, args: Vec<Expression> },
+
+    /// Boolean literal (for conditionals)
+    Boolean(bool),
+
+    /// Comparison: expr == expr, expr != expr
+    Comparison {
+        left: Box<Expression>,
+        right: Box<Expression>,
+        operator: ComparisonOp,
+    },
+}
+
+/// Comparison operators
+#[derive(Debug, Clone, PartialEq)]
+pub enum ComparisonOp {
+    Equal,
+    NotEqual,
+    // Future: Less, Greater, LessEqual, GreaterEqual
 }
 
 /// Represents the result of evaluating an expression
@@ -47,6 +211,7 @@ pub enum Value {
     Note(Note),
     Chord(Chord),
     Progression(Progression),
+    Boolean(bool),
 }
 
 impl fmt::Display for Expression {
@@ -81,6 +246,19 @@ impl fmt::Display for Expression {
                 }
                 write!(f, ")")
             }
+            Expression::Variable(name) => write!(f, "{}", name),
+            Expression::Boolean(b) => write!(f, "{}", b),
+            Expression::Comparison {
+                left,
+                right,
+                operator,
+            } => {
+                let op_str = match operator {
+                    ComparisonOp::Equal => "==",
+                    ComparisonOp::NotEqual => "!=",
+                };
+                write!(f, "{} {} {}", left, op_str, right)
+            }
         }
     }
 }
@@ -91,6 +269,7 @@ impl fmt::Display for Value {
             Value::Note(note) => write!(f, "{}", note),
             Value::Chord(chord) => write!(f, "{}", chord),
             Value::Progression(progression) => write!(f, "{}", progression),
+            Value::Boolean(b) => write!(f, "{}", b),
         }
     }
 }
