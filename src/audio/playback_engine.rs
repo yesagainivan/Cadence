@@ -7,6 +7,7 @@
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::scheduler::{Duration, Scheduler};
 use anyhow::Result;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
@@ -142,7 +143,8 @@ struct PlaybackLoop {
 
     // Playback state
     current_progression: Option<ProgressionConfig>,
-    pending_progression: Option<ProgressionConfig>,
+    /// Queue of progressions waiting to play (FIFO)
+    pending_queue: VecDeque<ProgressionConfig>,
     chord_index: usize,
     iteration: usize,
     audio_started: bool,
@@ -161,7 +163,7 @@ impl PlaybackLoop {
             command_rx,
             is_playing,
             current_progression: None,
-            pending_progression: None,
+            pending_queue: VecDeque::new(),
             chord_index: 0,
             iteration: 0,
             audio_started: false,
@@ -216,7 +218,7 @@ impl PlaybackLoop {
             PlaybackCommand::PlayProgression(config) => {
                 // Immediate switch - reset position and start new progression
                 self.current_progression = Some(config);
-                self.pending_progression = None;
+                self.pending_queue.clear(); // Clear queue on immediate play
                 self.chord_index = 0;
                 self.iteration = 0;
                 self.is_playing.store(true, Ordering::Relaxed);
@@ -228,9 +230,9 @@ impl PlaybackLoop {
                 self.audio_started = false;
             }
             PlaybackCommand::QueueProgression(config) => {
-                // Queue for next beat boundary - seamless transition
+                // Queue for next beat boundary - add to FIFO queue
                 if self.current_progression.is_some() {
-                    self.pending_progression = Some(config);
+                    self.pending_queue.push_back(config);
                 } else {
                     // No current progression - start immediately
                     self.current_progression = Some(config);
@@ -243,7 +245,7 @@ impl PlaybackLoop {
             }
             PlaybackCommand::Stop => {
                 self.current_progression = None;
-                self.pending_progression = None;
+                self.pending_queue.clear();
                 self.is_playing.store(false, Ordering::Relaxed);
                 let _ = self.audio_handle.pause();
                 self.audio_started = false;
@@ -257,12 +259,13 @@ impl PlaybackLoop {
 
     fn play_next_beat(&mut self) {
         // Check for pending progression at beat boundary (before playing current chord)
-        if let Some(pending) = self.pending_progression.take() {
-            // Seamless switch - don't pause, just change progression
-            self.current_progression = Some(pending);
-            self.chord_index = 0;
-            self.iteration = 0;
-            // Note: we keep audio_started true for seamless transition
+        // Pop from queue if current progression is done
+        if self.current_progression.is_none() {
+            if let Some(next) = self.pending_queue.pop_front() {
+                self.current_progression = Some(next);
+                self.chord_index = 0;
+                self.iteration = 0;
+            }
         }
 
         let config = match &self.current_progression {
@@ -273,6 +276,14 @@ impl PlaybackLoop {
         // Check if we've completed all iterations
         if let Some(max_loops) = config.loop_count {
             if self.iteration >= max_loops {
+                // Current progression done - try to get next from queue
+                if let Some(next) = self.pending_queue.pop_front() {
+                    self.current_progression = Some(next);
+                    self.chord_index = 0;
+                    self.iteration = 0;
+                    // Keep audio_started true for seamless transition
+                    return; // Recurse to play next beat
+                }
                 self.current_progression = None;
                 self.is_playing.store(false, Ordering::Relaxed);
                 let _ = self.audio_handle.pause();
@@ -290,6 +301,13 @@ impl PlaybackLoop {
             // Re-check loop count
             if let Some(max_loops) = config.loop_count {
                 if self.iteration >= max_loops {
+                    // Current progression done - try to get next from queue
+                    if let Some(next) = self.pending_queue.pop_front() {
+                        self.current_progression = Some(next);
+                        self.chord_index = 0;
+                        self.iteration = 0;
+                        return; // Will play next beat on next call
+                    }
                     self.current_progression = None;
                     self.is_playing.store(false, Ordering::Relaxed);
                     let _ = self.audio_handle.pause();
@@ -337,7 +355,7 @@ impl PlaybackLoop {
             match self.command_rx.try_recv() {
                 Ok(PlaybackCommand::Stop) => {
                     self.current_progression = None;
-                    self.pending_progression = None;
+                    self.pending_queue.clear();
                     self.is_playing.store(false, Ordering::Relaxed);
                     let _ = self.audio_handle.pause();
                     self.audio_started = false;
@@ -347,13 +365,13 @@ impl PlaybackLoop {
                     return;
                 }
                 Ok(PlaybackCommand::QueueProgression(config)) => {
-                    // Queue for next beat
-                    self.pending_progression = Some(config);
+                    // Add to queue
+                    self.pending_queue.push_back(config);
                 }
                 Ok(PlaybackCommand::PlayProgression(config)) => {
                     // Immediate switch even mid-beat
                     self.current_progression = Some(config);
-                    self.pending_progression = None;
+                    self.pending_queue.clear();
                     self.chord_index = 0;
                     self.iteration = 0;
                     self.scheduler.reset();

@@ -1,27 +1,57 @@
+// ============================================================
 // Cadence Demo Script
-// Demonstrates all Phase 1 scripting features
+// Demonstrates scripting with control flow and queue playback
+// ============================================================
 
-/* 
-   Jazz ii-V-I progression in C major
-   This is a common jazz turnaround
+/*
+   This demo showcases:
+   - Variable bindings (let)
+   - Control flow (repeat, loop with break)
+   - Queue-based sequential playback
+   - Transposition transformations
 */
-let jazz = ii_V_I(C)
 
-// Pop progression in G (I-V-vi-IV)  
-let pop = I_V_vi_IV(G)
+// Set a moderate tempo
+tempo 90
 
-// Set tempo to 120 BPM
-tempo 80
+// --------------------------
+// Part 1: Rising Modulation
+// --------------------------
+// Play ii-V-I progression starting in C, modulating up
 
-// Play the jazz progression first
-play jazz
+let prog = ii_V_I(C)
 
-// Variable re-assignment - transform in place!
-jazz = invert(jazz)
+repeat 4 {
+  play prog queue      // Queue for seamless playback
+  prog = prog + 2      // Transpose up 2 semitones (whole step)
+}
 
-// Play the inverted version
-play jazz loop
+// Result: Plays ii-V-I in C, D, E, F# sequentially!
 
-// Transpose pop progression up 2 semitones
-// pop = pop + 2
-// play pop
+// --------------------------
+// Part 2: Circle of Fifths
+// --------------------------
+// Descend through the circle of fifths
+
+let circle = ii_V_I(C)
+
+repeat 4 {
+  play circle queue
+  circle = circle + 7  // Up a fifth (7 semitones = down a fourth)
+}
+
+// Result: C -> G -> D -> A
+
+// --------------------------
+// Part 3: Inverted Variations
+// --------------------------
+// Same progression with different inversions
+
+let base = I_V_vi_IV(G)
+play base queue
+
+let inverted = map(invert, base)
+play inverted queue
+
+let double_inverted = map(invert, inverted)
+play double_inverted queue

@@ -498,4 +498,101 @@ mod tests {
             crate::parser::interpreter::InterpreterAction::Stop
         ));
     }
+
+    // =========================================================================
+    // Control Flow Tests
+    // =========================================================================
+
+    #[test]
+    fn test_repeat_execution() {
+        let mut interpreter = Interpreter::new();
+
+        // repeat 3 times should execute body 3 times
+        let program = parse_statements("repeat 3 { tempo 100 }").unwrap();
+        interpreter.run_program(&program).unwrap();
+
+        // Should have 3 SetTempo actions
+        let actions = interpreter.take_actions();
+        assert_eq!(actions.len(), 3);
+        assert!(
+            actions
+                .iter()
+                .all(|a| matches!(a, InterpreterAction::SetTempo(100.0)))
+        );
+    }
+
+    #[test]
+    fn test_repeat_with_break() {
+        let mut interpreter = Interpreter::new();
+
+        // Break should exit early
+        let program = parse_statements("repeat 10 { tempo 100; break }").unwrap();
+        interpreter.run_program(&program).unwrap();
+
+        // Should only have 1 action (break exits after first iteration)
+        let actions = interpreter.take_actions();
+        assert_eq!(actions.len(), 1);
+    }
+
+    #[test]
+    fn test_loop_with_break() {
+        let mut interpreter = Interpreter::new();
+
+        // Infinite loop should exit with break
+        let program = parse_statements("loop { tempo 120; break }").unwrap();
+        interpreter.run_program(&program).unwrap();
+
+        // Should have exactly 1 SetTempo action
+        let actions = interpreter.take_actions();
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(actions[0], InterpreterAction::SetTempo(120.0)));
+    }
+
+    #[test]
+    fn test_continue_in_repeat() {
+        let mut interpreter = Interpreter::new();
+
+        // Continue should skip to next iteration
+        // Only the first tempo in each iteration should execute
+        let program = parse_statements("repeat 3 { tempo 100; continue; tempo 200 }").unwrap();
+        interpreter.run_program(&program).unwrap();
+
+        let actions = interpreter.take_actions();
+        // Should have 3 actions (one per iteration), all tempo 100
+        assert_eq!(actions.len(), 3);
+        assert!(
+            actions
+                .iter()
+                .all(|a| matches!(a, InterpreterAction::SetTempo(100.0)))
+        );
+    }
+
+    #[test]
+    fn test_nested_loops() {
+        let mut interpreter = Interpreter::new();
+
+        // Nested repeat loops: outer 2x, inner 3x = 6 total
+        let program = parse_statements("repeat 2 { repeat 3 { tempo 90 } }").unwrap();
+        interpreter.run_program(&program).unwrap();
+
+        let actions = interpreter.take_actions();
+        assert_eq!(actions.len(), 6);
+    }
+
+    #[test]
+    fn test_break_outside_loop_error() {
+        let mut interpreter = Interpreter::new();
+
+        // Break outside of loop should error
+        let program = parse_statements("break").unwrap();
+        let result = interpreter.run_program(&program);
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Break outside of loop")
+        );
+    }
 }

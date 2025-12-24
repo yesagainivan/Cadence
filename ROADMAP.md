@@ -52,9 +52,9 @@ A production-ready music programming language for chord progressions and harmoni
 
 ## Phase 2: Control Flow
 
-### 2.1 Loops
-- [x] `repeat 4 { ... }` - fixed iterations (parsing done)
-- [x] `loop { ... }` - infinite with break (parsing done)
+### 2.1 Loops ✅
+- [x] `repeat 4 { ... }` - fixed iterations (parsing + execution)
+- [x] `loop { ... }` - infinite with break (parsing + execution)
 - [ ] `every n beats { ... }` - time-synced loops
 
 ### 2.2 Conditionals
@@ -134,6 +134,8 @@ A production-ready music programming language for chord progressions and harmoni
 | Variable Resolution | ✅ Environment-aware evaluation |
 | File Loading | ✅ load "file.cadence" works |
 | Script Audio | ✅ play/tempo/stop trigger audio |
+| Playback Queue | ✅ FIFO queue for `play X queue` |
+| Control Flow | ✅ `repeat`, `loop`, `break`, `continue` |
 | Live Coding | ❌ Not started |
 
 ---
@@ -150,8 +152,8 @@ A production-ready music programming language for chord progressions and harmoni
 ## Next Session Priorities
 
 1. ~~**Audio Polish** - Fix click on start/stop, silent REPL startup~~ ✅ Done
-2. **Error Line Info** - Improve error messages with line/column info
-3. **Control Flow Execution** - Make `loop {}` and `repeat {}` actually execute
+2. ~~**Control Flow Execution** - Make `loop {}` and `repeat {}` actually execute~~ ✅ Done
+3. **Error Line Info** - Improve error messages with line/column info
 4. **Multi-track/Voices** - Named tracks for simultaneous playback (Phase 4)
    - *Inspired by TidalCycles d1/d2/d3... pattern - each track plays independently*
    - Would require: multiple PlaybackEngines, mixer, different timbres
