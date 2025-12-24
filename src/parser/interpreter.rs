@@ -117,7 +117,6 @@ impl Interpreter {
 
             Statement::Expression(expr) => {
                 let val = self.eval_expression(expr)?;
-                println!("{}", val); // REPL-style: print expression results
                 self.last_eval_result = Some(val);
                 Ok(ControlFlow::Normal)
             }
