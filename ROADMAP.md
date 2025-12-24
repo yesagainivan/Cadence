@@ -43,10 +43,10 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] Better whitespace/newline handling as statement separators
   - *Lexer now emits `Token::Newline` - multi-line files work naturally*
 
-### 1.4 Lexer Improvements
+### 1.4 Lexer Improvements ✅
 - [x] Handle numbers > 127 (changed from i8 to i32 for tempo support)
 - [x] Unified expression parsing in StatementParser (no string reconstruction hack)
-- [ ] Improve error messages with line/column info
+- [x] Improve error messages with line/column info
 
 ---
 
@@ -153,7 +153,7 @@ A production-ready music programming language for chord progressions and harmoni
 
 1. ~~**Audio Polish** - Fix click on start/stop, silent REPL startup~~ ✅ Done
 2. ~~**Control Flow Execution** - Make `loop {}` and `repeat {}` actually execute~~ ✅ Done
-3. **Error Line Info** - Improve error messages with line/column info
+3. ~~**Error Line Info** - Improve error messages with line/column info~~ ✅ Done
 4. **Multi-track/Voices** - Named tracks for simultaneous playback (Phase 4)
    - *Inspired by TidalCycles d1/d2/d3... pattern - each track plays independently*
    - Would require: multiple PlaybackEngines, mixer, different timbres

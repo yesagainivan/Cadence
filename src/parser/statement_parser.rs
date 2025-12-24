@@ -9,12 +9,12 @@
 //! - `repeat 4 { ... }`
 
 use crate::parser::ast::{Expression, Program, Statement};
-use crate::parser::lexer::{Lexer, Token};
+use crate::parser::lexer::{Lexer, Span, SpannedToken, Token};
 use anyhow::{Result, anyhow};
 
 /// Parses statements and programs (sequences of statements)
 pub struct StatementParser {
-    tokens: Vec<Token>,
+    tokens: Vec<SpannedToken>,
     position: usize,
 }
 
@@ -22,7 +22,7 @@ impl StatementParser {
     /// Create a new statement parser from input string
     pub fn new(input: &str) -> Result<Self> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer.tokenize()?;
+        let tokens = lexer.tokenize_spanned()?;
 
         Ok(StatementParser {
             tokens,
@@ -32,13 +32,27 @@ impl StatementParser {
 
     /// Current token
     fn current(&self) -> &Token {
-        self.tokens.get(self.position).unwrap_or(&Token::Eof)
+        self.tokens
+            .get(self.position)
+            .map(|st| &st.token)
+            .unwrap_or(&Token::Eof)
+    }
+
+    /// Current span (position in source)
+    fn current_span(&self) -> Span {
+        self.tokens
+            .get(self.position)
+            .map(|st| st.span)
+            .unwrap_or_default()
     }
 
     /// Peek at the next token (unused but may be needed for future lookahead)
     #[allow(dead_code)]
     fn peek(&self) -> &Token {
-        self.tokens.get(self.position + 1).unwrap_or(&Token::Eof)
+        self.tokens
+            .get(self.position + 1)
+            .map(|st| &st.token)
+            .unwrap_or(&Token::Eof)
     }
 
     /// Advance to the next token
@@ -54,8 +68,10 @@ impl StatementParser {
             self.advance();
             Ok(())
         } else {
+            let span = self.current_span();
             Err(anyhow!(
-                "Expected {:?}, found {:?}",
+                "at {}: Expected {:?}, found {:?}",
+                span,
                 expected,
                 self.current()
             ))
@@ -437,7 +453,14 @@ impl StatementParser {
                 Ok(expr)
             }
 
-            token => Err(anyhow!("Unexpected token in expression: {:?}", token)),
+            token => {
+                let span = self.current_span();
+                Err(anyhow!(
+                    "at {}: Unexpected token in expression: {:?}",
+                    span,
+                    token
+                ))
+            }
         }
     }
 

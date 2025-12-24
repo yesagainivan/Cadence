@@ -104,11 +104,47 @@ impl fmt::Display for Token {
     }
 }
 
+/// Position in source code
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Span {
+    pub line: usize,
+    pub column: usize,
+}
+
+impl Span {
+    pub fn new(line: usize, column: usize) -> Self {
+        Span { line, column }
+    }
+}
+
+impl std::fmt::Display for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "line {}, column {}", self.line, self.column)
+    }
+}
+
+/// A token with its source position
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpannedToken {
+    pub token: Token,
+    pub span: Span,
+}
+
+impl SpannedToken {
+    pub fn new(token: Token, span: Span) -> Self {
+        SpannedToken { token, span }
+    }
+}
+
 /// Tokenizes input strings into tokens
 pub struct Lexer {
     input: Vec<char>,
     position: usize,
     current_char: Option<char>,
+    /// Current line number (1-indexed)
+    line: usize,
+    /// Current column number (1-indexed)
+    column: usize,
 }
 
 impl Lexer {
@@ -121,11 +157,25 @@ impl Lexer {
             input: chars,
             position: 0,
             current_char,
+            line: 1,
+            column: 1,
         }
+    }
+
+    /// Get the current span (position in source)
+    fn current_span(&self) -> Span {
+        Span::new(self.line, self.column)
     }
 
     /// Advance to the next character
     fn advance(&mut self) {
+        // Track newlines for line/column counting
+        if self.current_char == Some('\n') {
+            self.line += 1;
+            self.column = 1;
+        } else {
+            self.column += 1;
+        }
         self.position += 1;
         self.current_char = self.input.get(self.position).copied();
     }
@@ -496,6 +546,31 @@ impl Lexer {
             let token = self.next_token()?;
             let is_eof = matches!(token, Token::Eof);
             tokens.push(token);
+
+            if is_eof {
+                break;
+            }
+        }
+
+        Ok(tokens)
+    }
+
+    /// Get the next token with its span (position info)
+    pub fn next_spanned_token(&mut self) -> Result<SpannedToken> {
+        // Capture span before consuming any characters
+        let span = self.current_span();
+        let token = self.next_token()?;
+        Ok(SpannedToken::new(token, span))
+    }
+
+    /// Tokenize the entire input into a vector of spanned tokens
+    pub fn tokenize_spanned(&mut self) -> Result<Vec<SpannedToken>> {
+        let mut tokens = Vec::new();
+
+        loop {
+            let spanned = self.next_spanned_token()?;
+            let is_eof = matches!(spanned.token, Token::Eof);
+            tokens.push(spanned);
 
             if is_eof {
                 break;
