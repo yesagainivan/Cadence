@@ -297,21 +297,50 @@ impl Lexer {
 
     /// Determine if a string is a note name
     fn is_note(s: &str) -> bool {
-        if s.len() < 1 || s.len() > 2 {
+        if s.is_empty() {
             return false;
         }
 
-        let first_char = s.chars().next().unwrap();
-        if !matches!(first_char, 'A'..='G') {
+        let mut chars = s.chars().peekable();
+
+        // 1. Check note name (A-G)
+        let first = chars.next().unwrap();
+        if !matches!(first, 'A'..='G') {
             return false;
         }
 
-        if s.len() == 2 {
-            let second_char = s.chars().nth(1).unwrap();
-            matches!(second_char, '#' | 'b')
-        } else {
-            true
+        // 2. Check optional accidental
+        if let Some(&c) = chars.peek() {
+            if matches!(c, '#' | 'b' | 's') {
+                chars.next();
+            }
         }
+
+        // 3. Check optional octave (can be negative)
+        // If nothing left, it's a note (default octave)
+        if chars.peek().is_none() {
+            return true;
+        }
+
+        // Check for minus sign
+        if let Some(&c) = chars.peek() {
+            if c == '-' {
+                chars.next();
+                // Must be followed by digit
+                if chars.peek().is_none() {
+                    return false;
+                }
+            }
+        }
+
+        // The rest must be digits
+        for c in chars {
+            if !c.is_ascii_digit() {
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Get the next token
@@ -655,6 +684,23 @@ mod tests {
                 Token::Note("F#".to_string()),
                 Token::Note("Bb".to_string()),
                 Token::Note("A".to_string()),
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_octave_notes() {
+        let mut lexer = Lexer::new("C4 F#3 Bb2 A-1");
+        let tokens = lexer.tokenize().unwrap();
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Note("C4".to_string()),
+                Token::Note("F#3".to_string()),
+                Token::Note("Bb2".to_string()),
+                Token::Note("A-1".to_string()),
                 Token::Eof,
             ]
         );

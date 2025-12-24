@@ -1356,9 +1356,21 @@ mod tests {
 
         // Second chord should be Bb major (♭VII in C)
         let second_chord = &progression[1];
-        assert!(second_chord.contains(&"Bb".parse().unwrap()));
-        assert!(second_chord.contains(&"D".parse().unwrap()));
-        assert!(second_chord.contains(&"F".parse().unwrap()));
+        assert!(
+            second_chord
+                .notes()
+                .any(|n| n.pitch_class() == "Bb".parse::<Note>().unwrap().pitch_class())
+        );
+        assert!(
+            second_chord
+                .notes()
+                .any(|n| n.pitch_class() == "D".parse::<Note>().unwrap().pitch_class())
+        );
+        assert!(
+            second_chord
+                .notes()
+                .any(|n| n.pitch_class() == "F".parse::<Note>().unwrap().pitch_class())
+        );
     }
 
     #[test]
@@ -1641,10 +1653,26 @@ mod numeric_progression_tests {
 
         // Second chord should be B diminished
         let second_chord = &prog[1];
-        assert!(second_chord.contains(&"B".parse().unwrap()));
-        assert!(second_chord.contains(&"D".parse().unwrap()));
-        assert!(second_chord.contains(&"F".parse().unwrap())); // F natural, not F#
-        assert!(!second_chord.contains(&"F#".parse().unwrap())); // Should NOT contain F#
+        assert!(
+            second_chord
+                .notes()
+                .any(|n| n.pitch_class() == "B".parse::<Note>().unwrap().pitch_class())
+        );
+        assert!(
+            second_chord
+                .notes()
+                .any(|n| n.pitch_class() == "D".parse::<Note>().unwrap().pitch_class())
+        );
+        assert!(
+            second_chord
+                .notes()
+                .any(|n| n.pitch_class() == "F".parse::<Note>().unwrap().pitch_class())
+        ); // F natural, not F#
+        assert!(
+            !second_chord
+                .notes()
+                .any(|n| n.pitch_class() == "F#".parse::<Note>().unwrap().pitch_class())
+        ); // Should NOT contain F#
 
         let analysis = analyze_progression(&prog, key).unwrap();
         assert_eq!(analysis[0].to_string(), "I");
@@ -1661,10 +1689,26 @@ mod numeric_progression_tests {
 
         // Check that the last chord is B diminished [B, D, F], not B minor [B, D, F#]
         let last_chord = &prog[6];
-        assert!(last_chord.contains(&"B".parse().unwrap()));
-        assert!(last_chord.contains(&"D".parse().unwrap()));
-        assert!(last_chord.contains(&"F".parse().unwrap())); // F natural
-        assert!(!last_chord.contains(&"F#".parse().unwrap())); // Should NOT contain F#
+        assert!(
+            last_chord
+                .notes()
+                .any(|n| n.pitch_class() == "B".parse::<Note>().unwrap().pitch_class())
+        );
+        assert!(
+            last_chord
+                .notes()
+                .any(|n| n.pitch_class() == "D".parse::<Note>().unwrap().pitch_class())
+        );
+        assert!(
+            last_chord
+                .notes()
+                .any(|n| n.pitch_class() == "F".parse::<Note>().unwrap().pitch_class())
+        ); // F natural
+        assert!(
+            !last_chord
+                .notes()
+                .any(|n| n.pitch_class() == "F#".parse::<Note>().unwrap().pitch_class())
+        ); // Should NOT contain F#
 
         let analysis = analyze_progression(&prog, key).unwrap();
         assert_eq!(analysis[6].to_string(), "vii°");
@@ -1904,9 +1948,21 @@ mod roman_numeral_parser_tests {
 
         // Second chord should be Bb major (♭VII in C)
         let second_chord = &prog[1];
-        assert!(second_chord.contains(&"Bb".parse().unwrap()));
-        assert!(second_chord.contains(&"D".parse().unwrap()));
-        assert!(second_chord.contains(&"F".parse().unwrap()));
+        assert!(
+            second_chord
+                .notes()
+                .any(|n| n.pitch_class() == "Bb".parse::<Note>().unwrap().pitch_class())
+        );
+        assert!(
+            second_chord
+                .notes()
+                .any(|n| n.pitch_class() == "D".parse::<Note>().unwrap().pitch_class())
+        );
+        assert!(
+            second_chord
+                .notes()
+                .any(|n| n.pitch_class() == "F".parse::<Note>().unwrap().pitch_class())
+        );
     }
 
     #[test]

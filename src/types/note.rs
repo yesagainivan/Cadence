@@ -8,6 +8,7 @@ use std::str::FromStr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Note {
     pitch_class: u8, // 0-11 chromatic representation
+    octave: i8,      // Standard scientific pitch notation (4 = middle C)
     accidental_preference: AccidentalPreference,
 }
 
@@ -36,30 +37,18 @@ const BASE_OCTAVE_FREQUENCIES: [f32; 12] = [
 ];
 
 impl Note {
-    /// Get the frequency for this note in the 4th octave (C4-B4 range)
+    /// Get the frequency for this note
     ///
     /// # Returns
-    /// The frequency in Hz for this note's pitch class in the 4th octave
+    /// The frequency in Hz
     pub fn frequency(&self) -> f32 {
-        BASE_OCTAVE_FREQUENCIES[self.pitch_class() as usize]
+        let base_freq = BASE_OCTAVE_FREQUENCIES[self.pitch_class as usize];
+        let octave_diff = self.octave - 4;
+        let multiplier = 2.0_f32.powi(octave_diff as i32);
+        base_freq * multiplier
     }
 
-    /// Get the frequency for this note in a specific octave
-    ///
-    /// # Arguments
-    /// * `octave` - The octave number (4 is middle octave, each octave doubles/halves frequency)
-    ///
-    /// # Returns
-    /// The frequency in Hz for this note in the specified octave
-    pub fn frequency_in_octave(&self, octave: i8) -> f32 {
-        let base_frequency = self.frequency();
-        let octave_multiplier = 2.0_f32.powi((octave - 4) as i32);
-        base_frequency * octave_multiplier
-    }
-}
-
-impl Note {
-    /// Create a new note from chromatic pitch class (0-11)
+    /// Create a new note from chromatic pitch class (0-11), defaulting to octave 4
     pub fn new(pitch_class: u8) -> Result<Self> {
         if pitch_class > 11 {
             return Err(anyhow!("Pitch class must be 0-11, got {}", pitch_class));
@@ -67,6 +56,20 @@ impl Note {
 
         Ok(Note {
             pitch_class,
+            octave: 4,
+            accidental_preference: AccidentalPreference::Natural,
+        })
+    }
+
+    /// Create a new note with explicit octave
+    pub fn new_with_octave(pitch_class: u8, octave: i8) -> Result<Self> {
+        if pitch_class > 11 {
+            return Err(anyhow!("Pitch class must be 0-11, got {}", pitch_class));
+        }
+
+        Ok(Note {
+            pitch_class,
+            octave,
             accidental_preference: AccidentalPreference::Natural,
         })
     }
@@ -87,6 +90,7 @@ impl Note {
 
         Ok(Note {
             pitch_class,
+            octave: 4,
             accidental_preference: preference,
         })
     }
@@ -141,7 +145,11 @@ impl Note {
 
     /// Transpose the note by a number of semitones
     pub fn transpose(self, semitones: i8) -> Note {
-        let new_pitch_class = ((self.pitch_class as i8 + semitones).rem_euclid(12)) as u8;
+        let current_semitone_in_octave = self.pitch_class as i32;
+        let new_semitone_absolute = current_semitone_in_octave + semitones as i32;
+
+        let octave_shift = new_semitone_absolute.div_euclid(12);
+        let new_pitch_class = new_semitone_absolute.rem_euclid(12) as u8;
 
         // When transposing, reset accidental preference appropriately
         let new_preference = if Self::is_natural_note(new_pitch_class) {
@@ -156,18 +164,10 @@ impl Note {
 
         Note {
             pitch_class: new_pitch_class,
+            octave: self.octave + octave_shift as i8,
             accidental_preference: new_preference,
         }
     }
-
-    // /// Transpose the note by a number of semitones
-    // pub fn transpose(self, semitones: i8) -> Note {
-    //     let new_pitch_class = ((self.pitch_class as i8 + semitones).rem_euclid(12)) as u8;
-    //     Note {
-    //         pitch_class: new_pitch_class,
-    //         accidental_preference: self.accidental_preference,
-    //     }
-    // }
 }
 
 impl FromStr for Note {
@@ -176,7 +176,31 @@ impl FromStr for Note {
     fn from_str(s: &str) -> Result<Self> {
         let s = s.trim().to_uppercase();
 
-        let (pitch_class, accidental_preference) = match s.as_str() {
+        // Find where the note name ends and possible octave number begins
+        // Note name can be 1 or 2 chars (e.g. "C", "F#")
+        // Octave can be negative (e.g. "-1")
+
+        let mut note_part_end_idx = 0;
+        let mut chars = s.chars().peekable();
+
+        // First char is always part of the note name
+        if chars.next().is_some() {
+            note_part_end_idx += 1;
+        }
+
+        // Check second char (could be accidental or digit/sign)
+        if let Some(&c) = chars.peek() {
+            if c == '#' || c == 'B' || c == 'S' {
+                // Handle sharp/flat and legacy 'S'/'B'
+                chars.next(); // Consume the char
+                note_part_end_idx += 1;
+            }
+        }
+
+        let note_part = &s[..note_part_end_idx];
+        let octave_part = &s[note_part_end_idx..];
+
+        let (pitch_class, accidental_preference) = match note_part {
             // Natural notes
             "C" => (0, AccidentalPreference::Natural),
             "D" => (2, AccidentalPreference::Natural),
@@ -200,11 +224,20 @@ impl FromStr for Note {
             "AB" => (8, AccidentalPreference::Flat),
             "BB" => (10, AccidentalPreference::Flat),
 
-            _ => return Err(anyhow!("Invalid note name: {}", s)),
+            _ => return Err(anyhow!("Invalid note name: {}", note_part)),
+        };
+
+        let octave = if octave_part.is_empty() {
+            4
+        } else {
+            octave_part
+                .parse::<i8>()
+                .map_err(|_| anyhow!("Invalid octave: {}", octave_part))?
         };
 
         Ok(Note {
             pitch_class,
+            octave,
             accidental_preference,
         })
     }
@@ -237,11 +270,18 @@ impl fmt::Display for Note {
             }
         };
 
-        // Fallback to pitch class number if name is empty (shouldn't happen with fix above)
         if name.is_empty() {
-            write!(f, "PC{}", self.pitch_class)
+            write!(f, "PC{}", self.pitch_class)?;
         } else {
-            write!(f, "{}", name)
+            write!(f, "{}", name)?;
+        }
+
+        // Only display octave if it's not 4, for cleaner basic output
+        // OR always display? Let's display if not 4.
+        if self.octave != 4 {
+            write!(f, "{}", self.octave)
+        } else {
+            Ok(())
         }
     }
 }
@@ -350,5 +390,53 @@ mod tests {
 
         let c = Note::with_accidental_preference(0, true).unwrap();
         assert_eq!(format!("{}", c), "C"); // Natural notes ignore preference
+    }
+
+    #[test]
+    fn test_octave_parsing() {
+        let c4: Note = "C4".parse().unwrap();
+        assert_eq!(c4.pitch_class(), 0);
+        assert_eq!(c4.octave, 4);
+
+        let a0: Note = "A0".parse().unwrap();
+        assert_eq!(a0.pitch_class(), 9);
+        assert_eq!(a0.octave, 0);
+
+        let bb3: Note = "Bb3".parse().unwrap();
+        assert_eq!(bb3.pitch_class(), 10);
+        assert_eq!(bb3.octave, 3);
+
+        let g_neg1: Note = "G-1".parse().unwrap();
+        assert_eq!(g_neg1.pitch_class(), 7);
+        assert_eq!(g_neg1.octave, -1);
+    }
+
+    #[test]
+    fn test_octave_transposition() {
+        let c4: Note = "C4".parse().unwrap();
+
+        let c5 = c4 + 12;
+        assert_eq!(c5.pitch_class(), 0);
+        assert_eq!(c5.octave, 5);
+
+        let b3 = c4 - 1;
+        assert_eq!(b3.pitch_class(), 11);
+        assert_eq!(b3.octave, 3);
+
+        let c4_back = b3 + 1;
+        assert_eq!(c4_back.pitch_class(), 0);
+        assert_eq!(c4_back.octave, 4);
+    }
+
+    #[test]
+    fn test_octave_frequencies() {
+        let a4: Note = "A4".parse().unwrap();
+        assert!((a4.frequency() - 440.0).abs() < 0.01);
+
+        let a5: Note = "A5".parse().unwrap();
+        assert!((a5.frequency() - 880.0).abs() < 0.01);
+
+        let a3: Note = "A3".parse().unwrap();
+        assert!((a3.frequency() - 220.0).abs() < 0.01);
     }
 }

@@ -19,11 +19,11 @@ tempo 90
 // --------------------------
 // Play ii-V-I progression starting in C, modulating up
 
-let prog = ii_V_I(C)
+let prog = I_I_bVII_IV(C)
 
 repeat 4 {
   play prog queue      // Queue for seamless playback
-  prog = prog + 2      // Transpose up 2 semitones (whole step)
+  prog = prog + 3      // Transpose up 3 semitones (whole step)
 }
 
 // Result: Plays ii-V-I in C, D, E, F# sequentially!
@@ -33,7 +33,7 @@ repeat 4 {
 // --------------------------
 // Descend through the circle of fifths
 
-let circle = ii_V_I(C)
+let circle = I_I_bVII_IV(C)
 
 repeat 4 {
   play circle queue
@@ -47,7 +47,7 @@ repeat 4 {
 // --------------------------
 // Same progression with different inversions
 
-let base = I_V_vi_IV(G)
+let base = I_I_bVII_IV(C)
 play base queue
 
 let inverted = map(invert, base)
