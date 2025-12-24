@@ -65,32 +65,39 @@ impl Repl {
                         }
 
                         match self.evaluate_expression(expr_str) {
-                            Ok(value) => match self.audio_player.play() {
-                                Ok(_) => {
-                                    if let Ok(frequencies) = get_frequencies_from_value(&value) {
+                            Ok(value) => {
+                                // Get frequencies from the value
+                                match get_frequencies_from_value(&value) {
+                                    Ok(frequencies) => {
+                                        // Set notes BEFORE starting playback
                                         if let Err(e) = self.audio_player.set_notes(frequencies) {
                                             println!(
                                                 "{}",
                                                 format!("Error: Failed to set notes: {}", e)
                                                     .bright_red()
                                             );
+                                            continue;
+                                        }
+
+                                        // Now start playback
+                                        if let Err(e) = self.audio_player.play() {
+                                            println!(
+                                                "{}",
+                                                format!("Error: Failed to start playback: {}", e)
+                                                    .bright_red()
+                                            );
                                         } else {
                                             println!(
                                                 "{}",
-                                                "Audio playback started.".bright_green()
+                                                "🔊 Audio playback started.".bright_green()
                                             );
                                         }
-                                    } else {
-                                        println!(
-                                            "{}",
-                                            "Error: Cannot play this value type.".bright_red()
-                                        );
+                                    }
+                                    Err(e) => {
+                                        println!("{}", format!("Error: {}", e).bright_red());
                                     }
                                 }
-                                Err(e) => {
-                                    println!("{}", format!("Error: {}", e).bright_red());
-                                }
-                            },
+                            }
                             Err(e) => {
                                 println!("{}", format!("Error: {}", e).bright_red());
                             }
@@ -102,7 +109,38 @@ impl Repl {
                                 format!("Error: Failed to stop audio playback: {}", e).bright_red()
                             );
                         } else {
-                            println!("{}", "Audio playback stopped.".bright_green());
+                            println!("{}", "🔇 Audio playback stopped.".bright_green());
+                        }
+                    } else if line.starts_with("audio volume") {
+                        let volume_str = line.trim_start_matches("audio volume").trim();
+                        if volume_str.is_empty() {
+                            // Show current volume
+                            match self.audio_player.get_volume() {
+                                Ok(vol) => println!("Current volume: {:.0}%", vol * 100.0),
+                                Err(e) => println!("{}", format!("Error: {}", e).bright_red()),
+                            }
+                        } else {
+                            // Set volume
+                            match volume_str.parse::<f32>() {
+                                Ok(vol) => {
+                                    let normalized_vol = if vol > 1.0 { vol / 100.0 } else { vol };
+                                    if let Err(e) = self.audio_player.set_volume(normalized_vol) {
+                                        println!("{}", format!("Error: {}", e).bright_red());
+                                    } else {
+                                        println!(
+                                            "{}",
+                                            format!(
+                                                "🔊 Volume set to {:.0}%",
+                                                normalized_vol * 100.0
+                                            )
+                                            .bright_green()
+                                        );
+                                    }
+                                }
+                                Err(_) => {
+                                    println!("{}", "Error: Invalid volume value. Use a number between 0-100 or 0.0-1.0".bright_red());
+                                }
+                            }
                         }
                     } else if line == "quit" || line == "exit" {
                         break;
@@ -307,11 +345,18 @@ impl Repl {
         println!("    3: I (Tonic - home, stability, resolution)");
 
         println!();
-        println!("{}", "Commands:".green());
-        println!("  {}  - Show this help", "help".bright_green());
-        println!("  {}  - Play audio", "audio play".cyan());
-        println!("  {} - Pause audio", "audio pause".cyan());
-        println!("  {}  - Exit the REPL", "quit".bright_red());
+        println!("{}", "Audio Commands:".green());
+        println!("  {}  - Play a note or chord", "audio play <expr>".cyan());
+        println!("  {}      - Stop current playback", "audio stop".cyan());
+        println!(
+            "  {} - Set volume (0-100 or 0.0-1.0)",
+            "audio volume <level>".cyan()
+        );
+        println!("  {}     - Show current volume", "audio volume".cyan());
+        println!();
+        println!("{}", "Other Commands:".green());
+        println!("  {}         - Show this help", "help".bright_green());
+        println!("  {}         - Exit the REPL", "quit".bright_red());
     }
 }
 
@@ -326,7 +371,11 @@ fn get_frequencies_from_value(value: &Value) -> Result<Vec<f32>> {
                 frequencies.push(note.frequency());
             }
         }
-        _ => return Err(anyhow::anyhow!("Unsupported value type for playback")),
+        Value::Progression(_) => {
+            return Err(anyhow::anyhow!(
+                "Progressions are not yet supported for audio playback. Try playing individual chords instead."
+            ));
+        }
     }
     Ok(frequencies)
 }
