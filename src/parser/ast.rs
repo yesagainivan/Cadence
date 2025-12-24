@@ -206,6 +206,9 @@ pub enum Expression {
 
     /// Pattern literal: "C E G _"
     Pattern(Pattern),
+
+    /// String literal (that failed to parse as pattern): "rev"
+    String(String),
 }
 
 /// Comparison operators
@@ -224,6 +227,8 @@ pub enum Value {
     Progression(Progression),
     Boolean(bool),
     Pattern(Pattern),
+    Number(i32),
+    String(String),
 }
 
 impl fmt::Display for Expression {
@@ -272,6 +277,7 @@ impl fmt::Display for Expression {
                 write!(f, "{} {} {}", left, op_str, right)
             }
             Expression::Pattern(pattern) => write!(f, "{}", pattern),
+            Expression::String(s) => write!(f, "\"{}\"", s),
         }
     }
 }
@@ -284,6 +290,8 @@ impl fmt::Display for Value {
             Value::Progression(progression) => write!(f, "{}", progression),
             Value::Boolean(b) => write!(f, "{}", b),
             Value::Pattern(pattern) => write!(f, "{}", pattern),
+            Value::Number(n) => write!(f, "{}", n),
+            Value::String(s) => write!(f, "\"{}\"", s),
         }
     }
 }

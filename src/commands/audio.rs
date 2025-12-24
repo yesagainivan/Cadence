@@ -1,7 +1,7 @@
 //! Audio-related commands
 
+use crate::audio::clock::Duration;
 use crate::audio::playback_engine::ProgressionConfig;
-use crate::audio::scheduler::Duration;
 use crate::commands::{CommandContext, CommandResult};
 use crate::parser::Value;
 use colored::*;
@@ -181,15 +181,18 @@ fn get_frequencies_from_value(value: &Value) -> anyhow::Result<Vec<f32>> {
         }
         Value::Progression(_) => {
             return Err(anyhow::anyhow!(
-                "Use 'audio play progression' for progressions"
+                "Cannot play a progression directly as frequencies"
             ));
         }
-        Value::Boolean(_) => {
-            return Err(anyhow::anyhow!("Cannot play a boolean value"));
-        }
+        Value::Boolean(_) => return Err(anyhow::anyhow!("Cannot play a boolean")),
         Value::Pattern(_) => {
-            return Err(anyhow::anyhow!("Use 'play' for patterns"));
+            return Err(anyhow::anyhow!(
+                "Cannot play a pattern directly as frequencies"
+            ));
         }
+        Value::Number(_) => return Err(anyhow::anyhow!("Cannot play a number")),
+        Value::String(_) => return Err(anyhow::anyhow!("Cannot play a string")),
     }
+
     Ok(frequencies)
 }

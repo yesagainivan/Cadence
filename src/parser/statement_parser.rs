@@ -447,11 +447,19 @@ impl StatementParser {
             }
 
             Token::StringLiteral(pattern_str) => {
-                // Parse string literalpri as a pattern: "C E G _"
-                let pattern = crate::types::Pattern::parse(&pattern_str)
-                    .map_err(|e| anyhow!("Invalid pattern '{}': {}", pattern_str, e))?;
-                self.advance();
-                Ok(Expression::Pattern(pattern))
+                // Try to parse as pattern, otherwise treat as string literal
+                match crate::types::Pattern::parse(&pattern_str) {
+                    Ok(pattern) => {
+                        self.advance();
+                        Ok(Expression::Pattern(pattern))
+                    }
+                    Err(_) => {
+                        // Not a pattern, so it's a string literal
+                        let s = pattern_str.clone();
+                        self.advance();
+                        Ok(Expression::String(s))
+                    }
+                }
             }
 
             Token::LeftBracket => self.parse_expr_chord(),
@@ -460,16 +468,25 @@ impl StatementParser {
 
             Token::Number(num) => {
                 let name = num.to_string();
+                let val = num; // Value is already i32, no deref needed
                 self.advance();
                 // If followed by LeftParen, it's a function call
                 if matches!(self.current(), Token::LeftParen) {
                     self.parse_function_call(name)
                 } else {
-                    Err(anyhow!(
-                        "Unexpected number: {} (did you mean {}(key)?)",
-                        name,
-                        name
-                    ))
+                    // Treat bare number as raw pitch class note
+                    // This allows fast(p, 2) where 2 becomes a Note with pitch class 2
+                    if val >= 0 {
+                        let note = crate::types::Note::new(val as u8)
+                            .map_err(|e| anyhow!("Invalid note from number {}: {}", val, e))?;
+                        Ok(Expression::Note(note))
+                    } else {
+                        Err(anyhow!(
+                            "Unexpected negative number: {} (did you mean {}(key)?)",
+                            name,
+                            name
+                        ))
+                    }
                 }
             }
 

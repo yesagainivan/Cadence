@@ -155,8 +155,8 @@ impl Repl {
                 if let crate::parser::Value::Pattern(ref pattern) = display_value {
                     let step_beats = pattern.step_beats();
                     if step_beats > 0.0 {
-                        config = config
-                            .with_duration(crate::audio::scheduler::Duration::Beats(step_beats));
+                        config =
+                            config.with_duration(crate::audio::clock::Duration::Beats(step_beats));
                     }
                 }
 

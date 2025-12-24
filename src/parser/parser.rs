@@ -139,9 +139,26 @@ impl Parser {
 
             Token::LeftDoubleBracket => self.parse_progression(),
 
+            Token::StringLiteral(pattern_str) => {
+                // Try to parse as pattern, otherwise treat as string literal
+                match crate::types::Pattern::parse(pattern_str) {
+                    Ok(pattern) => {
+                        self.advance();
+                        Ok(Expression::Pattern(pattern))
+                    }
+                    Err(_) => {
+                        // Not a pattern, so it's a string literal
+                        let s = pattern_str.clone();
+                        self.advance();
+                        Ok(Expression::String(s))
+                    }
+                }
+            }
+
             // Handle numeric function calls like 251(C) for jazz progressions
             Token::Number(num) => {
                 let name = num.to_string();
+                let val = *num; // Capture value before borrowing self mutably
                 self.advance();
 
                 // If followed by LeftParen, it's a function call
@@ -151,11 +168,20 @@ impl Parser {
                     self.current_token = Token::Identifier(name.clone());
                     self.parse_function_call(name)
                 } else {
-                    Err(anyhow!(
-                        "Unexpected number: {} (did you mean {}(key)?)",
-                        name,
-                        name
-                    ))
+                    // Treat bare number as raw pitch class note
+                    // This allows fast(p, 2) where 2 becomes a Note with pitch class 2
+                    // Note::new takes u8, so we cast.
+                    if val >= 0 {
+                        let note = crate::types::Note::new(val as u8)
+                            .map_err(|e| anyhow!("Invalid note from number {}: {}", val, e))?;
+                        Ok(Expression::Note(note))
+                    } else {
+                        Err(anyhow!(
+                            "Unexpected negative number: {} (did you mean {}(key)?)",
+                            name,
+                            name
+                        ))
+                    }
                 }
             }
 

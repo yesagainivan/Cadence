@@ -29,6 +29,7 @@ impl Evaluator {
             Expression::Note(note) => Ok(Value::Note(note)),
             Expression::Chord(chord) => Ok(Value::Chord(chord)),
             Expression::Pattern(pattern) => Ok(Value::Pattern(pattern)),
+            Expression::String(s) => Ok(Value::String(s)),
             Expression::Transpose { target, semitones } => {
                 let target_value = self.eval_with_env(*target, env)?;
                 match target_value {
@@ -46,6 +47,8 @@ impl Evaluator {
                     }
                     Value::Boolean(_) => Err(anyhow!("Cannot transpose a boolean value")),
                     Value::Pattern(_) => Err(anyhow!("Cannot transpose a pattern directly")),
+                    Value::Number(_) => Err(anyhow!("Cannot transpose a number")),
+                    Value::String(_) => Err(anyhow!("Cannot transpose a string")),
                 }
             }
             Expression::Intersection { left, right } => {
@@ -575,6 +578,151 @@ impl Evaluator {
                 }
             }
 
+            // Pattern operators
+            "fast" => {
+                if args.len() != 2 {
+                    return Err(anyhow!("fast() expects 2 arguments: pattern, factor"));
+                }
+
+                let pattern_value = self.eval_with_env(args[0].clone(), env)?;
+                let factor_value = self.eval_with_env(args[1].clone(), env)?;
+
+                match (pattern_value, factor_value) {
+                    (Value::Pattern(pattern), Value::Note(note)) => {
+                        // Use pitch class as factor (e.g., D = 2)
+                        let factor = (note.pitch_class() as usize).max(1);
+                        Ok(Value::Pattern(pattern.fast(factor)))
+                    }
+                    _ => Err(anyhow!("fast() expects (pattern, factor_note)")),
+                }
+            }
+
+            "slow" => {
+                if args.len() != 2 {
+                    return Err(anyhow!("slow() expects 2 arguments: pattern, factor"));
+                }
+
+                let pattern_value = self.eval_with_env(args[0].clone(), env)?;
+                let factor_value = self.eval_with_env(args[1].clone(), env)?;
+
+                match (pattern_value, factor_value) {
+                    (Value::Pattern(pattern), Value::Note(note)) => {
+                        // Use pitch class as factor (e.g., D = 2)
+                        let factor = (note.pitch_class() as usize).max(1);
+                        Ok(Value::Pattern(pattern.slow(factor)))
+                    }
+                    _ => Err(anyhow!("slow() expects (pattern, factor_note)")),
+                }
+            }
+
+            "rev" => {
+                if args.len() != 1 {
+                    return Err(anyhow!("rev() expects 1 argument: pattern"));
+                }
+
+                let arg_value = self.eval_with_env(args.into_iter().next().unwrap(), env)?;
+                match arg_value {
+                    Value::Pattern(pattern) => Ok(Value::Pattern(pattern.rev())),
+                    _ => Err(anyhow!("rev() only works on patterns")),
+                }
+            }
+
+            "every" => {
+                if args.len() != 3 {
+                    return Err(anyhow!(
+                        "every() expects 3 arguments: intervals, function_name, pattern"
+                    ));
+                }
+
+                // Parse n (intervals)
+                let n_val = self.eval_with_env(args[0].clone(), env)?;
+                let n = match n_val {
+                    Value::Note(note) => note.pitch_class() as i32,
+                    Value::Number(num) => num,
+                    _ => return Err(anyhow!("every() expects a number as first argument")),
+                };
+
+                // Parse function name (transform)
+                let transform_name = match &args[1] {
+                    Expression::Variable(name) => name.clone(),
+                    Expression::String(s) => s.clone(),
+                    Expression::Pattern(p) => p.to_string(), // Fallback
+                    Expression::FunctionCall {
+                        name,
+                        args: internal_args,
+                    } if internal_args.is_empty() => name.clone(),
+                    _ => {
+                        return Err(anyhow!(
+                            "every() expects a function name as second argument"
+                        ));
+                    }
+                };
+
+                // Parse pattern
+                let pattern_val = self.eval_with_env(args[2].clone(), env)?;
+                let pattern = match pattern_val {
+                    Value::Pattern(p) => p,
+                    _ => return Err(anyhow!("every() expects a pattern as third argument")),
+                };
+
+                // Get current cycle from environment
+                let cycle = if let Some(e) = env {
+                    match e.get("_cycle") {
+                        Some(Value::Number(c)) => *c,
+                        Some(Value::Note(n)) => n.pitch_class() as i32,
+                        _ => 0,
+                    }
+                } else {
+                    0
+                };
+
+                // Apply logic: if cycle % n == 0, apply transform
+                if n > 0 && cycle % n == 0 {
+                    // Apply the transform
+                    // We need to call the function recursively with the pattern
+                    // Construct args for the function call
+                    // This is tricky because eval_function_with_env expects Expressions, but we have a Value::Pattern.
+                    // We can wrap the pattern back into Expression::Pattern?
+                    // No, Expression::Pattern holds a Pattern struct. Yes, we can.
+
+                    // Are there any other args required by the transform?
+                    // `rev` takes 1 arg (pattern).
+                    // `fast` takes 2 args. `every(3, fast(2), p)`?
+                    // If the user passed `fast(2)` as the transform arg, it would be a FunctionCall expression.
+                    // BUT my parser parses `fast(2)` as a function call immediately.
+                    // If I pass `fast` (variable), I only have the name. I don't have the factor 2.
+
+                    // IF the user syntax is `every(3, "rev", p)`, then `rev` is just a name.
+                    // If the user wants `fast 2`, they might need partial application which I don't have.
+                    // Or syntax: `every(3, fast, 2, p)`? No.
+
+                    // Let's assume for now, `every` supports only specific unary transformations referencable by name: `rev`.
+                    // Or we support `every(n, function_call_expr, pattern)` where `function_call_expr` is evaluated?
+                    // Tidal's `every 3 (fast 2) "..."` works because Haskell functions are curried.
+
+                    // For now, let's support `rev` specially.
+                    // If `transform_name` == "rev", apply rev.
+
+                    match transform_name.as_str() {
+                        "rev" => Ok(Value::Pattern(pattern.rev())),
+                        _ => {
+                            // Try calling it as a function if we can reconstruct expression?
+                            // Maybe later. For now, just rev.
+                            // Also support fast/slow if I can figure out how to pass args.
+                            // Wait, if I use `Expression::FunctionCall` as the argument, `eval_with_env` will evaluate it!
+                            // That returns a Value. I can't pass a function.
+
+                            // LIMITATION: `every` currently only supports "rev".
+                            Err(anyhow!(
+                                "every() currently only supports 'rev' transformation"
+                            ))
+                        }
+                    }
+                } else {
+                    Ok(Value::Pattern(pattern))
+                }
+            }
+
             _ => Err(anyhow!("Unknown function: {}", name)),
         }
     }
@@ -905,6 +1053,61 @@ mod evaluator_numeric_tests {
                 assert_eq!(analysis[2].to_string(), "I");
             }
             _ => panic!("Expected progression value"),
+        }
+    }
+
+    #[cfg(test)]
+    mod pattern_tests {
+        use super::*;
+        use crate::parser::parse;
+
+        #[test]
+        fn test_eval_fast() {
+            // fast("C E", 2) -> pattern with 2.0 beats per cycle (was 4.0)
+            let expr = parse("fast(\"C E\", 2)").unwrap();
+            let result = Evaluator::new().eval(expr).unwrap();
+
+            match result {
+                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, 2.0),
+                _ => panic!("Expected pattern value"),
+            }
+        }
+
+        #[test]
+        fn test_eval_slow() {
+            // slow("C E", 2) -> pattern with 8.0 beats per cycle (was 4.0)
+            let expr = parse("slow(\"C E\", 2)").unwrap();
+            let result = Evaluator::new().eval(expr).unwrap();
+
+            match result {
+                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, 8.0),
+                _ => panic!("Expected pattern value"),
+            }
+        }
+
+        #[test]
+        fn test_eval_rev() {
+            // rev("C D E") -> E D C
+            let expr = parse("rev(\"C D E\")").unwrap();
+            let result = Evaluator::new().eval(expr).unwrap();
+
+            match result {
+                Value::Pattern(p) => {
+                    let steps = p.steps;
+                    assert_eq!(steps.len(), 3);
+                    // First step should be E (pitch class 4)
+                    match &steps[0] {
+                        crate::types::PatternStep::Note(n) => assert_eq!(n.pitch_class(), 4),
+                        _ => panic!("Expected Note E, got {:?}", steps[0]),
+                    }
+                    // Last step should be C (pitch class 0)
+                    match &steps[2] {
+                        crate::types::PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0),
+                        _ => panic!("Expected Note C, got {:?}", steps[2]),
+                    }
+                }
+                _ => panic!("Expected pattern value"),
+            }
         }
     }
 

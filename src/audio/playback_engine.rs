@@ -9,8 +9,7 @@
 //! perfectly in sync regardless of how many tracks are playing.
 
 use crate::audio::audio::AudioPlayerHandle;
-use crate::audio::clock::ClockTick;
-use crate::audio::scheduler::Duration;
+use crate::audio::clock::{ClockTick, Duration};
 use crate::parser::{Evaluator, Expression, SharedEnvironment, Value};
 use anyhow::Result;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender, select};
@@ -34,12 +33,16 @@ pub enum PlaybackSource {
 }
 
 impl PlaybackSource {
-    /// Get the current frequencies by evaluating the source
-    /// For Static sources, returns the stored frequencies
+    /// Get the current frequencies and durations by evaluating the source
+    /// For Static sources, returns the stored frequencies with default duration 1.0
     /// For Reactive sources, re-evaluates the expression against the current environment
-    pub fn evaluate(&self) -> Result<Vec<Vec<f32>>> {
+    /// Returns Vec<(frequencies, duration_in_beats)>
+    pub fn evaluate(&self) -> Result<Vec<(Vec<f32>, f32)>> {
         match self {
-            PlaybackSource::Static(freqs) => Ok(freqs.clone()),
+            PlaybackSource::Static(freqs) => {
+                // Static sources get default duration of 1.0 beat each
+                Ok(freqs.iter().map(|f| (f.clone(), 1.0)).collect())
+            }
             PlaybackSource::Reactive { expression, env } => {
                 let evaluator = Evaluator::new();
                 let env_guard = env
@@ -51,27 +54,29 @@ impl PlaybackSource {
         }
     }
 
-    /// Convert a Value to a vector of frequency vectors
-    fn value_to_frequencies(value: &Value) -> Result<Vec<Vec<f32>>> {
+    /// Convert a Value to a vector of (frequency vectors, duration) tuples
+    fn value_to_frequencies(value: &Value) -> Result<Vec<(Vec<f32>, f32)>> {
         match value {
-            Value::Note(note) => Ok(vec![vec![note.frequency()]]),
-            Value::Chord(chord) => Ok(vec![chord.notes().map(|n| n.frequency()).collect()]),
+            Value::Note(note) => Ok(vec![(vec![note.frequency()], 1.0)]),
+            Value::String(_) => Err(anyhow::anyhow!("Cannot play a string string")),
+            Value::Chord(chord) => Ok(vec![(chord.notes().map(|n| n.frequency()).collect(), 1.0)]),
             Value::Progression(prog) => Ok(prog
                 .chords()
-                .map(|c| c.notes().map(|n| n.frequency()).collect())
+                .map(|c| (c.notes().map(|n| n.frequency()).collect(), 1.0))
                 .collect()),
             Value::Boolean(_) => Err(anyhow::anyhow!("Cannot play a boolean value")),
+            Value::Number(_) => Err(anyhow::anyhow!("Cannot play a raw number")),
             Value::Pattern(pattern) => {
-                // Convert pattern to frequencies, preserving rests as empty vectors
-                // Each event becomes one "chord" in the playback
+                // Convert pattern to frequencies with per-event durations
+                // Groups subdivide their time slot, so [C D] E gives C 0.5 beats, D 0.5 beats, E 1 beat
                 Ok(pattern
                     .to_events()
                     .into_iter()
-                    .map(|(freqs, _, is_rest)| {
+                    .map(|(freqs, duration, is_rest)| {
                         if is_rest {
-                            vec![] // Empty = silence for this step
+                            (vec![], duration) // Empty = silence for this step, but keep duration
                         } else {
-                            freqs
+                            (freqs, duration)
                         }
                     })
                     .collect())
@@ -79,7 +84,7 @@ impl PlaybackSource {
         }
     }
 
-    /// Get the number of chords in this source (evaluates if reactive)
+    /// Get the number of events in this source (evaluates if reactive)
     pub fn len(&self) -> Result<usize> {
         Ok(self.evaluate()?.len())
     }
@@ -87,6 +92,18 @@ impl PlaybackSource {
     /// Check if the source is empty
     pub fn is_empty(&self) -> Result<bool> {
         Ok(self.evaluate()?.is_empty())
+    }
+
+    /// Update a variable in the reactive environment (no-op for Static sources)
+    /// Used for injecting time/state like `_cycle` into the evaluator
+    pub fn update_environment(&self, name: &str, value: Value) -> Result<()> {
+        if let PlaybackSource::Reactive { env, .. } = self {
+            let _ = env
+                .write()
+                .map_err(|e| anyhow::anyhow!("Environment lock poisoned: {}", e))?
+                .set(name, value);
+        }
+        Ok(())
     }
 }
 
@@ -259,8 +276,6 @@ struct PlaybackLoop {
     track_id: usize,
 
     // Timing state for sub-beat notes
-    /// Beats accumulated since last chord change
-    beats_accumulated: f32,
     /// Next beat boundary to trigger chord change
     next_chord_beat: f64,
     /// Whether we're in a gap (silence between notes)
@@ -289,7 +304,6 @@ impl PlaybackLoop {
             iteration: 0,
             audio_started: false,
             track_id,
-            beats_accumulated: 0.0,
             next_chord_beat: 0.0,
             in_gap: false,
             gap_end_beat: 0.0,
@@ -473,6 +487,15 @@ impl PlaybackLoop {
             }
         }
 
+        // Update environment with current cycle index (for `every` operator)
+        // We use self.iteration as the cycle count
+        if let Err(e) = config
+            .source
+            .update_environment("_cycle", Value::Number(self.iteration as i32))
+        {
+            eprintln!("Failed to update environment: {}", e);
+        }
+
         // Evaluate the source to get current frequencies
         let frequencies = match config.source.evaluate() {
             Ok(f) => f,
@@ -502,7 +525,7 @@ impl PlaybackLoop {
             return;
         }
 
-        let chord_frequencies = &frequencies[self.chord_index];
+        let (chord_frequencies, event_duration) = &frequencies[self.chord_index];
 
         // Set the notes for this track
         if let Err(e) = self
@@ -523,8 +546,18 @@ impl PlaybackLoop {
         // Advance chord index
         self.chord_index += 1;
 
-        // Calculate next chord beat
-        let duration_beats = self.duration_to_beats(&config.note_duration);
+        // Calculate next chord beat using per-event duration
+        // Pattern events have their own duration from to_events()
+        // Non-pattern events use the config's note_duration as fallback
+        let base_duration = self.duration_to_beats(&config.note_duration);
+        let duration_beats = if *event_duration > 0.0 {
+            // Use the event's own duration, scaled by the base duration
+            // Pattern events are relative (e.g., 0.5 = half of a step)
+            // We multiply by base_duration to get actual beat timing
+            event_duration * base_duration
+        } else {
+            base_duration
+        };
         let gap_beats = self.duration_to_beats(&config.gap_duration);
 
         if gap_beats > 0.0 {
@@ -615,13 +648,13 @@ mod tests {
         assert_eq!(queue.len(), 3);
 
         let first = queue.pop_front().unwrap();
-        assert_eq!(first.source.evaluate().unwrap()[0][0], 440.0);
+        assert_eq!(first.source.evaluate().unwrap()[0].0[0], 440.0);
 
         let second = queue.pop_front().unwrap();
-        assert_eq!(second.source.evaluate().unwrap()[0][0], 880.0);
+        assert_eq!(second.source.evaluate().unwrap()[0].0[0], 880.0);
 
         let third = queue.pop_front().unwrap();
-        assert_eq!(third.source.evaluate().unwrap()[0][0], 220.0);
+        assert_eq!(third.source.evaluate().unwrap()[0].0[0], 220.0);
 
         assert!(queue.is_empty());
     }

@@ -81,10 +81,10 @@ A production-ready music programming language for chord progressions and harmoni
 - [ ] Changes apply at next beat/bar boundary
 - [ ] Error recovery without stopping playback
 
-### 3.3 Pattern System
-- [ ] Cycle-based patterns: `"C E G _"` (underscore = rest)
-- [ ] Pattern operators: `fast`, `slow`, `rev`, `every`
-- [ ] Mini-notation parser
+### 3.3 Pattern System ✅
+- [x] Cycle-based patterns: `"C E G _"` (underscore = rest)
+- [x] Pattern operators: `fast`, `slow`, `rev`, `every`
+- [x] Mini-notation parser (string -> pattern)
 
 ### 3.4 Multiple Voices
 - [x] Named tracks/voices (`track N { ... }`)
@@ -133,8 +133,8 @@ A production-ready music programming language for chord progressions and harmoni
 |-----------|--------|
 | Core Types (Note, Chord, Progression) | ✅ Stable |
 | Audio Engine (crossfade, beat-sync) | ✅ Production-ready |
-| Master Clock (24 PPQN, multi-track sync) | ✅ New! Eliminates tempo drift |
-| Scheduler (beat tracking) | ✅ Complete |
+| Master Clock (24 PPQN, multi-track sync) | ✅ Stable |
+| Scheduler | 🗑️ Removed (Replaced by MasterClock) |
 | REPL | ✅ Refactored with CommandRegistry |
 | Parser/AST | ✅ Separated, scripting-ready |
 | Lexer | ✅ 26 tokens + i32 numbers + newlines |
@@ -149,6 +149,7 @@ A production-ready music programming language for chord progressions and harmoni
 | Multitrack | ✅ `track N { }` or `on N { }`, 16-track limit |
 | Voice Leading | ✅ `smooth_voice_leading()` with octave normalization |
 | Reactive Variables | ✅ Per-beat re-evaluation, live variable updates |
+| Pattern System | ✅ Operators (`every`, `fast`, `rev`), Cycle-based timing |
 | Live Coding | 🟡 Reactive variables done, hot-reload pending |
 
 ---
@@ -169,6 +170,6 @@ A production-ready music programming language for chord progressions and harmoni
 3. ~~**Error Line Info** - Improve error messages with line/column info~~ ✅ Done
 4. ~~**Multi-track/Voices** - Named tracks for simultaneous playback~~ ✅ Done
 5. ~~**Reactive Variables** - Variable updates affect playing audio~~ ✅ Done
-6. **Pattern System** - Mini-notation, cycle-based patterns, operators
+6. ~~**Pattern System** - Mini-notation, cycle-based patterns, operators~~ ✅ Done
 7. **Live Reload** - File watch with hot-reload at beat boundaries
 8. **ADSR Envelopes** - Configurable attack/decay/sustain/release

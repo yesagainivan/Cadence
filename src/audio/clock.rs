@@ -9,7 +9,7 @@ use crossbeam_channel::{Receiver, unbounded};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::{Duration as StdDuration, Instant};
 
 /// Ticks per quarter note (MIDI standard)
 pub const TICKS_PER_BEAT: u8 = 24;
@@ -174,11 +174,11 @@ impl ClockThread {
     }
 
     /// Calculate duration between ticks based on current BPM
-    fn tick_duration(&self) -> Duration {
+    fn tick_duration(&self) -> StdDuration {
         let bpm = self.get_bpm();
         let beat_duration_secs = 60.0 / bpm as f64;
         let tick_duration_secs = beat_duration_secs / TICKS_PER_BEAT as f64;
-        Duration::from_secs_f64(tick_duration_secs)
+        StdDuration::from_secs_f64(tick_duration_secs)
     }
 
     fn run(&mut self) {
@@ -207,8 +207,8 @@ impl ClockThread {
                     } else {
                         // Spin-wait with small sleeps for precision
                         let remaining = target - now;
-                        if remaining > Duration::from_micros(500) {
-                            thread::sleep(Duration::from_micros(100));
+                        if remaining > StdDuration::from_micros(500) {
+                            thread::sleep(StdDuration::from_micros(100));
                         } else {
                             // Busy-wait for final precision
                             std::hint::spin_loop();
@@ -289,6 +289,33 @@ impl ClockThread {
     }
 }
 
+/// Musical duration representation
+#[derive(Clone, Copy, Debug)]
+pub enum Duration {
+    /// Duration in beats (quarter notes in 4/4 time)
+    Beats(f32),
+    /// Absolute duration in seconds
+    Seconds(f32),
+    /// Duration in bars (measures, assuming 4/4 time)
+    Bars(f32),
+}
+
+impl Duration {
+    /// Convert to milliseconds based on current BPM
+    pub fn to_millis(&self, bpm: f32) -> u64 {
+        match self {
+            Duration::Beats(beats) => ((beats * 60000.0) / bpm) as u64,
+            Duration::Seconds(secs) => (secs * 1000.0) as u64,
+            Duration::Bars(bars) => ((bars * 4.0 * 60000.0) / bpm) as u64, // 4 beats per bar
+        }
+    }
+
+    /// Convert to std::time::Duration based on current BPM
+    pub fn to_std_duration(&self, bpm: f32) -> StdDuration {
+        StdDuration::from_millis(self.to_millis(bpm))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,11 +370,11 @@ mod tests {
 
         assert!(!clock.is_running());
         clock.start();
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(StdDuration::from_millis(50));
         assert!(clock.is_running());
 
         clock.stop();
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(StdDuration::from_millis(50));
         assert!(!clock.is_running());
     }
 }
