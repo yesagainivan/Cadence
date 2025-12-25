@@ -432,7 +432,8 @@ impl PlaybackLoop {
                 self.current_progression = None;
                 self.pending_queue.clear();
                 self.is_playing.store(false, Ordering::Relaxed);
-                let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
+                // Set notes to empty to trigger ADSR release - don't mute volume immediately
+                let _ = self.audio_handle.set_track_notes(self.track_id, vec![]);
                 self.audio_started = false;
             }
             PlaybackCommand::SetVolume(vol) => {
@@ -472,7 +473,8 @@ impl PlaybackLoop {
     fn stop_playback(&mut self) {
         self.current_progression = None;
         self.is_playing.store(false, Ordering::Relaxed);
-        let _ = self.audio_handle.set_track_volume(self.track_id, 0.0);
+        // Set notes to empty - this triggers ADSR release phase for graceful fade-out
+        // Don't set volume to 0 here; let the envelope handle the fade
         let _ = self.audio_handle.set_track_notes(self.track_id, vec![]);
         self.audio_started = false;
     }

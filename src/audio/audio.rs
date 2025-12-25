@@ -5,6 +5,7 @@ use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
+use super::adsr::{AdsrEnvelope, AdsrParams};
 use std::collections::HashMap;
 
 /// State for a single audio track
@@ -49,54 +50,50 @@ impl Default for AudioState {
     }
 }
 
-/// Per-note oscillator state with amplitude envelope
+/// Per-note oscillator state with ADSR amplitude envelope
 struct EnvelopedOscillator {
     frequency: f32,
     phase: f32,
-    amplitude: f32,
-    target_amplitude: f32,
-    fade_rate: f32,
+    sample_rate: f32,
+    envelope: AdsrEnvelope,
     /// Which track this oscillator belongs to
     track_id: usize,
 }
 
 impl EnvelopedOscillator {
     fn new(frequency: f32, sample_rate: f32, track_id: usize) -> Self {
-        let fade_time_seconds = 0.005;
-        let fade_rate = 1.0 / (fade_time_seconds * sample_rate);
+        let params = AdsrParams::default();
+        let mut envelope = AdsrEnvelope::new(params, sample_rate);
+        envelope.trigger(); // Start the envelope immediately
 
         Self {
             frequency,
             phase: 0.0,
-            amplitude: 0.0,
-            target_amplitude: 1.0,
-            fade_rate,
+            sample_rate,
+            envelope,
             track_id,
         }
     }
 
     fn start_fade_out(&mut self) {
-        self.target_amplitude = 0.0;
+        self.envelope.release();
     }
 
     fn is_finished(&self) -> bool {
-        self.target_amplitude == 0.0 && self.amplitude <= 0.001
+        self.envelope.is_finished()
     }
 
-    fn next_sample(&mut self, sample_rate: f32) -> f32 {
+    fn next_sample(&mut self) -> f32 {
+        // Generate sine wave
         let value = (2.0 * std::f32::consts::PI * self.phase).sin();
-        self.phase += self.frequency / sample_rate;
+        self.phase += self.frequency / self.sample_rate;
         if self.phase >= 1.0 {
             self.phase -= 1.0;
         }
 
-        if self.amplitude < self.target_amplitude {
-            self.amplitude = (self.amplitude + self.fade_rate).min(self.target_amplitude);
-        } else if self.amplitude > self.target_amplitude {
-            self.amplitude = (self.amplitude - self.fade_rate).max(self.target_amplitude);
-        }
-
-        value * self.amplitude
+        // Apply ADSR envelope
+        let amplitude = self.envelope.next_sample();
+        value * amplitude
     }
 }
 
@@ -155,7 +152,9 @@ impl AudioPlayerInternal {
         let mut track_frequencies: HashMap<usize, Vec<f32>> = HashMap::new();
 
         let mut master_amplitude: f32 = 0.0;
-        let master_fade_rate = 1.0 / (0.005 * sample_rate);
+        // Master fade rate should match or exceed ADSR release time (200ms default)
+        // to allow envelopes to complete their release phase gracefully
+        let master_fade_rate = 1.0 / (0.25 * sample_rate); // 250ms for smooth master fade
 
         let err_fn = |err| eprintln!("Audio stream error: {:?}", err);
 
@@ -228,7 +227,7 @@ impl AudioPlayerInternal {
                                 .map(|t| t.volume)
                                 .unwrap_or(1.0);
 
-                            let sample = oscillator.next_sample(sample_rate);
+                            let sample = oscillator.next_sample();
                             if sample.abs() > 0.0001 {
                                 mixed_value += sample * track_vol;
                                 active_count += 1;
@@ -459,7 +458,7 @@ mod tests {
         let mut osc = EnvelopedOscillator::new(440.0, sample_rate, 1);
 
         for _ in 0..1000 {
-            let value = osc.next_sample(sample_rate);
+            let value = osc.next_sample();
             assert!(
                 value >= -1.0 && value <= 1.0,
                 "Oscillator value {} out of expected range",

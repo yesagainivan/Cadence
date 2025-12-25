@@ -19,3 +19,5 @@ let bottom = [[C2], [F7], [C6], [C2]];
 let middle = [[F7], [C6], [C2], [F7]];
 
 play smooth_voice_leading(big)
+
+let down = "C E G".fast(2).rev();
