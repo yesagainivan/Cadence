@@ -619,18 +619,37 @@ impl PlaybackLoop {
             }
         }
 
-        // Set the notes for this track (audio)
-        if let Err(e) = self
-            .audio_handle
-            .set_track_notes(self.track_id, chord_frequencies.clone())
-        {
-            eprintln!("Failed to set notes: {}", e);
+        // Check output mode to determine what to send
+        let audio_enabled = self
+            .midi_handle
+            .as_ref()
+            .map_or(true, |h| h.audio_enabled());
+        let midi_enabled = self
+            .midi_handle
+            .as_ref()
+            .map_or(false, |h| h.midi_enabled() && h.is_connected());
+
+        // Set the notes for this track (audio) - only if audio is enabled
+        if audio_enabled {
+            if let Err(e) = self
+                .audio_handle
+                .set_track_notes(self.track_id, chord_frequencies.clone())
+            {
+                eprintln!("Failed to set notes: {}", e);
+            }
+        } else {
+            // Clear audio notes if audio is disabled (MIDI-only mode)
+            if let Err(e) = self.audio_handle.set_track_notes(self.track_id, vec![]) {
+                eprintln!("Failed to clear notes: {}", e);
+            }
         }
 
-        // Send MIDI notes (parallel output: both audio and MIDI)
-        self.send_midi_notes(chord_frequencies);
+        // Send MIDI notes - only if MIDI is enabled and connected
+        if midi_enabled {
+            self.send_midi_notes(chord_frequencies);
+        }
 
-        // Start audio if not already playing
+        // Start audio if not already playing (even in MIDI-only mode, we need the audio thread running)
         if !self.audio_started {
             if let Err(e) = self.audio_handle.play() {
                 eprintln!("Failed to start audio: {}", e);

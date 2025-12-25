@@ -1,6 +1,6 @@
 //! MIDI REPL commands
 
-use crate::audio::midi::MidiChannelMode;
+use crate::audio::midi::{MidiChannelMode, OutputMode};
 use crate::commands::{CommandContext, CommandResult};
 use colored::*;
 
@@ -217,6 +217,46 @@ pub fn cmd_midi_test(args: &str, ctx: &mut CommandContext) -> CommandResult {
                 "🎹 Test complete: sent {}{} (MIDI note {}) for 500ms",
                 note_name, octave, note
             ))
+        }
+        None => CommandResult::Error("MIDI output not initialized".to_string()),
+    }
+}
+
+/// Handle `output <mode>` command - set output mode (midi, audio, both)
+pub fn cmd_output_mode(args: &str, ctx: &mut CommandContext) -> CommandResult {
+    let mode_arg = args.to_lowercase().trim().to_string();
+
+    match &ctx.midi_handle {
+        Some(handle) => {
+            if mode_arg.is_empty() {
+                // Show current mode
+                let mode = handle.output_mode();
+                let mode_desc = match mode {
+                    OutputMode::Both => "Both audio + MIDI",
+                    OutputMode::MidiOnly => "MIDI only (internal synth muted)",
+                    OutputMode::AudioOnly => "Audio only (no MIDI output)",
+                };
+                return CommandResult::Message(format!("🔊 Output mode: {}", mode_desc.cyan()));
+            }
+
+            let new_mode = match mode_arg.as_str() {
+                "midi" | "midi-only" | "midionly" => OutputMode::MidiOnly,
+                "audio" | "audio-only" | "audioonly" => OutputMode::AudioOnly,
+                "both" | "all" | "audio+midi" | "midi+audio" => OutputMode::Both,
+                _ => {
+                    return CommandResult::Error(
+                        "Usage: output <midi|audio|both>\n  midi  - MIDI output only\n  audio - Internal synth only\n  both  - Both (default)".to_string(),
+                    )
+                }
+            };
+
+            handle.set_output_mode(new_mode);
+            let mode_desc = match new_mode {
+                OutputMode::Both => "🔊 Output mode: Both audio + MIDI".green(),
+                OutputMode::MidiOnly => "🎹 Output mode: MIDI only (internal synth muted)".cyan(),
+                OutputMode::AudioOnly => "🔈 Output mode: Audio only (no MIDI)".yellow(),
+            };
+            CommandResult::Message(mode_desc.to_string())
         }
         None => CommandResult::Error("MIDI output not initialized".to_string()),
     }

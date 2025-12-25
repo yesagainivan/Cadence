@@ -42,6 +42,18 @@ impl Default for MidiChannelMode {
     }
 }
 
+/// Output mode: audio only, MIDI only, or both
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum OutputMode {
+    /// Output both internal audio synthesis and MIDI (default)
+    #[default]
+    Both,
+    /// Output MIDI only (silence from internal synth)
+    MidiOnly,
+    /// Output audio only (no MIDI messages sent)
+    AudioOnly,
+}
+
 /// Commands that can be sent to the MIDI output thread
 #[derive(Debug, Clone)]
 pub enum MidiCommand {
@@ -163,6 +175,8 @@ pub struct MidiOutputHandle {
     _thread: JoinHandle<()>,
     /// Current channel mode
     channel_mode: RwLock<MidiChannelMode>,
+    /// Output mode: Both, MidiOnly, or AudioOnly
+    output_mode: RwLock<OutputMode>,
     /// Track which notes are currently active per channel for proper Note Off
     /// Key: (channel, note), Value: true if active
     active_notes: Mutex<std::collections::HashSet<(u8, u8)>>,
@@ -191,6 +205,7 @@ impl MidiOutputHandle {
             command_tx: tx,
             _thread: thread,
             channel_mode: RwLock::new(MidiChannelMode::default()),
+            output_mode: RwLock::new(OutputMode::default()),
             active_notes: Mutex::new(std::collections::HashSet::new()),
             connected: RwLock::new(false),
             port_name: RwLock::new(None),
@@ -307,6 +322,28 @@ impl MidiOutputHandle {
     /// Get the channel mode
     pub fn channel_mode(&self) -> MidiChannelMode {
         *self.channel_mode.read().unwrap()
+    }
+
+    /// Set the output mode (Both, MidiOnly, or AudioOnly)
+    pub fn set_output_mode(&self, mode: OutputMode) {
+        if let Ok(mut m) = self.output_mode.write() {
+            *m = mode;
+        }
+    }
+
+    /// Get the output mode
+    pub fn output_mode(&self) -> OutputMode {
+        *self.output_mode.read().unwrap()
+    }
+
+    /// Check if audio output is enabled
+    pub fn audio_enabled(&self) -> bool {
+        matches!(self.output_mode(), OutputMode::Both | OutputMode::AudioOnly)
+    }
+
+    /// Check if MIDI output is enabled
+    pub fn midi_enabled(&self) -> bool {
+        matches!(self.output_mode(), OutputMode::Both | OutputMode::MidiOnly)
     }
 
     /// Get the MIDI channel for a given track ID

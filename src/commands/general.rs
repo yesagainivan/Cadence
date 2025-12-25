@@ -200,6 +200,10 @@ fn print_help() {
     );
     println!("  {}        - Show MIDI status", "midi status".cyan());
     println!("  {}         - All notes off (panic)", "midi panic".cyan());
+    println!(
+        "  {} - Set output (midi/audio/both)",
+        "output <mode>".cyan()
+    );
     println!();
     println!("{}", "Other Commands:".green());
     println!(
