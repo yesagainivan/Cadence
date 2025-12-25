@@ -193,14 +193,32 @@ impl MidiOutputHandle {
     }
 
     /// List available MIDI output ports
+    /// Note: Creates a temporary MIDI client, which can sometimes fail on macOS.
+    /// Retries up to 3 times with a small delay.
     pub fn list_ports() -> Result<Vec<String>> {
-        let midi_out = MidiOutput::new("Cadence")?;
-        let ports = midi_out.ports();
-        let names: Vec<String> = ports
-            .iter()
-            .filter_map(|p| midi_out.port_name(p).ok())
-            .collect();
-        Ok(names)
+        let mut last_err = None;
+        for attempt in 0..3 {
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            match MidiOutput::new("Cadence") {
+                Ok(midi_out) => {
+                    let ports = midi_out.ports();
+                    let names: Vec<String> = ports
+                        .iter()
+                        .filter_map(|p| midi_out.port_name(p).ok())
+                        .collect();
+                    return Ok(names);
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                }
+            }
+        }
+        Err(anyhow!(
+            "MIDI initialization failed after 3 attempts: {:?}",
+            last_err
+        ))
     }
 
     /// Connect to a MIDI output port by name (partial match supported)
