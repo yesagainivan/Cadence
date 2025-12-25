@@ -117,6 +117,61 @@ impl Pattern {
         }
     }
 
+    /// Create a pattern from a progression (each chord becomes a step)
+    /// This enables progressions to use pattern playback with proper envelopes
+    pub fn from_progression(progression: &crate::types::Progression) -> Self {
+        let steps: Vec<PatternStep> = progression
+            .chords()
+            .map(|chord| PatternStep::Chord(chord.clone()))
+            .collect();
+
+        // Set cycle length to match number of chords (1 beat per chord by default)
+        let beats_per_cycle = steps.len() as f32;
+
+        Pattern {
+            steps,
+            beats_per_cycle,
+            envelope: Some((0.01, 0.1, 0.7, 0.3)), // Default smooth envelope
+        }
+    }
+
+    /// Convert a pattern back to a Progression (only works if all steps are chords)
+    /// This enables voice leading analysis on patterns that contain chords
+    pub fn to_progression(&self) -> Option<crate::types::Progression> {
+        let mut chords = Vec::new();
+
+        for step in &self.steps {
+            match step {
+                PatternStep::Chord(chord) => chords.push(chord.clone()),
+                PatternStep::Note(note) => {
+                    // Single notes become single-note chords
+                    chords.push(crate::types::Chord::from_notes(vec![*note]));
+                }
+                PatternStep::Repeat(inner, count) => {
+                    // Expand repeats
+                    if let PatternStep::Chord(chord) = inner.as_ref() {
+                        for _ in 0..*count {
+                            chords.push(chord.clone());
+                        }
+                    } else if let PatternStep::Note(note) = inner.as_ref() {
+                        for _ in 0..*count {
+                            chords.push(crate::types::Chord::from_notes(vec![*note]));
+                        }
+                    } else {
+                        return None; // Can't convert groups of groups
+                    }
+                }
+                _ => return None, // Rests and groups can't become progressions
+            }
+        }
+
+        if chords.is_empty() {
+            None
+        } else {
+            Some(crate::types::Progression::from_chords(chords))
+        }
+    }
+
     /// Set beats per cycle
     pub fn with_cycle_length(mut self, beats: f32) -> Self {
         self.beats_per_cycle = beats;
@@ -494,5 +549,45 @@ mod tests {
             PatternStep::Note(n) => assert_eq!(n.pitch_class(), 3),
             _ => panic!("Expected Note"),
         }
+    }
+
+    #[test]
+    fn test_chord_repeat_expansion() {
+        // Test that [C,E,G]*2 [F,A,C] gives 3 events (2 C majors + 1 F major)
+        let p = Pattern::parse("[C,E,G]*2 [F,A,C]").unwrap();
+        assert_eq!(p.steps.len(), 2); // 2 steps: Repeat(Chord) and Chord
+
+        // Check the first step is a Repeat containing a Chord
+        match &p.steps[0] {
+            PatternStep::Repeat(inner, count) => {
+                assert_eq!(*count, 2);
+                assert!(matches!(**inner, PatternStep::Chord(_)));
+            }
+            _ => panic!("Expected Repeat"),
+        }
+
+        // Check to_events expands correctly
+        let events = p.to_events();
+        assert_eq!(
+            events.len(),
+            3,
+            "Should have 3 events: [C,E,G], [C,E,G], [F,A,C]"
+        );
+
+        // First two events should be C major (3 notes)
+        assert_eq!(events[0].0.len(), 3);
+        assert_eq!(events[1].0.len(), 3);
+        // Last event should be F major (3 notes)
+        assert_eq!(events[2].0.len(), 3);
+
+        // Durations should be 2.0 beats for each (cycle=4, 2 slots, each slot has 2 and 1 events)
+        // Step 1: Repeat(Chord)*2 = 2 events at step_beats/2 each
+        // Step 2: Chord = 1 event at step_beats
+        // With 2 steps and 4 beat cycle, step_beats = 2.0
+        // Repeat expands to 2 events at 2.0/2 = 1.0 each
+        // Last chord at 2.0
+        assert_eq!(events[0].1, 1.0);
+        assert_eq!(events[1].1, 1.0);
+        assert_eq!(events[2].1, 2.0);
     }
 }

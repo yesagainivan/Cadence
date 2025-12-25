@@ -340,21 +340,54 @@ impl Evaluator {
                 }
 
                 let arg_value = self.eval_with_env(args.into_iter().next().unwrap(), env)?;
-                match arg_value {
-                    Value::Progression(progression) => {
-                        println!("Optimizing voice leading...");
 
-                        let original_quality = progression.average_voice_leading_quality();
-                        println!("Original voice leading quality: {:.1}", original_quality);
+                // Track if input was a pattern and save its timing/envelope (before consuming arg_value)
+                let (was_pattern, original_beats_per_cycle, original_envelope) = match &arg_value {
+                    Value::Pattern(p) => (true, Some(p.beats_per_cycle), p.envelope),
+                    _ => (false, None, None),
+                };
 
-                        let optimized = progression.optimize_voice_leading();
-
-                        let new_quality = optimized.average_voice_leading_quality();
-                        println!("Optimized voice leading quality: {:.1}", new_quality);
-
-                        Ok(Value::Progression(optimized))
+                // Convert to progression if needed
+                let progression = match arg_value {
+                    Value::Progression(p) => p,
+                    Value::Pattern(pattern) => match pattern.to_progression() {
+                        Some(p) => p,
+                        None => {
+                            return Err(anyhow!(
+                                "smooth_voice_leading() requires a pattern with only chords/notes (no rests or groups)"
+                            ));
+                        }
+                    },
+                    _ => {
+                        return Err(anyhow!(
+                            "smooth_voice_leading() only works on progressions or patterns"
+                        ));
                     }
-                    _ => Err(anyhow!("smooth_voice_leading() only works on progressions")),
+                };
+
+                println!("Optimizing voice leading...");
+
+                let original_quality = progression.average_voice_leading_quality();
+                println!("Original voice leading quality: {:.1}", original_quality);
+
+                let optimized = progression.optimize_voice_leading();
+
+                let new_quality = optimized.average_voice_leading_quality();
+                println!("Optimized voice leading quality: {:.1}", new_quality);
+
+                // Return as pattern if input was pattern, otherwise progression
+                if was_pattern {
+                    // Convert back to pattern, preserving original timing and envelope
+                    let mut result_pattern = crate::types::Pattern::from_progression(&optimized);
+                    if let Some(beats) = original_beats_per_cycle {
+                        result_pattern.beats_per_cycle = beats;
+                    }
+                    if original_envelope.is_some() {
+                        result_pattern.envelope = original_envelope;
+                    }
+                    Ok(Value::Pattern(result_pattern))
+                } else {
+                    Ok(Value::Progression(optimized))
                 }
             }
 

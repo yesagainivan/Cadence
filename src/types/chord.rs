@@ -522,7 +522,7 @@ impl fmt::Display for Chord {
                 bass_info,
                 "[".bright_white(),
                 notes_str.join(&format!("{} ", ",".bright_white())),
-                "[".bright_white()
+                "]".bright_white()
             )
         } else {
             write!(

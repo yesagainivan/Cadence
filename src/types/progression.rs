@@ -434,6 +434,12 @@ impl Progression {
 
         report
     }
+
+    /// Convert this progression to a Pattern for unified playback
+    /// This enables envelope handling and cycle-based timing for progressions
+    pub fn to_pattern(&self) -> crate::types::Pattern {
+        crate::types::Pattern::from_progression(self)
+    }
 }
 
 /// Detailed analysis of voice leading between two specific chords

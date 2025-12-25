@@ -71,10 +71,12 @@ impl PlaybackSource {
                 }
             }
             Value::Chord(chord) => Ok(vec![(chord.notes().map(|n| n.frequency()).collect(), 1.0)]),
-            Value::Progression(prog) => Ok(prog
-                .chords()
-                .map(|c| (c.notes().map(|n| n.frequency()).collect(), 1.0))
-                .collect()),
+            Value::Progression(prog) => {
+                // Convert to pattern for unified playback with envelope handling
+                // This fixes the clicks between chords!
+                let pattern = prog.to_pattern();
+                Self::value_to_frequencies(&Value::Pattern(pattern))
+            }
             Value::Boolean(_) => Err(anyhow::anyhow!("Cannot play a boolean value")),
             Value::Number(_) => Err(anyhow::anyhow!("Cannot play a raw number")),
             Value::Pattern(pattern) => {
@@ -107,6 +109,8 @@ impl PlaybackSource {
                 let value = evaluator.eval_with_env(expression.clone(), Some(&env_guard))?;
                 match value {
                     Value::Pattern(pattern) => Ok(pattern.envelope),
+                    // Progressions now use pattern playback with default envelope
+                    Value::Progression(prog) => Ok(prog.to_pattern().envelope),
                     _ => Ok(None),
                 }
             }
