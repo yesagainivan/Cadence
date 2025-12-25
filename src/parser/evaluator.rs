@@ -46,8 +46,11 @@ impl Evaluator {
                         let transposed = progression + semitones;
                         Ok(Value::Progression(transposed))
                     }
+                    Value::Pattern(pattern) => {
+                        let transposed = pattern.transpose(semitones);
+                        Ok(Value::Pattern(transposed))
+                    }
                     Value::Boolean(_) => Err(anyhow!("Cannot transpose a boolean value")),
-                    Value::Pattern(_) => Err(anyhow!("Cannot transpose a pattern directly")),
                     Value::Number(_) => Err(anyhow!("Cannot transpose a number")),
                     Value::String(_) => Err(anyhow!("Cannot transpose a string")),
                 }

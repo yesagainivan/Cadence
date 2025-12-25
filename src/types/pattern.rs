@@ -46,6 +46,21 @@ impl PatternStep {
             }
         }
     }
+
+    /// Transpose this step by the given number of semitones
+    pub fn transpose(&self, semitones: i8) -> PatternStep {
+        match self {
+            PatternStep::Note(n) => PatternStep::Note(*n + semitones),
+            PatternStep::Chord(c) => PatternStep::Chord(c.clone() + semitones),
+            PatternStep::Rest => PatternStep::Rest,
+            PatternStep::Group(steps) => {
+                PatternStep::Group(steps.iter().map(|s| s.transpose(semitones)).collect())
+            }
+            PatternStep::Repeat(step, count) => {
+                PatternStep::Repeat(Box::new(step.transpose(semitones)), *count)
+            }
+        }
+    }
 }
 
 impl fmt::Display for PatternStep {
@@ -174,6 +189,16 @@ impl Pattern {
             "organ" => Some((0.005, 0.0, 1.0, 0.01)),
             _ => Some((0.01, 0.1, 0.7, 0.2)), // default
         };
+        self
+    }
+
+    /// Transpose all notes in the pattern by the given number of semitones
+    pub fn transpose(mut self, semitones: i8) -> Self {
+        self.steps = self
+            .steps
+            .into_iter()
+            .map(|s| s.transpose(semitones))
+            .collect();
         self
     }
 
