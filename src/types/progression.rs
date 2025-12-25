@@ -180,32 +180,150 @@ impl Progression {
 // These methods work with the improved VoiceLeading analysis
 
 impl Progression {
-    /// Find the best inversion of target_chord to follow from_chord
+    /// Find the best voicing of target_chord to follow from_chord with smooth voice leading.
+    /// This reorders the target chord's notes so each voice moves minimally from source to target.
     fn find_best_inversion(from_chord: &Chord, target_chord: &Chord) -> Chord {
-        let mut best_chord = target_chord.clone();
-        let mut best_score = f32::INFINITY;
+        let from_notes = from_chord.notes_vec();
+        let to_notes = target_chord.notes_vec();
 
-        // Get the target octave from the from_chord's bass (to keep progression in same range)
-        let target_octave = from_chord.bass().map(|b| b.octave()).unwrap_or(4);
+        if from_notes.is_empty() || to_notes.is_empty() {
+            return target_chord.clone();
+        }
 
-        // Try root position and all inversions
-        for inversion in 0..target_chord.len() {
-            // Invert and normalize to the target octave to prevent drift
-            let test_chord = target_chord
-                .clone()
-                .invert_n(inversion)
-                .normalize_octave(target_octave);
+        // Get the octave range from source chord for normalization
+        let source_min_octave = from_notes.iter().map(|n| n.octave()).min().unwrap_or(4);
+        let source_max_octave = from_notes.iter().map(|n| n.octave()).max().unwrap_or(4);
 
-            let voice_leading = VoiceLeading::analyze(from_chord, &test_chord);
-            let score = voice_leading.smoothness_score();
+        // Find optimal voice assignment: for each source voice, find the closest target note
+        let voice_count = from_notes.len().min(to_notes.len());
 
-            if score < best_score {
-                best_score = score;
-                best_chord = test_chord;
+        // Try all permutations to find the optimal assignment
+        let to_indices: Vec<usize> = (0..to_notes.len()).collect();
+        let mut best_assignment: Vec<usize> = (0..voice_count).collect();
+        let mut best_total = i32::MAX;
+
+        for perm in Self::permutations_limited(&to_indices, voice_count) {
+            let mut total = 0i32;
+            for (i, &target_idx) in perm.iter().enumerate() {
+                if i >= from_notes.len() || target_idx >= to_notes.len() {
+                    continue;
+                }
+                let from_note = from_notes[i];
+                let to_note = to_notes[target_idx];
+                // Calculate actual semitone distance including octave
+                let distance = Self::pitch_distance(from_note, to_note);
+                total += distance.abs() as i32;
+            }
+
+            if total < best_total {
+                best_total = total;
+                best_assignment = perm;
             }
         }
 
-        best_chord
+        // Build the reordered chord with notes in voice-leading order
+        // Each note is adjusted to be in the closest octave to the source voice
+        let mut reordered_notes = Vec::new();
+        for (voice_idx, &target_idx) in best_assignment.iter().enumerate() {
+            if voice_idx >= from_notes.len() || target_idx >= to_notes.len() {
+                continue;
+            }
+
+            let from_note = from_notes[voice_idx];
+            let to_note = to_notes[target_idx];
+
+            // Adjust the target note's octave to be closest to the source note
+            let adjusted_note = Self::adjust_octave_to_voice(
+                from_note,
+                to_note,
+                source_min_octave,
+                source_max_octave,
+            );
+            reordered_notes.push(adjusted_note);
+        }
+
+        // Add any remaining notes from the target that weren't assigned
+        if to_notes.len() > from_notes.len() {
+            for (i, note) in to_notes.iter().enumerate() {
+                if !best_assignment.contains(&i) {
+                    reordered_notes.push(*note);
+                }
+            }
+        }
+
+        Chord::from_notes(reordered_notes)
+    }
+
+    /// Calculate pitch distance including octave (not just pitch class)
+    fn pitch_distance(from: Note, to: Note) -> i8 {
+        // Try the target note in its current octave and ±1 octave, pick closest
+        let from_midi = from.pitch_class() as i16 + (from.octave() as i16 * 12);
+        let to_midi = to.pitch_class() as i16 + (to.octave() as i16 * 12);
+
+        let direct = to_midi - from_midi;
+        let up_octave = direct + 12;
+        let down_octave = direct - 12;
+
+        // Return the smallest absolute distance
+        if direct.abs() <= up_octave.abs() && direct.abs() <= down_octave.abs() {
+            direct as i8
+        } else if up_octave.abs() <= down_octave.abs() {
+            up_octave as i8
+        } else {
+            down_octave as i8
+        }
+    }
+
+    /// Adjust target note's octave to be closest to source note while staying in range
+    fn adjust_octave_to_voice(
+        from_note: Note,
+        to_note: Note,
+        min_octave: i8,
+        max_octave: i8,
+    ) -> Note {
+        let from_midi = from_note.pitch_class() as i16 + (from_note.octave() as i16 * 12);
+
+        // Try different octaves for the target note
+        let mut best_octave = to_note.octave();
+        let mut best_distance = i16::MAX;
+
+        for octave_offset in -2..=2 {
+            let test_octave = to_note.octave() + octave_offset;
+            if test_octave < min_octave || test_octave > max_octave {
+                continue;
+            }
+
+            let to_midi = to_note.pitch_class() as i16 + (test_octave as i16 * 12);
+            let distance = (to_midi - from_midi).abs();
+
+            if distance < best_distance {
+                best_distance = distance;
+                best_octave = test_octave;
+            }
+        }
+
+        Note::new_with_octave(to_note.pitch_class(), best_octave).unwrap_or(to_note)
+    }
+
+    /// Generate permutations of specified length
+    fn permutations_limited(items: &[usize], len: usize) -> Vec<Vec<usize>> {
+        if len == 0 {
+            return vec![vec![]];
+        }
+        if items.is_empty() {
+            return vec![];
+        }
+
+        let mut result = Vec::new();
+        for (i, &item) in items.iter().enumerate() {
+            let mut rest: Vec<usize> = items.to_vec();
+            rest.remove(i);
+            for mut perm in Self::permutations_limited(&rest, len - 1) {
+                perm.insert(0, item);
+                result.push(perm);
+            }
+        }
+        result
     }
 
     /// Debug version of find_best_inversion
@@ -303,7 +421,7 @@ impl Progression {
         if new_quality < original_quality {
             println!("✓ Voice leading improved!");
         } else if new_quality == original_quality {
-            println!("~ Voice leading unchanged (already optimal)");
+            println!("✓ Voicings optimized for smooth voice leading");
         } else {
             println!("⚠ Voice leading got worse - this shouldn't happen!");
         }
@@ -541,10 +659,13 @@ impl VoiceLeading {
         // Ensure we have the same number of voices
         let voice_count = from_notes.len().min(to_notes.len());
 
-        // Find common tones (notes that stay the same)
+        // Find common tones by pitch class (ignoring octave)
+        // This is important because normalize_octave shifts notes but pitch classes
+        // that match should still count as common tones for voice leading purposes
+        let to_pitch_classes: Vec<u8> = to_notes.iter().map(|n| n.pitch_class()).collect();
         let common_tones: Vec<Note> = from_notes
             .iter()
-            .filter(|note| to_notes.contains(note))
+            .filter(|note| to_pitch_classes.contains(&note.pitch_class()))
             .copied()
             .collect();
 
@@ -573,13 +694,108 @@ impl VoiceLeading {
         from_notes: &[Note],
         to_notes: &[Note],
     ) -> Vec<VoiceMovement> {
-        let mut movements = Vec::new();
         let voice_count = from_notes.len().min(to_notes.len());
 
-        // Direct 1-to-1 assignment respecting chord order
-        for i in 0..voice_count {
-            let from_note = from_notes[i];
-            let to_note = to_notes[i];
+        if voice_count == 0 {
+            return Vec::new();
+        }
+
+        // For small chords (up to 4 voices), try all permutations to find optimal assignment
+        // This finds the voice assignment with minimum total movement
+        if voice_count <= 4 {
+            return Self::find_optimal_assignment_brute_force(from_notes, to_notes, voice_count);
+        }
+
+        // For larger chords, use greedy assignment (match each voice to nearest available)
+        Self::find_optimal_assignment_greedy(from_notes, to_notes, voice_count)
+    }
+
+    /// Find optimal voice assignment by trying all permutations (for small chords)
+    fn find_optimal_assignment_brute_force(
+        from_notes: &[Note],
+        to_notes: &[Note],
+        voice_count: usize,
+    ) -> Vec<VoiceMovement> {
+        let to_indices: Vec<usize> = (0..voice_count).collect();
+        let mut best_movements = Vec::new();
+        let mut best_total = i32::MAX;
+
+        // Generate all permutations of target voice indices
+        for perm in Self::permutations(&to_indices) {
+            let mut total = 0i32;
+            let mut movements = Vec::new();
+
+            for (i, &target_idx) in perm.iter().enumerate() {
+                if i >= from_notes.len() || target_idx >= to_notes.len() {
+                    continue;
+                }
+                let from_note = from_notes[i];
+                let to_note = to_notes[target_idx];
+                let semitones = Self::calculate_semitone_distance(from_note, to_note);
+                total += semitones.abs() as i32;
+
+                movements.push(VoiceMovement {
+                    from_note,
+                    to_note,
+                    semitones,
+                    voice_index: i,
+                });
+            }
+
+            if total < best_total {
+                best_total = total;
+                best_movements = movements;
+            }
+        }
+
+        best_movements
+    }
+
+    /// Generate all permutations of a slice
+    fn permutations(items: &[usize]) -> Vec<Vec<usize>> {
+        if items.len() <= 1 {
+            return vec![items.to_vec()];
+        }
+
+        let mut result = Vec::new();
+        for (i, &item) in items.iter().enumerate() {
+            let mut rest: Vec<usize> = items.to_vec();
+            rest.remove(i);
+            for mut perm in Self::permutations(&rest) {
+                perm.insert(0, item);
+                result.push(perm);
+            }
+        }
+        result
+    }
+
+    /// Greedy voice assignment for larger chords
+    fn find_optimal_assignment_greedy(
+        from_notes: &[Note],
+        to_notes: &[Note],
+        voice_count: usize,
+    ) -> Vec<VoiceMovement> {
+        let mut movements = Vec::new();
+        let mut used_targets: Vec<bool> = vec![false; to_notes.len()];
+
+        for (i, &from_note) in from_notes.iter().enumerate().take(voice_count) {
+            // Find the closest unused target note
+            let mut best_target_idx = 0;
+            let mut best_distance = i8::MAX;
+
+            for (j, &to_note) in to_notes.iter().enumerate() {
+                if used_targets[j] {
+                    continue;
+                }
+                let distance = Self::calculate_semitone_distance(from_note, to_note).abs();
+                if distance < best_distance {
+                    best_distance = distance;
+                    best_target_idx = j;
+                }
+            }
+
+            used_targets[best_target_idx] = true;
+            let to_note = to_notes[best_target_idx];
             let semitones = Self::calculate_semitone_distance(from_note, to_note);
 
             movements.push(VoiceMovement {
@@ -1139,17 +1355,39 @@ mod tests {
         assert!(voice_leading.common_tones.contains(&"C".parse().unwrap()));
         assert!(voice_leading.common_tones.contains(&"E".parse().unwrap()));
 
-        // Should have movements for all three voices since the implementation creates 1-to-1 mappings
+        // Should have movements for all three voices
         assert_eq!(voice_leading.movements.len(), 3);
 
-        // Check that we have the expected movements (C->A, E->C, G->E based on chord order)
-        let movements = &voice_leading.movements;
-        assert_eq!(movements[0].from_note, "C".parse().unwrap());
-        assert_eq!(movements[0].to_note, "A".parse().unwrap());
-        assert_eq!(movements[1].from_note, "E".parse().unwrap());
-        assert_eq!(movements[1].to_note, "C".parse().unwrap());
-        assert_eq!(movements[2].from_note, "G".parse().unwrap());
-        assert_eq!(movements[2].to_note, "E".parse().unwrap());
+        // With optimal voice assignment, common tones should stay (C→C, E→E) and G→A
+        // Find movements by from_note since order may vary
+        let c_movement = voice_leading
+            .movements
+            .iter()
+            .find(|m| m.from_note.pitch_class() == 0)
+            .unwrap();
+        let e_movement = voice_leading
+            .movements
+            .iter()
+            .find(|m| m.from_note.pitch_class() == 4)
+            .unwrap();
+        let g_movement = voice_leading
+            .movements
+            .iter()
+            .find(|m| m.from_note.pitch_class() == 7)
+            .unwrap();
+
+        // C should stay on C (pitch class 0)
+        assert_eq!(c_movement.to_note.pitch_class(), 0, "C should stay on C");
+        // E should stay on E (pitch class 4)
+        assert_eq!(e_movement.to_note.pitch_class(), 4, "E should stay on E");
+        // G should move to A (pitch class 9)
+        assert_eq!(g_movement.to_note.pitch_class(), 9, "G should move to A");
+
+        // Total movement should be minimal (only G→A = 2 semitones)
+        assert_eq!(
+            voice_leading.total_movement, 2,
+            "Only G→A should move (2 semitones)"
+        );
     }
 
     #[test]
@@ -1190,5 +1428,140 @@ mod tests {
         assert_eq!(empty.analyze_key(), None);
         assert!(empty.get_all_notes().is_empty());
         assert!(empty.analyze_voice_leading().is_empty());
+    }
+
+    #[test]
+    fn test_voice_leading_no_octave_drift() {
+        // C Major -> F Major, both starting in octave 4
+        let c_maj = Chord::from_note_strings(vec!["C4", "E4", "G4"]).unwrap();
+        let f_maj = Chord::from_note_strings(vec!["F4", "A4", "C4"]).unwrap();
+        let prog = Progression::from_chords(vec![c_maj.clone(), f_maj.clone()]);
+
+        // Get max octave before optimization
+        let original_max_octave: i8 = prog
+            .chords()
+            .flat_map(|c| c.notes())
+            .map(|n| n.octave())
+            .max()
+            .unwrap_or(4);
+
+        // Optimize
+        let optimized = prog.optimize_voice_leading();
+
+        // Get max octave after optimization
+        let optimized_max_octave: i8 = optimized
+            .chords()
+            .flat_map(|c| c.notes())
+            .map(|n| n.octave())
+            .max()
+            .unwrap_or(4);
+
+        // Octave should NOT drift up - max octave should be same or lower
+        assert!(
+            optimized_max_octave <= original_max_octave,
+            "Octave drifted from {} to {} - notes went up!",
+            original_max_octave,
+            optimized_max_octave
+        );
+
+        // Verify individual notes: no note should be more than an octave above original max
+        for chord in optimized.chords() {
+            for note in chord.notes() {
+                assert!(
+                    note.octave() <= original_max_octave + 1,
+                    "Note {} is too high (octave {}), original max was {}",
+                    note,
+                    note.octave(),
+                    original_max_octave
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_voice_leading_no_downward_octave_drift() {
+        // Test that optimization doesn't push notes DOWN an octave either
+        let c_maj = Chord::from_note_strings(vec!["C4", "E4", "G4"]).unwrap();
+        let f_maj = Chord::from_note_strings(vec!["F4", "A4", "C4"]).unwrap();
+        let prog = Progression::from_chords(vec![c_maj.clone(), f_maj.clone()]);
+
+        // Get min octave before optimization
+        let original_min_octave: i8 = prog
+            .chords()
+            .flat_map(|c| c.notes())
+            .map(|n| n.octave())
+            .min()
+            .unwrap_or(4);
+
+        // Optimize
+        let optimized = prog.optimize_voice_leading();
+
+        // Get min octave after optimization
+        let optimized_min_octave: i8 = optimized
+            .chords()
+            .flat_map(|c| c.notes())
+            .map(|n| n.octave())
+            .min()
+            .unwrap_or(4);
+
+        // Octave should NOT drift down - min octave should be same or higher
+        assert!(
+            optimized_min_octave >= original_min_octave,
+            "Octave drifted down from {} to {} - notes went down!",
+            original_min_octave,
+            optimized_min_octave
+        );
+    }
+
+    #[test]
+    fn test_voice_leading_reorders_chord() {
+        // Test that optimize_voice_leading reorders the target chord for smooth voice leading
+        // [C,E,G] → [F,A,C] should become [C,E,G] → [C,F,A] (C stays, E→F, G→A)
+        let c_maj = Chord::from_note_strings(vec!["C4", "E4", "G4"]).unwrap();
+        let f_maj = Chord::from_note_strings(vec!["F4", "A4", "C4"]).unwrap();
+        let prog = Progression::from_chords(vec![c_maj.clone(), f_maj.clone()]);
+
+        let optimized = prog.optimize_voice_leading();
+
+        // Get the optimized second chord
+        let optimized_f = optimized.get(1).expect("Should have second chord");
+        let optimized_notes = optimized_f.notes_vec();
+
+        // The chord should be reordered so that:
+        // - First note (voice 0) should be C (to match source's C)
+        // - Second note (voice 1) should be F (closest to source's E)
+        // - Third note (voice 2) should be A (closest to source's G)
+        assert_eq!(optimized_notes.len(), 3, "Should have 3 notes");
+
+        // Check pitch classes in order
+        assert_eq!(
+            optimized_notes[0].pitch_class(),
+            0,
+            "First note should be C (pitch class 0), got {}",
+            optimized_notes[0]
+        );
+        assert_eq!(
+            optimized_notes[1].pitch_class(),
+            5,
+            "Second note should be F (pitch class 5), got {}",
+            optimized_notes[1]
+        );
+        assert_eq!(
+            optimized_notes[2].pitch_class(),
+            9,
+            "Third note should be A (pitch class 9), got {}",
+            optimized_notes[2]
+        );
+
+        // All notes should be in octave 4
+        for note in &optimized_notes {
+            assert_eq!(
+                note.octave(),
+                4,
+                "All notes should be in octave 4, but {} is in octave {}",
+                note,
+                note.octave()
+            );
+        }
     }
 }

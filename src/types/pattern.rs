@@ -36,7 +36,7 @@ impl PatternStep {
         match self {
             PatternStep::Note(n) => vec![(vec![n.frequency()], false)],
             PatternStep::Chord(c) => {
-                vec![(c.notes().map(|n| n.frequency()).collect(), false)]
+                vec![(c.notes_vec().iter().map(|n| n.frequency()).collect(), false)]
             }
             PatternStep::Rest => vec![(vec![], true)],
             PatternStep::Group(steps) => steps.iter().flat_map(|s| s.to_frequencies()).collect(),
@@ -589,5 +589,63 @@ mod tests {
         assert_eq!(events[0].1, 1.0);
         assert_eq!(events[1].1, 1.0);
         assert_eq!(events[2].1, 2.0);
+    }
+
+    #[test]
+    fn test_voice_leading_frequency_order_in_playback() {
+        // This test verifies that after voice leading optimization,
+        // the frequencies sent to MIDI/audio are in the correct order
+        use crate::types::Progression;
+
+        let c_maj = Chord::from_note_strings(vec!["C4", "E4", "G4"]).unwrap();
+        let f_maj = Chord::from_note_strings(vec!["F4", "A4", "C4"]).unwrap();
+        let prog = Progression::from_chords(vec![c_maj.clone(), f_maj.clone()]);
+
+        // Optimize voice leading
+        let optimized = prog.optimize_voice_leading();
+
+        // Verify the second chord is reordered to [C, F, A]
+        let second_chord = optimized.get(1).unwrap();
+        let notes = second_chord.notes_vec();
+        assert_eq!(notes[0].pitch_class(), 0, "First note should be C");
+        assert_eq!(notes[1].pitch_class(), 5, "Second note should be F");
+        assert_eq!(notes[2].pitch_class(), 9, "Third note should be A");
+
+        // Convert to pattern (this is what playback does)
+        let pattern = optimized.to_pattern();
+
+        // Get the playback events
+        let events = pattern.to_events();
+        assert_eq!(events.len(), 2, "Should have 2 chord events");
+
+        // Check the frequencies of the second chord
+        let (freqs, _duration, _is_rest) = &events[1];
+        assert_eq!(freqs.len(), 3, "Second chord should have 3 frequencies");
+
+        // Calculate expected frequencies
+        let c4_freq = notes[0].frequency(); // C4 ~261.63 Hz
+        let f4_freq = notes[1].frequency(); // F4 ~349.23 Hz
+        let a4_freq = notes[2].frequency(); // A4 ~440 Hz
+
+        // Frequencies should be in order: C, F, A
+        let tolerance = 0.1; // Small tolerance for float comparison
+        assert!(
+            (freqs[0] - c4_freq).abs() < tolerance,
+            "First frequency should be C4 (~{}), got {}",
+            c4_freq,
+            freqs[0]
+        );
+        assert!(
+            (freqs[1] - f4_freq).abs() < tolerance,
+            "Second frequency should be F4 (~{}), got {}",
+            f4_freq,
+            freqs[1]
+        );
+        assert!(
+            (freqs[2] - a4_freq).abs() < tolerance,
+            "Third frequency should be A4 (~{}), got {}",
+            a4_freq,
+            freqs[2]
+        );
     }
 }

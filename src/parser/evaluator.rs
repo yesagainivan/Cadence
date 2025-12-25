@@ -654,13 +654,16 @@ impl Evaluator {
 
             "rev" => {
                 if args.len() != 1 {
-                    return Err(anyhow!("rev() expects 1 argument: pattern"));
+                    return Err(anyhow!("rev() expects 1 argument: pattern or progression"));
                 }
 
                 let arg_value = self.eval_with_env(args.into_iter().next().unwrap(), env)?;
                 match arg_value {
                     Value::Pattern(pattern) => Ok(Value::Pattern(pattern.rev())),
-                    _ => Err(anyhow!("rev() only works on patterns")),
+                    Value::Progression(progression) => {
+                        Ok(Value::Progression(progression.retrograde()))
+                    }
+                    _ => Err(anyhow!("rev() only works on patterns or progressions")),
                 }
             }
 

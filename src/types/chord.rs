@@ -33,11 +33,47 @@ impl Chord {
     }
 
     /// Create a chord from note strings (e.g., vec!["C", "E", "G"])
+    /// When no octave is specified, notes are placed in ascending order starting from octave 4.
+    /// For example, [F, A, C] becomes [F4, A4, C5] not [F4, A4, C4].
     pub fn from_note_strings(note_strings: Vec<&str>) -> Result<Self> {
         let mut notes = Vec::new();
+        let mut last_pitch: Option<i16> = None; // Track last absolute pitch for ascending order
+        let mut current_octave: i8 = 4;
+
         for note_str in note_strings {
-            let note: Note = note_str.parse()?;
-            notes.push(note);
+            let parsed_note: Note = note_str.parse()?;
+
+            // Check if an explicit octave was provided (look for digit in string)
+            let has_explicit_octave = note_str.chars().any(|c| c.is_ascii_digit() || c == '-');
+
+            if has_explicit_octave {
+                // Use the explicit octave as-is
+                notes.push(parsed_note);
+                last_pitch =
+                    Some(parsed_note.pitch_class() as i16 + (parsed_note.octave() as i16 * 12));
+                current_octave = parsed_note.octave();
+            } else {
+                // No explicit octave - place in ascending order
+                let this_pitch_class = parsed_note.pitch_class() as i16;
+
+                if let Some(last) = last_pitch {
+                    // Calculate what the absolute pitch would be at current octave
+                    let this_pitch_at_current_octave =
+                        this_pitch_class + (current_octave as i16 * 12);
+
+                    // If this note would be at or below the last note, bump it up an octave
+                    if this_pitch_at_current_octave <= last {
+                        current_octave += 1;
+                    }
+                }
+
+                // Create note with adjusted octave
+                let adjusted_note =
+                    Note::new_with_octave(parsed_note.pitch_class(), current_octave)?;
+                let absolute_pitch = this_pitch_class + (current_octave as i16 * 12);
+                notes.push(adjusted_note);
+                last_pitch = Some(absolute_pitch);
+            }
         }
         Ok(Self::from_notes(notes))
     }
@@ -558,20 +594,28 @@ impl Sub<i8> for Chord {
 impl BitAnd for Chord {
     type Output = Chord;
 
-    /// Intersection: common tones between chords
+    /// Intersection: common tones between chords (by pitch class, ignoring octave)
     fn bitand(self, other: Chord) -> Self::Output {
-        let common_notes: BTreeSet<Note> = self.notes.intersection(&other.notes).copied().collect();
+        // Find common pitch classes
+        let self_pitch_classes: BTreeSet<u8> = self.notes.iter().map(|n| n.pitch_class()).collect();
+        let other_pitch_classes: BTreeSet<u8> =
+            other.notes.iter().map(|n| n.pitch_class()).collect();
+
+        // Get notes from self that have matching pitch classes in other
+        let common_notes: BTreeSet<Note> = self
+            .notes
+            .iter()
+            .filter(|n| other_pitch_classes.contains(&n.pitch_class()))
+            .copied()
+            .collect();
 
         // Create input order from common notes, preserving left operand's order
         let mut input_order = Vec::new();
         for note in &self.input_order {
-            if common_notes.contains(note) {
-                input_order.push(*note);
-            }
-        }
-        // Add any remaining notes from right operand that weren't in left's order
-        for note in &other.input_order {
-            if common_notes.contains(note) && !input_order.contains(note) {
+            if self_pitch_classes
+                .intersection(&other_pitch_classes)
+                .any(|&pc| pc == note.pitch_class())
+            {
                 input_order.push(*note);
             }
         }
@@ -587,21 +631,34 @@ impl BitAnd for Chord {
 impl BitOr for Chord {
     type Output = Chord;
 
-    /// Union: all notes from both chords
+    /// Union: all pitch classes from both chords (uses left operand's octave for duplicates)
     fn bitor(self, other: Chord) -> Self::Output {
-        let all_notes: BTreeSet<Note> = self.notes.union(&other.notes).copied().collect();
+        // Collect pitch classes we've already seen (from self)
+        let mut seen_pitch_classes: BTreeSet<u8> = BTreeSet::new();
+        let mut result_notes: BTreeSet<Note> = BTreeSet::new();
+        let mut input_order = Vec::new();
 
-        // Create input order combining both operands, left first
-        let mut input_order = self.input_order.clone();
+        // Add all notes from self
+        for note in &self.input_order {
+            if !seen_pitch_classes.contains(&note.pitch_class()) {
+                seen_pitch_classes.insert(note.pitch_class());
+                result_notes.insert(*note);
+                input_order.push(*note);
+            }
+        }
+
+        // Add notes from other that have new pitch classes
         for note in &other.input_order {
-            if all_notes.contains(note) && !input_order.contains(note) {
+            if !seen_pitch_classes.contains(&note.pitch_class()) {
+                seen_pitch_classes.insert(note.pitch_class());
+                result_notes.insert(*note);
                 input_order.push(*note);
             }
         }
 
         Chord {
-            notes: all_notes,
-            bass_note: self.bass_note.or(other.bass_note), // Prefer left operand's bass
+            notes: result_notes,
+            bass_note: self.bass_note.or(other.bass_note),
             input_order,
         }
     }
@@ -610,30 +667,45 @@ impl BitOr for Chord {
 impl BitXor for Chord {
     type Output = Chord;
 
-    /// Symmetric difference: notes that are in one chord but not both
+    /// Symmetric difference: pitch classes that are in one chord but not both
     fn bitxor(self, other: Chord) -> Self::Output {
-        let diff_notes: BTreeSet<Note> = self
-            .notes
-            .symmetric_difference(&other.notes)
+        let self_pitch_classes: BTreeSet<u8> = self.notes.iter().map(|n| n.pitch_class()).collect();
+        let other_pitch_classes: BTreeSet<u8> =
+            other.notes.iter().map(|n| n.pitch_class()).collect();
+
+        // Find pitch classes only in self
+        let only_in_self: BTreeSet<u8> = self_pitch_classes
+            .difference(&other_pitch_classes)
+            .copied()
+            .collect();
+        // Find pitch classes only in other
+        let only_in_other: BTreeSet<u8> = other_pitch_classes
+            .difference(&self_pitch_classes)
             .copied()
             .collect();
 
-        // Create input order from diff notes, preserving original orders
+        let mut result_notes: BTreeSet<Note> = BTreeSet::new();
         let mut input_order = Vec::new();
+
+        // Add notes from self that are only in self
         for note in &self.input_order {
-            if diff_notes.contains(note) {
+            if only_in_self.contains(&note.pitch_class()) {
+                result_notes.insert(*note);
                 input_order.push(*note);
             }
         }
+
+        // Add notes from other that are only in other
         for note in &other.input_order {
-            if diff_notes.contains(note) && !input_order.contains(note) {
+            if only_in_other.contains(&note.pitch_class()) {
+                result_notes.insert(*note);
                 input_order.push(*note);
             }
         }
 
         Chord {
-            notes: diff_notes,
-            bass_note: None, // Reset bass for set operations
+            notes: result_notes,
+            bass_note: None,
             input_order,
         }
     }

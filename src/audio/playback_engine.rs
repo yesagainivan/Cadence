@@ -70,7 +70,10 @@ impl PlaybackSource {
                     Err(anyhow::anyhow!("Cannot play a string \"{}\"", s))
                 }
             }
-            Value::Chord(chord) => Ok(vec![(chord.notes().map(|n| n.frequency()).collect(), 1.0)]),
+            Value::Chord(chord) => Ok(vec![(
+                chord.notes_vec().iter().map(|n| n.frequency()).collect(),
+                1.0,
+            )]),
             Value::Progression(prog) => {
                 // Convert to pattern for unified playback with envelope handling
                 // This fixes the clicks between chords!
