@@ -136,9 +136,7 @@ impl Evaluator {
 
                 let key_value = self.eval_with_env(args[0].clone(), env)?;
                 if let Value::Note(key) = key_value {
-                    let prog = CommonProgressions::get_progression(name, key)?;
-                    // Convert Progression to Pattern
-                    let pattern = crate::types::Pattern::from_progression(&prog);
+                    let pattern = CommonProgressions::get_progression(name, key)?;
 
                     // Enhanced display message with smart formatting
                     let display_name = if CommonProgressions::is_numeric_progression(name) {
@@ -520,14 +518,12 @@ impl Evaluator {
                     if let Value::Note(key) = key_value {
                         // Try both underscore and dash versions, and Roman numeral versions
                         let underscore_name = prog_name.replace("-", "_");
-                        let prog =
-                            CommonProgressions::get_progression(&prog_name, key).or_else(|_| {
+                        let pattern = CommonProgressions::get_progression(&prog_name, key)
+                            .or_else(|_| {
                                 CommonProgressions::get_progression(&underscore_name, key)
                             })?;
 
                         println!("Generated {} progression in {}", prog_name, key);
-                        // Convert Progression to Pattern
-                        let pattern = crate::types::Pattern::from_progression(&prog);
                         Ok(Value::Pattern(pattern))
                     } else {
                         Err(anyhow!("progression() expects (name, key)"))
