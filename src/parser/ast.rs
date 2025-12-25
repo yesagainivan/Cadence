@@ -209,6 +209,9 @@ pub enum Expression {
 
     /// String literal (that failed to parse as pattern): "rev"
     String(String),
+
+    /// Numeric literal: 20, 100, etc.
+    Number(i32),
 }
 
 /// Comparison operators
@@ -278,6 +281,7 @@ impl fmt::Display for Expression {
             }
             Expression::Pattern(pattern) => write!(f, "{}", pattern),
             Expression::String(s) => write!(f, "\"{}\"", s),
+            Expression::Number(n) => write!(f, "{}", n),
         }
     }
 }

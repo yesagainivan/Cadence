@@ -100,12 +100,18 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] Subdivision helpers (is_half_beat, is_quarter_beat)
 - [x] Proper cycle ordering for `every()` operator
 
+### 3.6 Method Chaining ✅
+- [x] `.method()` syntax desugared to function calls
+- [x] Chained transforms: `"C E G".fast(2).rev().env("pluck")`
+
 ---
 
 ## Phase 4: Production Features
 
 ### 4.1 Audio Enhancements
-- [ ] ADSR envelopes (configurable attack/decay/sustain/release)
+- [x] ADSR envelopes (configurable attack/decay/sustain/release)
+  - *Presets: pluck, pad, perc, organ + custom `env(pattern, a, d, s, r)`*
+  - *Method chaining: `"C E".env("pluck")` or `"C E".rev().env(40, 10, 0, 10)`*
 - [ ] Multiple waveforms (saw, square, triangle)
 - [ ] Basic effects (reverb, delay, filter)
 
@@ -179,7 +185,7 @@ A production-ready music programming language for chord progressions and harmoni
 5. ~~**Reactive Variables** - Variable updates affect playing audio~~ ✅ Done
 6. ~~**Pattern System** - Mini-notation, cycle-based patterns, operators~~ ✅ Done
 7. ~~**Live Reload** - File watch with hot-reload at beat boundaries~~ ✅ Done
-8. **ADSR Envelopes** - Configurable attack/decay/sustain/release
+8. ~~**ADSR Envelopes** - Configurable attack/decay/sustain/release~~ ✅ Done
 9. **MIDI Output** - MIDI device enumeration, note-on/note-off events, control change messages
-
-10. **modularize statement parser** - break down into smaller modules
+10. **Multiple Waveforms** - saw, square, triangle waveforms
+11. **modularize statement parser** - break down into smaller modules

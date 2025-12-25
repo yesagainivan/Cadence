@@ -94,6 +94,24 @@ impl PlaybackSource {
         }
     }
 
+    /// Get the envelope parameters from the source (if it's a pattern with envelope)
+    pub fn get_envelope(&self) -> Result<Option<(f32, f32, f32, f32)>> {
+        match self {
+            PlaybackSource::Static(_) => Ok(None),
+            PlaybackSource::Reactive { expression, env } => {
+                let evaluator = Evaluator::new();
+                let env_guard = env
+                    .read()
+                    .map_err(|e| anyhow::anyhow!("Environment lock poisoned: {}", e))?;
+                let value = evaluator.eval_with_env(expression.clone(), Some(&env_guard))?;
+                match value {
+                    Value::Pattern(pattern) => Ok(pattern.envelope),
+                    _ => Ok(None),
+                }
+            }
+        }
+    }
+
     /// Get the number of events in this source (evaluates if reactive)
     pub fn len(&self) -> Result<usize> {
         Ok(self.evaluate()?.len())
@@ -521,6 +539,16 @@ impl PlaybackLoop {
         }
 
         let (chord_frequencies, event_duration) = &frequencies[self.chord_index];
+
+        // Set the envelope for this track (from pattern if available)
+        if let Ok(envelope) = config.source.get_envelope() {
+            if let Err(e) = self
+                .audio_handle
+                .set_track_envelope(self.track_id, envelope)
+            {
+                eprintln!("Failed to set envelope: {}", e);
+            }
+        }
 
         // Set the notes for this track
         if let Err(e) = self

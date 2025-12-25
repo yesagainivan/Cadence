@@ -513,23 +513,17 @@ impl StatementParser {
                 let name = num.to_string();
                 let val = num; // Value is already i32, no deref needed
                 self.advance();
-                // If followed by LeftParen, it's a function call
+                // If followed by LeftParen, it's a function call (e.g., 251(C) for progressions)
                 if matches!(self.current(), Token::LeftParen) {
                     self.parse_function_call(name)
+                } else if val >= 0 && val <= 11 {
+                    // Small numbers (0-11) can be notes (for backward compat with fast(p, 2))
+                    let note = crate::types::Note::new(val as u8)
+                        .map_err(|e| anyhow!("Invalid note from number {}: {}", val, e))?;
+                    Ok(Expression::Note(note))
                 } else {
-                    // Treat bare number as raw pitch class note
-                    // This allows fast(p, 2) where 2 becomes a Note with pitch class 2
-                    if val >= 0 {
-                        let note = crate::types::Note::new(val as u8)
-                            .map_err(|e| anyhow!("Invalid note from number {}: {}", val, e))?;
-                        Ok(Expression::Note(note))
-                    } else {
-                        Err(anyhow!(
-                            "Unexpected negative number: {} (did you mean {}(key)?)",
-                            name,
-                            name
-                        ))
-                    }
+                    // Larger numbers stay as numbers (for env(), etc.)
+                    Ok(Expression::Number(val))
                 }
             }
 

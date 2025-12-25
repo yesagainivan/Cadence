@@ -30,6 +30,7 @@ impl Evaluator {
             Expression::Chord(chord) => Ok(Value::Chord(chord)),
             Expression::Pattern(pattern) => Ok(Value::Pattern(pattern)),
             Expression::String(s) => Ok(Value::String(s)),
+            Expression::Number(n) => Ok(Value::Number(n)),
             Expression::Transpose { target, semitones } => {
                 let target_value = self.eval_with_env(*target, env)?;
                 match target_value {
@@ -748,6 +749,62 @@ impl Evaluator {
                 }
             }
 
+            // Envelope function - sets ADSR parameters on a pattern
+            "env" => {
+                if args.is_empty() || args.len() > 5 {
+                    return Err(anyhow!(
+                        "env() expects 1-5 arguments: pattern, [attack, decay, sustain, release] or pattern, preset_name"
+                    ));
+                }
+
+                let pattern_value = self.eval_with_env(args[0].clone(), env)?;
+                let pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    _ => return Err(anyhow!("env() first argument must be a pattern")),
+                };
+
+                if args.len() == 2 {
+                    // Preset mode: env(pattern, "pluck")
+                    let preset_val = self.eval_with_env(args[1].clone(), env)?;
+                    match preset_val {
+                        Value::String(preset_name) => {
+                            Ok(Value::Pattern(pattern.env_preset(&preset_name)))
+                        }
+                        _ => Err(anyhow!(
+                            "env() with 2 arguments expects a preset name string"
+                        )),
+                    }
+                } else if args.len() == 5 {
+                    // Custom ADSR: env(pattern, attack, decay, sustain, release)
+                    let attack = match self.eval_with_env(args[1].clone(), env)? {
+                        Value::Number(n) => n as f32 / 100.0, // Assume percentage-like input
+                        Value::Note(n) => n.pitch_class() as f32 / 100.0,
+                        _ => return Err(anyhow!("env() attack must be a number")),
+                    };
+                    let decay = match self.eval_with_env(args[2].clone(), env)? {
+                        Value::Number(n) => n as f32 / 100.0,
+                        Value::Note(n) => n.pitch_class() as f32 / 100.0,
+                        _ => return Err(anyhow!("env() decay must be a number")),
+                    };
+                    let sustain = match self.eval_with_env(args[3].clone(), env)? {
+                        Value::Number(n) => (n as f32 / 100.0).clamp(0.0, 1.0),
+                        Value::Note(n) => (n.pitch_class() as f32 / 12.0).clamp(0.0, 1.0),
+                        _ => return Err(anyhow!("env() sustain must be a number")),
+                    };
+                    let release = match self.eval_with_env(args[4].clone(), env)? {
+                        Value::Number(n) => n as f32 / 100.0,
+                        Value::Note(n) => n.pitch_class() as f32 / 100.0,
+                        _ => return Err(anyhow!("env() release must be a number")),
+                    };
+
+                    Ok(Value::Pattern(pattern.env(attack, decay, sustain, release)))
+                } else {
+                    Err(anyhow!(
+                        "env() expects either (pattern, preset_name) or (pattern, a, d, s, r)"
+                    ))
+                }
+            }
+
             _ => Err(anyhow!("Unknown function: {}", name)),
         }
     }
@@ -1130,6 +1187,60 @@ mod evaluator_numeric_tests {
                         crate::types::PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0),
                         _ => panic!("Expected Note C, got {:?}", steps[2]),
                     }
+                }
+                _ => panic!("Expected pattern value"),
+            }
+        }
+
+        #[test]
+        fn test_eval_env_preset() {
+            // env("C E", "pluck") -> pattern with pluck envelope
+            let expr = parse("env(\"C E\", \"pluck\")").unwrap();
+            let result = Evaluator::new().eval(expr).unwrap();
+
+            match result {
+                Value::Pattern(p) => {
+                    assert!(p.envelope.is_some());
+                    let (attack, _decay, sustain, _release) = p.envelope.unwrap();
+                    assert!(attack < 0.01); // pluck has very short attack
+                    assert!(sustain < 0.1); // pluck has no sustain
+                }
+                _ => panic!("Expected pattern value"),
+            }
+        }
+
+        #[test]
+        fn test_method_chain_env() {
+            // "C E".env("pad") should work with method chaining
+            let expr = parse("\"C E\".env(\"pad\")").unwrap();
+            let result = Evaluator::new().eval(expr).unwrap();
+
+            match result {
+                Value::Pattern(p) => {
+                    assert!(p.envelope.is_some());
+                    let (attack, _decay, sustain, _release) = p.envelope.unwrap();
+                    assert!(attack > 0.1); // pad has slow attack
+                    assert!(sustain > 0.5); // pad has high sustain
+                }
+                _ => panic!("Expected pattern value"),
+            }
+        }
+
+        #[test]
+        fn test_eval_env_custom_adsr() {
+            // env("C E", 20, 40, 70, 30) -> pattern with custom ADSR
+            // Values are divided by 100 to get seconds/level
+            let expr = parse("env(\"C E\", 20, 40, 70, 30)").unwrap();
+            let result = Evaluator::new().eval(expr).unwrap();
+
+            match result {
+                Value::Pattern(p) => {
+                    assert!(p.envelope.is_some());
+                    let (attack, decay, sustain, release) = p.envelope.unwrap();
+                    assert!((attack - 0.20).abs() < 0.01);
+                    assert!((decay - 0.40).abs() < 0.01);
+                    assert!((sustain - 0.70).abs() < 0.01);
+                    assert!((release - 0.30).abs() < 0.01);
                 }
                 _ => panic!("Expected pattern value"),
             }

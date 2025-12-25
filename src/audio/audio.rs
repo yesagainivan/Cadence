@@ -17,6 +17,8 @@ pub struct TrackState {
     pub volume: f32,
     /// Whether this specific track is playing (not currently used for master pause)
     pub is_playing: bool,
+    /// Optional custom ADSR envelope (attack, decay, sustain, release)
+    pub envelope: Option<(f32, f32, f32, f32)>,
 }
 
 impl Default for TrackState {
@@ -25,6 +27,7 @@ impl Default for TrackState {
             notes: Vec::new(),
             volume: 1.0, // Individual tracks default to full volume (master mixer handles global)
             is_playing: true,
+            envelope: None, // Use default ADSR
         }
     }
 }
@@ -62,7 +65,19 @@ struct EnvelopedOscillator {
 
 impl EnvelopedOscillator {
     fn new(frequency: f32, sample_rate: f32, track_id: usize) -> Self {
-        let params = AdsrParams::default();
+        Self::with_envelope(frequency, sample_rate, track_id, None)
+    }
+
+    fn with_envelope(
+        frequency: f32,
+        sample_rate: f32,
+        track_id: usize,
+        envelope_params: Option<(f32, f32, f32, f32)>,
+    ) -> Self {
+        let params = match envelope_params {
+            Some((a, d, s, r)) => AdsrParams::new(a, d, s, r),
+            None => AdsrParams::default(),
+        };
         let mut envelope = AdsrEnvelope::new(params, sample_rate);
         envelope.trigger(); // Start the envelope immediately
 
@@ -102,6 +117,7 @@ impl EnvelopedOscillator {
 pub enum AudioPlayerCommand {
     SetTrackNotes(usize, Vec<f32>),
     SetTrackVolume(usize, f32),
+    SetTrackEnvelope(usize, Option<(f32, f32, f32, f32)>),
     SetMasterVolume(f32),
     Play,
     Pause,
@@ -193,12 +209,13 @@ impl AudioPlayerInternal {
                                 osc.start_fade_out();
                             }
 
-                            // Add new oscillators
+                            // Add new oscillators with track's envelope settings
                             for &freq in &track_state.notes {
-                                oscillators.push(EnvelopedOscillator::new(
+                                oscillators.push(EnvelopedOscillator::with_envelope(
                                     freq,
                                     sample_rate,
                                     *track_id,
+                                    track_state.envelope,
                                 ));
                             }
 
@@ -289,6 +306,20 @@ impl AudioPlayerInternal {
         Ok(())
     }
 
+    fn set_track_envelope(
+        &mut self,
+        track_id: usize,
+        envelope: Option<(f32, f32, f32, f32)>,
+    ) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
+        let track = state.tracks.entry(track_id).or_default();
+        track.envelope = envelope;
+        Ok(())
+    }
+
     fn set_master_volume(&mut self, volume: f32) -> Result<()> {
         let mut state = self
             .state
@@ -356,6 +387,11 @@ impl AudioPlayerHandle {
                             eprintln!("Failed to set track volume: {}", e);
                         }
                     }
+                    AudioPlayerCommand::SetTrackEnvelope(track_id, envelope) => {
+                        if let Err(e) = player.set_track_envelope(track_id, envelope) {
+                            eprintln!("Failed to set track envelope: {}", e);
+                        }
+                    }
                     AudioPlayerCommand::SetMasterVolume(vol) => {
                         if let Err(e) = player.set_master_volume(vol) {
                             eprintln!("Failed to set master volume: {}", e);
@@ -398,6 +434,17 @@ impl AudioPlayerHandle {
     pub fn set_track_volume(&self, track_id: usize, volume: f32) -> Result<()> {
         self.command_tx
             .send(AudioPlayerCommand::SetTrackVolume(track_id, volume))
+            .map_err(|e| anyhow!("Failed to send command: {}", e))
+    }
+
+    /// Set the ADSR envelope for a specific track
+    pub fn set_track_envelope(
+        &self,
+        track_id: usize,
+        envelope: Option<(f32, f32, f32, f32)>,
+    ) -> Result<()> {
+        self.command_tx
+            .send(AudioPlayerCommand::SetTrackEnvelope(track_id, envelope))
             .map_err(|e| anyhow!("Failed to send command: {}", e))
     }
 
