@@ -170,14 +170,14 @@ impl StatementParser {
         Ok(Statement::Let { name, value })
     }
 
-    /// Parse: play <expression> [loop] [queue] [duration <n>]
+    /// Parse: play <expression> [loop] [queue [beat|bar|cycle]] [duration <n>]
     fn parse_play_statement(&mut self) -> Result<Statement> {
         self.expect(&Token::Play)?;
 
         let target = self.parse_expression()?;
 
         let mut looping = false;
-        let mut queue = false;
+        let mut queue_mode = None;
         let mut duration = None;
 
         // Parse modifiers
@@ -189,7 +189,22 @@ impl StatementParser {
                 }
                 Token::Queue => {
                     self.advance();
-                    queue = true;
+                    // Check for optional mode: beat, bar, cycle
+                    if let Token::Identifier(mode) = self.current() {
+                        match mode.as_str() {
+                            "beat" | "bar" | "cycle" => {
+                                queue_mode = Some(mode.clone());
+                                self.advance();
+                            }
+                            _ => {
+                                // Not a mode, default to beat
+                                queue_mode = Some("beat".to_string());
+                            }
+                        }
+                    } else {
+                        // No mode specified, default to beat
+                        queue_mode = Some("beat".to_string());
+                    }
                 }
                 Token::Identifier(name) if name == "duration" => {
                     self.advance();
@@ -212,7 +227,7 @@ impl StatementParser {
         Ok(Statement::Play {
             target,
             looping,
-            queue,
+            queue_mode,
             duration,
         })
     }

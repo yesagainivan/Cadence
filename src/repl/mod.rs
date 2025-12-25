@@ -161,7 +161,7 @@ impl Repl {
             InterpreterAction::PlayExpression {
                 expression,
                 looping,
-                queue,
+                queue_mode,
                 track_id,
             } => {
                 let engine = self.get_engine(track_id);
@@ -204,13 +204,18 @@ impl Repl {
                 // Ensure the clock is running before starting playback
                 self.clock.start();
 
-                if queue {
-                    if let Err(e) = engine.queue_progression(config) {
+                if let Some(mode) = queue_mode {
+                    if let Err(e) = engine.queue_progression_with_mode(config, mode) {
                         println!("{} {}", "Playback error:".red(), e);
                     } else {
+                        let mode_str = match mode {
+                            crate::audio::playback_engine::QueueMode::Beat => "next beat",
+                            crate::audio::playback_engine::QueueMode::Bar => "next bar",
+                            crate::audio::playback_engine::QueueMode::Cycle => "next cycle",
+                        };
                         println!(
-                            "🔁 Queued {} for next beat... (Track {})",
-                            display_value, track_id
+                            "🔁 Queued {} for {}... (Track {})",
+                            display_value, mode_str, track_id
                         );
                     }
                 } else {
@@ -273,7 +278,7 @@ impl Repl {
             InterpreterAction::PlayExpression {
                 expression,
                 looping: true, // Only handle looped expressions specially
-                queue: _,
+                queue_mode: _,
                 track_id,
             } => {
                 let engine = self.get_engine(track_id);
@@ -312,7 +317,7 @@ impl Repl {
                     InterpreterAction::PlayExpression {
                         expression,
                         looping: true,
-                        queue: false, // Immediate play since track isn't running
+                        queue_mode: None, // Immediate play since track isn't running
                         track_id,
                     },
                     ctx,

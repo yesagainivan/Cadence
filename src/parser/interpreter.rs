@@ -2,6 +2,7 @@
 //!
 //! Executes statements with side effects (audio, variable binding, control flow).
 
+use crate::audio::playback_engine::QueueMode;
 use crate::parser::ast::{Expression, Program, Statement, Value};
 use crate::parser::environment::{Environment, SharedEnvironment};
 use crate::parser::evaluator::Evaluator;
@@ -25,7 +26,8 @@ pub enum InterpreterAction {
     PlayExpression {
         expression: Expression,
         looping: bool,
-        queue: bool,
+        /// None = immediate play, Some(mode) = queue with specified sync mode
+        queue_mode: Option<QueueMode>,
         track_id: usize,
     },
     /// Set the tempo (global)
@@ -180,16 +182,21 @@ impl Interpreter {
             Statement::Play {
                 target,
                 looping,
-                queue,
+                queue_mode: ast_queue_mode,
                 duration: _,
             } => {
                 // Validate expression can be evaluated (catch errors early)
                 let val = self.eval_expression(target)?;
-                // Store the expression for reactive evaluation in playback thread
+                // Convert string queue mode to QueueMode enum
+                let queue_mode = ast_queue_mode.as_ref().map(|mode| match mode.as_str() {
+                    "bar" => QueueMode::Bar,
+                    "cycle" => QueueMode::Cycle,
+                    _ => QueueMode::Beat, // default
+                });
                 self.actions.push(InterpreterAction::PlayExpression {
                     expression: target.clone(),
                     looping: *looping,
-                    queue: *queue,
+                    queue_mode,
                     track_id: self.current_track,
                 });
                 if *looping {
@@ -503,11 +510,11 @@ mod tests {
         match &actions[0] {
             crate::parser::interpreter::InterpreterAction::PlayExpression {
                 looping,
-                queue,
+                queue_mode,
                 ..
             } => {
                 assert!(!looping);
-                assert!(!queue);
+                assert!(queue_mode.is_none());
             }
             _ => panic!("Expected PlayExpression action"),
         }

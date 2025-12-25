@@ -199,13 +199,25 @@ impl ProgressionConfig {
     }
 }
 
+/// When to start a queued progression
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum QueueMode {
+    /// Start at the next beat boundary (default)
+    #[default]
+    Beat,
+    /// Start at the next bar boundary (beat 0, 4, 8, 12... in 4/4 time)
+    Bar,
+    /// Start when current pattern completes its cycle
+    Cycle,
+}
+
 /// Commands that can be sent to the playback engine
 #[derive(Debug)]
 pub enum PlaybackCommand {
     /// Start playing a progression immediately (interrupts current)
     PlayProgression(ProgressionConfig),
-    /// Queue a progression to start at the next beat boundary
-    QueueProgression(ProgressionConfig),
+    /// Queue a progression to start at the specified sync point
+    QueueProgression(ProgressionConfig, QueueMode),
     /// Stop playback immediately
     Stop,
     /// Set volume for this track
@@ -277,8 +289,17 @@ impl PlaybackEngine {
 
     /// Queue a progression to start at the next beat boundary (seamless transition)
     pub fn queue_progression(&self, config: ProgressionConfig) -> Result<()> {
+        self.queue_progression_with_mode(config, QueueMode::Beat)
+    }
+
+    /// Queue a progression to start at the specified sync point
+    pub fn queue_progression_with_mode(
+        &self,
+        config: ProgressionConfig,
+        mode: QueueMode,
+    ) -> Result<()> {
         self.command_tx
-            .send(PlaybackCommand::QueueProgression(config))
+            .send(PlaybackCommand::QueueProgression(config, mode))
             .map_err(|e| anyhow::anyhow!("Failed to send command: {}", e))
     }
 
@@ -321,8 +342,8 @@ struct PlaybackLoop {
 
     // Playback state
     current_progression: Option<ProgressionConfig>,
-    /// Queue of progressions waiting to play (FIFO)
-    pending_queue: VecDeque<ProgressionConfig>,
+    /// Queue of progressions waiting to play (FIFO) with their sync modes
+    pending_queue: VecDeque<(ProgressionConfig, QueueMode)>,
     chord_index: usize,
     iteration: usize,
     audio_started: bool,
@@ -443,16 +464,23 @@ impl PlaybackLoop {
         {
             self.play_next_beat(current_beat);
         } else if self.current_progression.is_none() && !self.pending_queue.is_empty() {
-            // No current progression but items in queue - start on beat boundaries only
-            if tick.is_beat_boundary() {
-                if let Some(next) = self.pending_queue.pop_front() {
-                    self.current_progression = Some(next);
-                    self.chord_index = 0;
-                    self.iteration = 0;
-                    self.next_chord_beat = current_beat;
-                    self.is_playing.store(true, Ordering::Relaxed);
-                    let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
-                    self.play_next_beat(current_beat);
+            // No current progression but items in queue - check sync mode
+            if let Some((_, mode)) = self.pending_queue.front() {
+                let should_start = match mode {
+                    QueueMode::Beat => tick.is_beat_boundary(),
+                    QueueMode::Bar => tick.is_bar_boundary(),
+                    QueueMode::Cycle => tick.is_beat_boundary(), // No cycle to wait for, use beat
+                };
+                if should_start {
+                    if let Some((next_config, _)) = self.pending_queue.pop_front() {
+                        self.current_progression = Some(next_config);
+                        self.chord_index = 0;
+                        self.iteration = 0;
+                        self.next_chord_beat = current_beat;
+                        self.is_playing.store(true, Ordering::Relaxed);
+                        let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
+                        self.play_next_beat(current_beat);
+                    }
                 }
             }
         }
@@ -471,8 +499,8 @@ impl PlaybackLoop {
                 self.audio_started = false;
                 let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
             }
-            PlaybackCommand::QueueProgression(config) => {
-                self.pending_queue.push_back(config);
+            PlaybackCommand::QueueProgression(config, mode) => {
+                self.pending_queue.push_back((config, mode));
                 self.is_playing.store(true, Ordering::Relaxed);
             }
             PlaybackCommand::Stop => {
@@ -506,8 +534,8 @@ impl PlaybackLoop {
 
     /// Try to start the next queued progression
     fn try_start_next_queued(&mut self) -> bool {
-        if let Some(next) = self.pending_queue.pop_front() {
-            self.current_progression = Some(next);
+        if let Some((next_config, _mode)) = self.pending_queue.pop_front() {
+            self.current_progression = Some(next_config);
             self.chord_index = 0;
             self.iteration = 0;
             true
@@ -568,14 +596,26 @@ impl PlaybackLoop {
 
     fn play_next_beat(&mut self, current_beat: f64) {
         // Quantized Interrupt Logic:
-        // If current progression is an infinite loop, try to switch to queued item
+        // If current progression is an infinite loop, check if we should switch to queued item
+        // based on the queued item's sync mode
         let is_infinite = self
             .current_progression
             .as_ref()
             .map_or(false, |p| p.loop_count.is_none());
 
         if is_infinite && !self.pending_queue.is_empty() {
-            self.try_start_next_queued();
+            // Check the sync mode of the next queued item
+            if let Some((_, mode)) = self.pending_queue.front() {
+                let should_switch = match mode {
+                    // Beat and Bar modes: switch immediately (already at a beat/bar from handle_tick)
+                    QueueMode::Beat | QueueMode::Bar => true,
+                    // Cycle mode: only switch at end of pattern cycle (chord_index about to wrap)
+                    QueueMode::Cycle => false, // Will be handled in evaluate_with_cycle_check
+                };
+                if should_switch {
+                    self.try_start_next_queued();
+                }
+            }
         }
 
         let config = match &self.current_progression {
@@ -704,6 +744,15 @@ impl PlaybackLoop {
         if self.chord_index >= frequencies.len() {
             self.chord_index = 0;
             self.iteration += 1;
+
+            // Check for QueueMode::Cycle - end of cycle is our switch point
+            if config.loop_count.is_none() && !self.pending_queue.is_empty() {
+                if let Some((_, QueueMode::Cycle)) = self.pending_queue.front() {
+                    self.try_start_next_queued();
+                    // Return error to signal we've switched progressions
+                    return Err(anyhow::anyhow!("Switched to queued progression"));
+                }
+            }
 
             // Check loop count after increment
             if let Some(max_loops) = config.loop_count {

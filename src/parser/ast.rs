@@ -45,11 +45,12 @@ pub enum Statement {
     /// Expression statement (evaluates and optionally prints): [C, E, G]
     Expression(Expression),
 
-    /// Play command with options: play progression loop queue
+    /// Play command with options: play progression loop queue [beat|bar|cycle]
     Play {
         target: Expression,
         looping: bool,
-        queue: bool,
+        /// None = immediate, Some("beat"|"bar"|"cycle") = queued with sync mode
+        queue_mode: Option<String>,
         duration: Option<f32>,
     },
 
@@ -106,15 +107,15 @@ impl fmt::Display for Statement {
             Statement::Play {
                 target,
                 looping,
-                queue,
+                queue_mode,
                 duration,
             } => {
                 write!(f, "play {}", target)?;
                 if *looping {
                     write!(f, " loop")?;
                 }
-                if *queue {
-                    write!(f, " queue")?;
+                if let Some(mode) = queue_mode {
+                    write!(f, " queue {}", mode)?;
                 }
                 if let Some(d) = duration {
                     write!(f, " duration {}", d)?;

@@ -190,6 +190,19 @@ fn print_help() {
     println!("  {}        - Show current tempo", "tempo".cyan());
     println!("  {}    - Set tempo", "tempo <bpm>".cyan());
     println!();
+    println!("{}", "Queue Sync Modes:".green());
+    println!(
+        "  {} - Queue for next beat (default)",
+        "play X queue".cyan()
+    );
+    println!(
+        "  {}  - Queue for next bar (beat 0, 4, 8...)",
+        "play X queue bar".cyan()
+    );
+    println!(
+        "  {} - Queue for next cycle end",
+        "play X queue cycle".cyan()
+    );
     println!("{}", "MIDI Commands:".green());
     println!("  {}       - List MIDI output ports", "midi devices".cyan());
     println!("  {} - Connect to MIDI port", "midi connect <port>".cyan());

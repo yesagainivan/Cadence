@@ -33,6 +33,11 @@ impl ClockTick {
         self.tick_in_beat == 0
     }
 
+    /// Returns true if this tick is on a bar boundary (beat 0, 4, 8, 12... in 4/4 time)
+    pub fn is_bar_boundary(&self) -> bool {
+        self.tick_in_beat == 0 && self.beat_number % 4 == 0
+    }
+
     /// Returns true if this tick is on a subdivision boundary.
     /// - subdivision 2: 8th notes (every 12 ticks)
     /// - subdivision 4: 16th notes (every 6 ticks)
