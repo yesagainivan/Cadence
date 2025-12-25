@@ -506,6 +506,26 @@ impl Lexer {
                     self.advance(); // consume opening quote
                     let mut s = String::new();
                     while let Some(ch) = self.current_char {
+                        if ch == '\\' {
+                            self.advance(); // consume backslash
+                            if let Some(escaped) = self.current_char {
+                                match escaped {
+                                    '"' => s.push('"'),
+                                    '\\' => s.push('\\'),
+                                    'n' => s.push('\n'),
+                                    't' => s.push('\t'),
+                                    'r' => s.push('\r'),
+                                    _ => s.push(escaped), // Allow other escaped chars as-is
+                                }
+                                self.advance();
+                                continue;
+                            } else {
+                                return Err(anyhow!(
+                                    "Unterminated string literal (trailing backslash)"
+                                ));
+                            }
+                        }
+
                         if ch == '"' {
                             self.advance(); // consume closing quote
                             return Ok(Token::StringLiteral(s));
@@ -975,5 +995,16 @@ mod tests {
         assert!(tokens.contains(&Token::LeftBracket));
         assert!(tokens.contains(&Token::RightBracket));
         assert_eq!(tokens.last(), Some(&Token::Eof));
+    }
+
+    #[test]
+    fn test_string_escapes() {
+        let mut lexer = Lexer::new(r#""fast(\"C E G\", 2)""#);
+        let tokens = lexer.tokenize().unwrap();
+
+        match &tokens[0] {
+            Token::StringLiteral(s) => assert_eq!(s, r#"fast("C E G", 2)"#),
+            _ => panic!("Expected string literal"),
+        }
     }
 }

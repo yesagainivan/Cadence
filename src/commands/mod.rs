@@ -24,6 +24,8 @@ pub enum CommandResult {
     NotACommand,
     /// Error occurred
     Error(String),
+    /// Watch a file for changes
+    Watch(String),
 }
 
 /// Context passed to command handlers
@@ -117,6 +119,7 @@ pub fn create_registry() -> CommandRegistry {
     registry.register("help", general::cmd_help);
     registry.register("quit", general::cmd_quit);
     registry.register("exit", general::cmd_quit);
+    registry.register("watch", general::cmd_watch);
 
     registry
 }

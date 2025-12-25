@@ -171,5 +171,5 @@ A production-ready music programming language for chord progressions and harmoni
 4. ~~**Multi-track/Voices** - Named tracks for simultaneous playback~~ ✅ Done
 5. ~~**Reactive Variables** - Variable updates affect playing audio~~ ✅ Done
 6. ~~**Pattern System** - Mini-notation, cycle-based patterns, operators~~ ✅ Done
-7. **Live Reload** - File watch with hot-reload at beat boundaries
+7. ~~**Live Reload** - File watch with hot-reload at beat boundaries~~ ✅ Done
 8. **ADSR Envelopes** - Configurable attack/decay/sustain/release

@@ -58,7 +58,14 @@ impl PlaybackSource {
     fn value_to_frequencies(value: &Value) -> Result<Vec<(Vec<f32>, f32)>> {
         match value {
             Value::Note(note) => Ok(vec![(vec![note.frequency()], 1.0)]),
-            Value::String(_) => Err(anyhow::anyhow!("Cannot play a string string")),
+            Value::String(s) => {
+                // Try to parse string as a pattern
+                if let Ok(pattern) = crate::types::Pattern::parse(s) {
+                    Self::value_to_frequencies(&Value::Pattern(pattern))
+                } else {
+                    Err(anyhow::anyhow!("Cannot play a string \"{}\"", s))
+                }
+            }
             Value::Chord(chord) => Ok(vec![(chord.notes().map(|n| n.frequency()).collect(), 1.0)]),
             Value::Progression(prog) => Ok(prog
                 .chords()
@@ -98,10 +105,13 @@ impl PlaybackSource {
     /// Used for injecting time/state like `_cycle` into the evaluator
     pub fn update_environment(&self, name: &str, value: Value) -> Result<()> {
         if let PlaybackSource::Reactive { env, .. } = self {
-            let _ = env
+            let mut guard = env
                 .write()
-                .map_err(|e| anyhow::anyhow!("Environment lock poisoned: {}", e))?
-                .set(name, value);
+                .map_err(|e| anyhow::anyhow!("Environment lock poisoned: {}", e))?;
+
+            if guard.set(name, value.clone()).is_err() {
+                guard.define(name.to_string(), value);
+            }
         }
         Ok(())
     }
@@ -497,7 +507,7 @@ impl PlaybackLoop {
         }
 
         // Evaluate the source to get current frequencies
-        let frequencies = match config.source.evaluate() {
+        let mut frequencies = match config.source.evaluate() {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("Failed to evaluate playback source: {}", e);
@@ -519,6 +529,23 @@ impl PlaybackLoop {
                     return;
                 }
             }
+
+            // IMPORTANT: We started a new cycle, so we MUST update environment and re-evaluate
+            // to get the correct pattern for this new cycle immediately.
+            if let Err(e) = config
+                .source
+                .update_environment("_cycle", Value::Number(self.iteration as i32))
+            {
+                eprintln!("Failed to update environment: {}", e);
+            }
+
+            match config.source.evaluate() {
+                Ok(f) => frequencies = f,
+                Err(e) => {
+                    eprintln!("Failed to evaluate playback source: {}", e);
+                    return;
+                }
+            };
         }
 
         if frequencies.is_empty() {

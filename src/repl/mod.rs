@@ -5,17 +5,28 @@ use crate::audio::clock::MasterClock;
 use crate::audio::playback_engine::PlaybackEngine;
 use crate::commands::{CommandContext, CommandResult, create_registry};
 use crate::parser::{Interpreter, InterpreterAction, parse_statements};
+use crate::repl::watcher::FileWatcher;
 use anyhow::Result;
 use colored::*;
+use crossbeam_channel::{Receiver, Sender, unbounded};
+use notify::Event;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result as RustylineResult};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::thread;
+
+pub mod watcher;
+
+/// Types of events the REPL loop handles
+enum ReplEvent {
+    Input(Result<String, ReadlineError>),
+}
 
 /// Interactive REPL for the Cadence language
 pub struct Repl {
-    editor: DefaultEditor,
+    editor: Option<DefaultEditor>,
     audio_handle: Arc<AudioPlayerHandle>,
     clock: Arc<MasterClock>,
     /// Shared BPM as atomic for playback engines
@@ -24,6 +35,15 @@ pub struct Repl {
     playback_engines: HashMap<usize, Arc<PlaybackEngine>>,
     /// Interpreter for scripting constructs
     interpreter: Interpreter,
+
+    // Event channels
+    tx_input: Sender<ReplEvent>,
+    rx_input: Receiver<ReplEvent>,
+    tx_watcher: Sender<notify::Result<Event>>,
+    rx_watcher: Receiver<notify::Result<Event>>,
+
+    // File watcher
+    watcher: Option<FileWatcher>,
 }
 
 impl Repl {
@@ -47,13 +67,21 @@ impl Repl {
         ));
         playback_engines.insert(default_track, engine);
 
+        let (tx_input, rx_input) = unbounded();
+        let (tx_watcher, rx_watcher) = unbounded();
+
         Ok(Repl {
-            editor,
+            editor: Some(editor),
             audio_handle,
             clock,
             bpm,
             playback_engines,
             interpreter: Interpreter::new(),
+            tx_input,
+            rx_input,
+            tx_watcher,
+            rx_watcher,
+            watcher: None,
         })
     }
 
@@ -242,6 +270,33 @@ impl Repl {
             "Ctrl+C".bright_red()
         );
 
+        // Move editor to thread
+        let mut editor = self.editor.take().expect("Repl editor missing");
+        let tx_input = self.tx_input.clone();
+
+        thread::spawn(move || {
+            loop {
+                let prompt = format!("{} ", "cadence>".bright_magenta().bold());
+                let readline = editor.readline(&prompt);
+
+                match readline {
+                    Ok(line) => {
+                        let line = line.trim().to_string();
+                        if !line.is_empty() {
+                            let _ = editor.add_history_entry(&line);
+                        }
+                        if tx_input.send(ReplEvent::Input(Ok(line))).is_err() {
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        let _ = tx_input.send(ReplEvent::Input(Err(err)));
+                        break;
+                    }
+                }
+            }
+        });
+
         // Create command registry and context
         // Use track 1 engine for global context for now
         let default_engine = self.get_engine(1);
@@ -253,78 +308,140 @@ impl Repl {
         );
 
         loop {
-            let prompt = format!("{} ", "cadence>".bright_magenta().bold());
-            match self.editor.readline(&prompt) {
-                Ok(line) => {
-                    let line = line.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
-                    self.editor.add_history_entry(line.to_owned())?;
+            crossbeam_channel::select! {
+                recv(self.rx_input) -> msg => match msg {
+                    Ok(ReplEvent::Input(res)) => {
+                        match res {
+                            Ok(line) => {
+                                if line.is_empty() {
+                                    continue;
+                                }
 
-                    // Handle REPL-specific commands (needs access to playback_engines)
-                    if line == "tracks" {
-                        println!("{}", self.list_tracks());
-                        continue;
-                    }
+                                // Handle REPL-specific commands (needs access to playback_engines)
+                                if line == "tracks" {
+                                    println!("{}", self.list_tracks());
+                                    continue;
+                                }
 
-                    // Try to execute as a command
-                    match registry.execute(line, &mut ctx) {
-                        CommandResult::Success => {
-                            // Command executed, no output needed
-                        }
-                        CommandResult::Message(msg) => {
-                            println!("{}", msg);
-                        }
-                        CommandResult::Exit => {
-                            println!("{} 🎵", "Goodbye!".bright_cyan());
-                            break;
-                        }
-                        CommandResult::Error(e) => {
-                            println!("{} {}", "Error:".bright_red().bold(), e.red());
-                        }
-                        CommandResult::NotACommand => {
-                            // Parse and execute as statement(s)
-                            match parse_statements(line) {
-                                Ok(program) => {
-                                    match self.interpreter.run_program(&program) {
-                                        Ok(Some(value)) => println!("{}", value),
-                                        Ok(None) => {} // Statement with no value
-                                        Err(e) => println!(
-                                            "{} {}",
-                                            "Error:".bright_red().bold(),
-                                            e.to_string().red()
-                                        ),
+                                // Try to execute as a command
+                                match registry.execute(&line, &mut ctx) {
+                                    CommandResult::Success => {
+                                        // Command executed, no output needed
                                     }
+                                    CommandResult::Message(msg) => {
+                                        println!("{}", msg);
+                                    }
+                                    CommandResult::Exit => {
+                                        println!("{} 🎵", "Goodbye!".bright_cyan());
+                                        break;
+                                    }
+                                    CommandResult::Error(e) => {
+                                        println!("{} {}", "Error:".bright_red().bold(), e.red());
+                                    }
+                                    CommandResult::Watch(path) => {
+                                         // Initialize watcher if needed
+                                         if self.watcher.is_none() {
+                                            match FileWatcher::new(self.tx_watcher.clone()) {
+                                                Ok(w) => self.watcher = Some(w),
+                                                Err(e) => println!("{} Failed to create watcher: {}", "Error:".red(), e),
+                                            }
+                                         }
 
-                                    // Execute collected actions
-                                    for action in self.interpreter.take_actions() {
-                                        self.execute_action(action, &mut ctx);
+                                         if let Some(w) = &mut self.watcher {
+                                             if let Err(e) = w.watch(&path) {
+                                                  println!("{} Failed to watch {}: {}", "Error:".red(), path, e);
+                                             } else {
+                                                  println!("{} Watching {} for changes...", "eyes".bright_cyan(), path.bright_green());
+                                             }
+                                         }
+                                    }
+                                    CommandResult::NotACommand => {
+                                        // Parse and execute as statement(s)
+                                        match parse_statements(&line) {
+                                            Ok(program) => {
+                                                match self.interpreter.run_program(&program) {
+                                                    Ok(Some(value)) => println!("{}", value),
+                                                    Ok(None) => {} // Statement with no value
+                                                    Err(e) => println!(
+                                                        "{} {}",
+                                                        "Error:".bright_red().bold(),
+                                                        e.to_string().red()
+                                                    ),
+                                                }
+
+                                                // Execute collected actions
+                                                for action in self.interpreter.take_actions() {
+                                                    self.execute_action(action, &mut ctx);
+                                                }
+                                            }
+                                            Err(e) => println!(
+                                                "{} {}",
+                                                "Parse error:".bright_red().bold(),
+                                                e.to_string().red()
+                                            ),
+                                        }
                                     }
                                 }
-                                Err(e) => println!(
+                            }
+                            Err(ReadlineError::Interrupted) => {
+                                println!("{} 🎵", "Goodbye!".bright_cyan());
+                                break;
+                            }
+                            Err(ReadlineError::Eof) => {
+                                println!("{} 🎵", "Goodbye!".bright_cyan());
+                                break;
+                            }
+                            Err(err) => {
+                                println!(
                                     "{} {}",
-                                    "Parse error:".bright_red().bold(),
-                                    e.to_string().red()
-                                ),
+                                    "Error reading input:".bright_red().bold(),
+                                    err.to_string().red()
+                                );
                             }
                         }
-                    }
-                }
-                Err(ReadlineError::Interrupted) => {
-                    println!("{} 🎵", "Goodbye!".bright_cyan());
-                    break;
-                }
-                Err(ReadlineError::Eof) => {
-                    println!("{} 🎵", "Goodbye!".bright_cyan());
-                    break;
-                }
-                Err(err) => {
-                    println!(
-                        "{} {}",
-                        "Error reading input:".bright_red().bold(),
-                        err.to_string().red()
-                    );
+                    },
+                    Err(_) => break, // Channel closed
+                },
+
+                recv(self.rx_watcher) -> msg => match msg {
+                    Ok(Ok(event)) => {
+                        // Only care about modifications or creations
+                        // notify 5.0+ events are granular
+                        // We generally reload on any write-close or modify
+                        use notify::EventKind;
+                        match event.kind {
+                            EventKind::Modify(_) | EventKind::Create(_) => {
+                                for path in event.paths {
+                                    println!("{} File changed: {}", "⚡".bright_yellow(), path.display());
+
+                                    // Reload the file content
+                                    match std::fs::read_to_string(&path) {
+                                        Ok(contents) => {
+                                            println!("Reloading...");
+                                            match parse_statements(&contents) {
+                                                Ok(program) => {
+                                                    match self.interpreter.run_program(&program) {
+                                                        Ok(_) => println!("{} Reloaded successfully", "✓".bright_green()),
+                                                        Err(e) => println!("{} Runtime error: {}", "Error:".red(), e),
+                                                    }
+
+                                                    // Execute actions
+                                                    for action in self.interpreter.take_actions() {
+                                                        self.execute_action(action, &mut ctx);
+                                                    }
+                                                },
+                                                Err(e) => println!("{} Parse error: {}", "Error:".red(), e),
+                                            }
+                                        },
+                                        Err(e) => println!("{} Failed to read file: {}", "Error:".red(), e),
+                                    }
+                                }
+                            },
+                            _ => {}
+                        }
+                    },
+                    Ok(Err(e)) => println!("{} Watch error: {}", "Error:".red(), e),
+                    Err(_) => break, // Channel closed
                 }
             }
         }

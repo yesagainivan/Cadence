@@ -33,6 +33,14 @@ pub fn cmd_tempo(args: &str, ctx: &mut CommandContext) -> CommandResult {
     }
 }
 
+/// Handle `watch [file]` command
+pub fn cmd_watch(args: &str, _ctx: &mut CommandContext) -> CommandResult {
+    if args.is_empty() {
+        return CommandResult::Error("Usage: watch <file>".to_string());
+    }
+    CommandResult::Watch(args.to_string())
+}
+
 /// Print help information
 fn print_help() {
     println!("{}", "🎵 Cadence Language Help".bold());

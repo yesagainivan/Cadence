@@ -1,54 +1,69 @@
-// ============================================
-// Cadence Pattern Demo 🎵
-// ============================================
-// Run with: cargo run --release
-// Then: load "demo.cadence"
+// 🌅 Sunrise over the Grid - A Cadence Live Coding Demo
+// Usage: Run 'cargo run --release', then type 'watch demo.cadence'
 
-// Set a comfortable tempo
-tempo 90
+// Global Settings
+tempo 110
+
 
 // ============================================
-// Basic Pattern - 4 notes in a cycle
+// 1. THE PALETTE (Variables)
 // ============================================
-let melody = "C E G E"
 
-// ============================================  
-// Pattern with rests - creates rhythm
-// ============================================
-let rhythm = "C _ E _ G _ E _"
+// Harmonic Bed (Pads) - Uses chords in patterns
+// We use a cycle of 4 chords: CMaj7 -> G6 -> Am7 -> FMaj7
+let chords = "[C, E, G, B] [G, B, D, E] [A, C, E, G] [F, A, C, E]"
 
-// ============================================
-// Bass line with octaves
-// ============================================
-let bass = "C3 _ G2 _ A2 _ E2 _"
+// Bassline - Strong root movement
+let bass = "C2 G1 A1 F1"
 
-// ============================================
-// Chord hits with rests
-// ============================================
-let chords = "[C, E, G] _ _ _ [F, A, C] _ _ _"
+// Arpeggios - Fast flowing notes
+// Using 'fast' to double the speed (8 notes per cycle)
+let arp = "fast(\"C E G B\", 2)"
 
-// ============================================
-// Fast arpeggio using groups
-// ============================================
-let arp = "[C E G] [E G C5] [G C5 E5] [C5 E5 G5]"
+// Rhythmic Pattern - Syncopated hits
+// _ is a rest
+let rhythm = "C _ _ G _ C _ _"
+
+
 
 // ============================================
-// Syncopated pattern with repeats
+// 2. THE ARRANGEMENT (Uncomment to Play!)
 // ============================================
-let synth = "C*2 E G*2 E"
+
+// PHASE A: Intro - Just chords
+// track 1 play slow(chords, 1) loop
+
+// PHASE B: Bring in the deep bass
+// track 2 play bass loop
+
+// PHASE C: Add movement (Pattern transformation)
+// 'rev' reverses the arp pattern every cycle for variation
+// track 3 play every(2, "rev", arp) loop
+
+// PHASE D: Rhythmic interest
+// track 4 play rhythm loop
 
 // ============================================
-// Play individual patterns:
+// 3. THE MIXER (Tracks)
 // ============================================
-// play melody loop
-// play rhythm loop
-// play bass loop
+
+// Track 1: Pads (The Foundation)
+track 1 volume 0
+
+// Track 2: Bass (The anchor)
+track 2 volume 50
+
+// Track 3: Arps (The Texture)
+track 3 volume 30
+
+// Track 4: Lead/Rhythm
+track 4 volume 10
 
 // ============================================
-// Multi-track arrangement:
+// 4. LIVE CODING EXPERIMENTS
 // ============================================
-// track 1 play melody loop
-// track 2 volume 30; track 2 play bass loop
-// track 3 volume 20; track 3 play chords loop
+// Try changing the 'bass' variable above to:
+// let bass = "C2 _ C2 G1"
+// ...and save the file. The music will update instantly!
 
-// Stop all: stop
+// stop

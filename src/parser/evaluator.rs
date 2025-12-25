@@ -662,6 +662,32 @@ impl Evaluator {
                 let pattern_val = self.eval_with_env(args[2].clone(), env)?;
                 let pattern = match pattern_val {
                     Value::Pattern(p) => p,
+                    Value::String(s) => {
+                        // Soft parsing: try to parse string as pattern
+                        match crate::types::Pattern::parse(&s) {
+                            Ok(p) => p,
+                            Err(_) => {
+                                // If not a valid mini-notation, try evaluating it as an expression (e.g. "fast(...)")
+                                match crate::parser::parse(&s) {
+                                    Ok(expr) => match self.eval_with_env(expr, env)? {
+                                        Value::Pattern(p) => p,
+                                        _ => {
+                                            return Err(anyhow!(
+                                                "String \"{}\" evaluated to non-pattern in every()",
+                                                s
+                                            ));
+                                        }
+                                    },
+                                    Err(_) => {
+                                        return Err(anyhow!(
+                                            "every() expects a pattern, pattern string, or valid expression string as third argument, got string \"{}\"",
+                                            s
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
                     _ => return Err(anyhow!("every() expects a pattern as third argument")),
                 };
 
@@ -676,7 +702,6 @@ impl Evaluator {
                     0
                 };
 
-                // Apply logic: if cycle % n == 0, apply transform
                 if n > 0 && cycle % n == 0 {
                     // Apply the transform
                     // We need to call the function recursively with the pattern
