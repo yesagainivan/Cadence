@@ -190,6 +190,17 @@ fn print_help() {
     println!("  {}        - Show current tempo", "tempo".cyan());
     println!("  {}    - Set tempo", "tempo <bpm>".cyan());
     println!();
+    println!("{}", "MIDI Commands:".green());
+    println!("  {}       - List MIDI output ports", "midi devices".cyan());
+    println!("  {} - Connect to MIDI port", "midi connect <port>".cyan());
+    println!("  {}    - Disconnect MIDI", "midi disconnect".cyan());
+    println!(
+        "  {}     - Set channel (1-16 or 'auto')",
+        "midi channel".cyan()
+    );
+    println!("  {}        - Show MIDI status", "midi status".cyan());
+    println!("  {}         - All notes off (panic)", "midi panic".cyan());
+    println!();
     println!("{}", "Other Commands:".green());
     println!(
         "  {}            - List active tracks",

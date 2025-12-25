@@ -4,9 +4,11 @@
 
 pub mod audio;
 pub mod general;
+pub mod midi;
 
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::MasterClock;
+use crate::audio::midi::MidiOutputHandle;
 use crate::audio::playback_engine::PlaybackEngine;
 use crate::parser::{Value, eval};
 use std::sync::Arc;
@@ -33,6 +35,7 @@ pub struct CommandContext {
     pub audio_handle: Arc<AudioPlayerHandle>,
     pub clock: Arc<MasterClock>,
     pub playback_engine: Arc<PlaybackEngine>,
+    pub midi_handle: Option<Arc<MidiOutputHandle>>,
 }
 
 impl CommandContext {
@@ -45,6 +48,22 @@ impl CommandContext {
             audio_handle,
             clock,
             playback_engine,
+            midi_handle: None,
+        }
+    }
+
+    /// Create a new context with MIDI support
+    pub fn new_with_midi(
+        audio_handle: Arc<AudioPlayerHandle>,
+        clock: Arc<MasterClock>,
+        playback_engine: Arc<PlaybackEngine>,
+        midi_handle: Arc<MidiOutputHandle>,
+    ) -> Self {
+        Self {
+            audio_handle,
+            clock,
+            playback_engine,
+            midi_handle: Some(midi_handle),
         }
     }
 
@@ -115,6 +134,17 @@ pub fn create_registry() -> CommandRegistry {
     registry.register("audio play", audio::cmd_audio_play);
     registry.register("audio stop", audio::cmd_audio_stop);
     registry.register("audio volume", audio::cmd_audio_volume);
+
+    // MIDI commands
+    registry.register("midi devices", midi::cmd_midi_devices);
+    registry.register("midi connect", midi::cmd_midi_connect);
+    registry.register("midi disconnect", midi::cmd_midi_disconnect);
+    registry.register("midi channel", midi::cmd_midi_channel);
+    registry.register("midi status", midi::cmd_midi_status);
+    registry.register("midi panic", midi::cmd_midi_panic);
+    registry.register("midi test", midi::cmd_midi_test);
+
+    // General commands
     registry.register("tempo", general::cmd_tempo);
     registry.register("help", general::cmd_help);
     registry.register("quit", general::cmd_quit);

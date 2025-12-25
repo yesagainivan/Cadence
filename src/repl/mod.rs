@@ -2,6 +2,7 @@
 
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::MasterClock;
+use crate::audio::midi::MidiOutputHandle;
 use crate::audio::playback_engine::PlaybackEngine;
 use crate::commands::{CommandContext, CommandResult, create_registry};
 use crate::parser::{Interpreter, InterpreterAction, parse_statements};
@@ -28,6 +29,7 @@ enum ReplEvent {
 pub struct Repl {
     editor: Option<DefaultEditor>,
     audio_handle: Arc<AudioPlayerHandle>,
+    midi_handle: Arc<MidiOutputHandle>,
     clock: Arc<MasterClock>,
     /// Shared BPM as atomic for playback engines
     bpm: Arc<AtomicU64>,
@@ -52,18 +54,23 @@ impl Repl {
         let editor = DefaultEditor::new()?;
         let audio_handle =
             Arc::new(AudioPlayerHandle::new().expect("Failed to create audio player"));
+
+        // Initialize MIDI output (non-fatal if it fails)
+        let midi_handle = Arc::new(MidiOutputHandle::new().expect("Failed to create MIDI output"));
+
         let clock = Arc::new(MasterClock::new(90.0)); // Default 90 BPM
         let bpm = Arc::new(AtomicU64::new(90.0_f32.to_bits() as u64));
 
-        // Initialize with default track 1
+        // Initialize with default track 1 (with MIDI support)
         let mut playback_engines = HashMap::new();
         let default_track = 1;
         let tick_rx = clock.subscribe();
-        let engine = Arc::new(PlaybackEngine::new(
+        let engine = Arc::new(PlaybackEngine::new_with_midi(
             audio_handle.clone(),
             tick_rx,
             bpm.clone(),
             default_track,
+            Some(midi_handle.clone()),
         ));
         playback_engines.insert(default_track, engine);
 
@@ -73,6 +80,7 @@ impl Repl {
         Ok(Repl {
             editor: Some(editor),
             audio_handle,
+            midi_handle,
             clock,
             bpm,
             playback_engines,
@@ -110,11 +118,12 @@ impl Repl {
         }
 
         let tick_rx = self.clock.subscribe();
-        let engine = Arc::new(PlaybackEngine::new(
+        let engine = Arc::new(PlaybackEngine::new_with_midi(
             self.audio_handle.clone(),
             tick_rx,
             self.bpm.clone(),
             track_id,
+            Some(self.midi_handle.clone()),
         ));
         self.playback_engines.insert(track_id, engine.clone());
         engine
@@ -365,10 +374,11 @@ impl Repl {
         // Use track 1 engine for global context for now
         let default_engine = self.get_engine(1);
         let registry = create_registry();
-        let mut ctx = CommandContext::new(
+        let mut ctx = CommandContext::new_with_midi(
             self.audio_handle.clone(),
             self.clock.clone(),
             default_engine,
+            self.midi_handle.clone(),
         );
 
         loop {

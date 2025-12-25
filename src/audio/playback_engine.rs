@@ -10,6 +10,7 @@
 
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::{ClockTick, Duration};
+use crate::audio::midi::{MidiOutputHandle, frequency_to_midi};
 use crate::parser::{Evaluator, Expression, SharedEnvironment, Value};
 use anyhow::Result;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender, select};
@@ -231,12 +232,32 @@ impl PlaybackEngine {
         bpm: Arc<AtomicU64>,
         track_id: usize,
     ) -> Self {
+        Self::new_with_midi(audio_handle, tick_rx, bpm, track_id, None)
+    }
+
+    /// Create a new playback engine with optional MIDI output
+    pub fn new_with_midi(
+        audio_handle: Arc<AudioPlayerHandle>,
+        tick_rx: CrossbeamReceiver<ClockTick>,
+        bpm: Arc<AtomicU64>,
+        track_id: usize,
+        midi_handle: Option<Arc<MidiOutputHandle>>,
+    ) -> Self {
         let (tx, rx) = channel();
         let is_playing = Arc::new(AtomicBool::new(false));
         let is_playing_clone = is_playing.clone();
 
         let thread = thread::spawn(move || {
-            PlaybackLoop::new(audio_handle, tick_rx, bpm, rx, is_playing_clone, track_id).run();
+            PlaybackLoop::new(
+                audio_handle,
+                midi_handle,
+                tick_rx,
+                bpm,
+                rx,
+                is_playing_clone,
+                track_id,
+            )
+            .run();
         });
 
         PlaybackEngine {
@@ -292,6 +313,7 @@ impl Drop for PlaybackEngine {
 /// Uses crossbeam select! to wait on both clock ticks and commands simultaneously.
 struct PlaybackLoop {
     audio_handle: Arc<AudioPlayerHandle>,
+    midi_handle: Option<Arc<MidiOutputHandle>>,
     tick_rx: CrossbeamReceiver<ClockTick>,
     bpm: Arc<AtomicU64>,
     command_rx: Receiver<PlaybackCommand>,
@@ -312,11 +334,16 @@ struct PlaybackLoop {
     /// Whether we're in a gap (silence between notes)
     in_gap: bool,
     gap_end_beat: f64,
+
+    // MIDI state
+    /// Currently active MIDI notes for this track (for proper Note Off)
+    active_midi_notes: Vec<u8>,
 }
 
 impl PlaybackLoop {
     fn new(
         audio_handle: Arc<AudioPlayerHandle>,
+        midi_handle: Option<Arc<MidiOutputHandle>>,
         tick_rx: CrossbeamReceiver<ClockTick>,
         bpm: Arc<AtomicU64>,
         command_rx: Receiver<PlaybackCommand>,
@@ -325,6 +352,7 @@ impl PlaybackLoop {
     ) -> Self {
         Self {
             audio_handle,
+            midi_handle,
             tick_rx,
             bpm,
             command_rx,
@@ -338,6 +366,7 @@ impl PlaybackLoop {
             next_chord_beat: 0.0,
             in_gap: false,
             gap_end_beat: 0.0,
+            active_midi_notes: Vec::new(),
         }
     }
 
@@ -495,6 +524,46 @@ impl PlaybackLoop {
         // Don't set volume to 0 here; let the envelope handle the fade
         let _ = self.audio_handle.set_track_notes(self.track_id, vec![]);
         self.audio_started = false;
+
+        // Send MIDI Note Off for any active notes
+        self.send_midi_notes_off();
+    }
+
+    /// Send MIDI Note Off for all currently active notes on this track
+    fn send_midi_notes_off(&mut self) {
+        if let Some(ref midi_handle) = self.midi_handle {
+            if let Err(e) = midi_handle.notes_off(self.track_id, &self.active_midi_notes) {
+                eprintln!("Failed to send MIDI note off: {}", e);
+            }
+        }
+        self.active_midi_notes.clear();
+    }
+
+    /// Send MIDI notes for the given frequencies (converts to MIDI note numbers)
+    fn send_midi_notes(&mut self, frequencies: &[f32]) {
+        if let Some(ref midi_handle) = self.midi_handle {
+            // First, turn off any currently active notes
+            if !self.active_midi_notes.is_empty() {
+                if let Err(e) = midi_handle.notes_off(self.track_id, &self.active_midi_notes) {
+                    eprintln!("Failed to send MIDI note off: {}", e);
+                }
+                self.active_midi_notes.clear();
+            }
+
+            // Convert frequencies to MIDI notes and send Note On
+            if !frequencies.is_empty() {
+                let midi_notes: Vec<u8> =
+                    frequencies.iter().map(|&f| frequency_to_midi(f)).collect();
+
+                // Send Note On with velocity 100 (solid feel)
+                if let Err(e) = midi_handle.notes_on(self.track_id, &midi_notes, 100) {
+                    eprintln!("Failed to send MIDI note on: {}", e);
+                }
+
+                // Track active notes for later Note Off
+                self.active_midi_notes = midi_notes;
+            }
+        }
     }
 
     fn play_next_beat(&mut self, current_beat: f64) {
@@ -550,13 +619,16 @@ impl PlaybackLoop {
             }
         }
 
-        // Set the notes for this track
+        // Set the notes for this track (audio)
         if let Err(e) = self
             .audio_handle
             .set_track_notes(self.track_id, chord_frequencies.clone())
         {
             eprintln!("Failed to set notes: {}", e);
         }
+
+        // Send MIDI notes (parallel output: both audio and MIDI)
+        self.send_midi_notes(chord_frequencies);
 
         // Start audio if not already playing
         if !self.audio_started {

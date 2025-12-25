@@ -115,10 +115,13 @@ A production-ready music programming language for chord progressions and harmoni
 - [ ] Multiple waveforms (saw, square, triangle)
 - [ ] Basic effects (reverb, delay, filter)
 
-### 4.2 MIDI Output
-- [ ] MIDI device enumeration
-- [ ] Note-on/note-off events
+### 4.2 MIDI Output ✅
+- [x] MIDI device enumeration (`midi devices`)
+- [x] Note-on/note-off events (automatic from playback)
+- [x] Per-track and mono channel modes (`midi channel`)
+- [x] REPL commands: `midi connect`, `midi disconnect`, `midi status`, `midi panic`
 - [ ] Control change messages
+- [ ] Velocity from pattern dynamics
 
 ### 4.3 Recording & Export
 - [ ] Record session to WAV
@@ -164,6 +167,7 @@ A production-ready music programming language for chord progressions and harmoni
 | Pattern System | ✅ Operators (`every`, `fast`, `rev`), Cycle-based timing |
 | Sub-Beat Timing | ✅ 24 PPQN processing, proper every() cycle ordering |
 | Live Coding | ✅ Reactive variables, file watch, hot-reload |
+| MIDI Output | ✅ `midir` integration, parallel audio+MIDI, per-track channels |
 
 ---
 
@@ -186,6 +190,7 @@ A production-ready music programming language for chord progressions and harmoni
 6. ~~**Pattern System** - Mini-notation, cycle-based patterns, operators~~ ✅ Done
 7. ~~**Live Reload** - File watch with hot-reload at beat boundaries~~ ✅ Done
 8. ~~**ADSR Envelopes** - Configurable attack/decay/sustain/release~~ ✅ Done
-9. **MIDI Output** - MIDI device enumeration, note-on/note-off events, control change messages
+9. ~~**MIDI Output** - MIDI device enumeration, note-on/note-off events~~ ✅ Done
 10. **Multiple Waveforms** - saw, square, triangle waveforms
-11. **modularize statement parser** - break down into smaller modules if needed
+11. **MIDI Control Change** - CC messages for external control
+12. **modularize statement parser** - break down into smaller modules if needed
