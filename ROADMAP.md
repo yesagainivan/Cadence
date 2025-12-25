@@ -76,23 +76,29 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] Per-beat expression re-evaluation in PlaybackLoop
 - [x] Variable updates affect playing audio: `play a loop` then `a = E`
 
-### 3.2 Live Reload
-- [ ] File watch with hot-reload
-- [ ] Changes apply at next beat/bar boundary
-- [ ] Error recovery without stopping playback
+### 3.2 Live Reload ✅
+- [x] File watch with hot-reload (`watch "file.cadence"`)
+- [x] Changes apply reactively without restart (skip play if track already running)
+- [x] Error recovery without stopping playback
 
 ### 3.3 Pattern System ✅
 - [x] Cycle-based patterns: `"C E G _"` (underscore = rest)
 - [x] Pattern operators: `fast`, `slow`, `rev`, `every`
 - [x] Mini-notation parser (string -> pattern)
 
-### 3.4 Multiple Voices
+### 3.4 Multiple Voices ✅
 - [x] Named tracks/voices (`track N { ... }`)
 - [x] Parallel execution (multiple PlaybackEngines)
 - [x] Per-voice volume (`track N { volume 50 }`)
 - [x] `tracks` command to list active tracks
 - [x] 16-track limit with graceful fallback
 - [x] `stop` stops all tracks, `track N stop` stops specific
+
+### 3.5 Sub-Beat Timing ✅
+- [x] Process all 24 PPQN clock ticks (not just beat boundaries)
+- [x] Sub-beat event scheduling with TICK_EPSILON precision
+- [x] Subdivision helpers (is_half_beat, is_quarter_beat)
+- [x] Proper cycle ordering for `every()` operator
 
 ---
 
@@ -150,7 +156,8 @@ A production-ready music programming language for chord progressions and harmoni
 | Voice Leading | ✅ `smooth_voice_leading()` with octave normalization |
 | Reactive Variables | ✅ Per-beat re-evaluation, live variable updates |
 | Pattern System | ✅ Operators (`every`, `fast`, `rev`), Cycle-based timing |
-| Live Coding | 🟡 Reactive variables done, hot-reload pending |
+| Sub-Beat Timing | ✅ 24 PPQN processing, proper every() cycle ordering |
+| Live Coding | ✅ Reactive variables, file watch, hot-reload |
 
 ---
 

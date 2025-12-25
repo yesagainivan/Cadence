@@ -19,6 +19,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::{self, JoinHandle};
 
+/// Epsilon for floating-point beat comparisons (half a tick at 24 PPQN)
+const TICK_EPSILON: f64 = 1.0 / 48.0;
+
 /// Source of playback content - supports both static and reactive (live-coding) modes
 #[derive(Clone, Debug)]
 pub enum PlaybackSource {
@@ -377,29 +380,33 @@ impl PlaybackLoop {
     }
 
     fn handle_tick(&mut self, tick: ClockTick) {
-        // Only process on beat boundaries for now (can be more granular later)
-        if !tick.is_beat_boundary() {
-            return;
-        }
+        // Process ALL ticks for sub-beat accuracy (24 PPQN gives us triplet precision)
+        // This is critical for patterns like fast("C E", 2) which need 8th note timing
+        let current_beat = tick.beat;
 
         // Handle gap ending
-        if self.in_gap && tick.beat >= self.gap_end_beat {
+        if self.in_gap && current_beat >= self.gap_end_beat - TICK_EPSILON {
             self.in_gap = false;
         }
 
-        // Check if we should advance to next chord
-        if self.current_progression.is_some() && tick.beat >= self.next_chord_beat && !self.in_gap {
-            self.play_next_beat(tick.beat);
+        // Check if we should advance to next chord (using epsilon for float comparison)
+        if self.current_progression.is_some()
+            && current_beat >= self.next_chord_beat - TICK_EPSILON
+            && !self.in_gap
+        {
+            self.play_next_beat(current_beat);
         } else if self.current_progression.is_none() && !self.pending_queue.is_empty() {
-            // No current progression but items in queue - start on this beat
-            if let Some(next) = self.pending_queue.pop_front() {
-                self.current_progression = Some(next);
-                self.chord_index = 0;
-                self.iteration = 0;
-                self.next_chord_beat = tick.beat;
-                self.is_playing.store(true, Ordering::Relaxed);
-                let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
-                self.play_next_beat(tick.beat);
+            // No current progression but items in queue - start on beat boundaries only
+            if tick.is_beat_boundary() {
+                if let Some(next) = self.pending_queue.pop_front() {
+                    self.current_progression = Some(next);
+                    self.chord_index = 0;
+                    self.iteration = 0;
+                    self.next_chord_beat = current_beat;
+                    self.is_playing.store(true, Ordering::Relaxed);
+                    let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
+                    self.play_next_beat(current_beat);
+                }
             }
         }
     }
@@ -497,56 +504,15 @@ impl PlaybackLoop {
             }
         }
 
-        // Update environment with current cycle index (for `every` operator)
-        // We use self.iteration as the cycle count
-        if let Err(e) = config
-            .source
-            .update_environment("_cycle", Value::Number(self.iteration as i32))
-        {
-            eprintln!("Failed to update environment: {}", e);
-        }
-
-        // Evaluate the source to get current frequencies
-        let mut frequencies = match config.source.evaluate() {
+        // CRITICAL FIX: Check if we need to advance cycle BEFORE evaluating
+        // This ensures every() and other cycle-dependent operators see the correct cycle
+        let frequencies = match self.evaluate_with_cycle_check(&config) {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("Failed to evaluate playback source: {}", e);
                 return;
             }
         };
-
-        // Check if we've reached end of progression
-        if self.chord_index >= frequencies.len() {
-            self.chord_index = 0;
-            self.iteration += 1;
-
-            // Re-check loop count
-            if let Some(max_loops) = config.loop_count {
-                if self.iteration >= max_loops {
-                    if !self.try_start_next_queued() {
-                        self.stop_playback();
-                    }
-                    return;
-                }
-            }
-
-            // IMPORTANT: We started a new cycle, so we MUST update environment and re-evaluate
-            // to get the correct pattern for this new cycle immediately.
-            if let Err(e) = config
-                .source
-                .update_environment("_cycle", Value::Number(self.iteration as i32))
-            {
-                eprintln!("Failed to update environment: {}", e);
-            }
-
-            match config.source.evaluate() {
-                Ok(f) => frequencies = f,
-                Err(e) => {
-                    eprintln!("Failed to evaluate playback source: {}", e);
-                    return;
-                }
-            };
-        }
 
         if frequencies.is_empty() {
             return;
@@ -597,6 +563,47 @@ impl PlaybackLoop {
         } else {
             self.next_chord_beat = current_beat + duration_beats as f64;
         }
+    }
+
+    /// Evaluate the current pattern, handling cycle advancement properly.
+    /// This ensures _cycle is updated BEFORE evaluation so every() sees the correct value.
+    fn evaluate_with_cycle_check(
+        &mut self,
+        config: &ProgressionConfig,
+    ) -> Result<Vec<(Vec<f32>, f32)>> {
+        // First, do a "peek" evaluation to check if we're at end of pattern
+        // Update environment with current cycle before initial evaluation
+        config
+            .source
+            .update_environment("_cycle", Value::Number(self.iteration as i32))?;
+
+        let mut frequencies = config.source.evaluate()?;
+
+        // Check if we've reached end of progression and need to wrap
+        if self.chord_index >= frequencies.len() {
+            self.chord_index = 0;
+            self.iteration += 1;
+
+            // Check loop count after increment
+            if let Some(max_loops) = config.loop_count {
+                if self.iteration >= max_loops {
+                    if !self.try_start_next_queued() {
+                        self.stop_playback();
+                    }
+                    return Err(anyhow::anyhow!("Progression complete"));
+                }
+            }
+
+            // CRITICAL: Update _cycle to NEW value, then re-evaluate
+            // This is what makes every(2, "rev", pat) work correctly
+            config
+                .source
+                .update_environment("_cycle", Value::Number(self.iteration as i32))?;
+
+            frequencies = config.source.evaluate()?;
+        }
+
+        Ok(frequencies)
     }
 }
 

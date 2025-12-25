@@ -250,6 +250,70 @@ impl Repl {
         }
     }
 
+    /// Execute an action but skip looped play expressions if track is already playing.
+    /// This is used during file hot-reload for smoother transitions.
+    ///
+    /// The key insight: reactive expressions are re-evaluated on EVERY beat,
+    /// so if you change `let bass = "C2 G1"` to `let bass = "C2 _ C2 G1"`,
+    /// the track playing `bass` will automatically pick up the new value
+    /// WITHOUT needing to restart the progression!
+    fn execute_action_queued(&mut self, action: InterpreterAction, ctx: &mut CommandContext) {
+        use crate::parser::Evaluator;
+
+        match action {
+            InterpreterAction::PlayExpression {
+                expression,
+                looping: true, // Only handle looped expressions specially
+                queue: _,
+                track_id,
+            } => {
+                let engine = self.get_engine(track_id);
+
+                // KEY FIX: If this track is already playing, SKIP the play command!
+                // The reactive expression will automatically pick up variable changes
+                // on the next beat. This is what makes hot-reload feel like the REPL.
+                if engine.is_playing() {
+                    // Just validate that the expression is still valid
+                    let shared_env = self.interpreter.shared_environment();
+                    let evaluator = Evaluator::new();
+                    let display_value = {
+                        let env_guard = shared_env.read().unwrap();
+                        match evaluator.eval_with_env(expression.clone(), Some(&env_guard)) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                println!(
+                                    "{} Expression error on Track {}: {}",
+                                    "Error:".red(),
+                                    track_id,
+                                    e
+                                );
+                                return;
+                            }
+                        }
+                    };
+                    println!(
+                        "🔄 Track {} updated: {} (reactive, no restart needed)",
+                        track_id, display_value
+                    );
+                    return;
+                }
+
+                // Track is not playing - start it normally
+                self.execute_action(
+                    InterpreterAction::PlayExpression {
+                        expression,
+                        looping: true,
+                        queue: false, // Immediate play since track isn't running
+                        track_id,
+                    },
+                    ctx,
+                );
+            }
+            // For all other actions, use normal execution
+            other => self.execute_action(other, ctx),
+        }
+    }
+
     /// Start the REPL loop
     pub fn run(&mut self) -> Result<()> {
         println!(
@@ -425,9 +489,10 @@ impl Repl {
                                                         Err(e) => println!("{} Runtime error: {}", "Error:".red(), e),
                                                     }
 
-                                                    // Execute actions
+                                                    // Execute actions using queued execution for smoother hot-reload
+                                                    // Looped patterns will queue instead of immediate restart
                                                     for action in self.interpreter.take_actions() {
-                                                        self.execute_action(action, &mut ctx);
+                                                        self.execute_action_queued(action, &mut ctx);
                                                     }
                                                 },
                                                 Err(e) => println!("{} Parse error: {}", "Error:".red(), e),

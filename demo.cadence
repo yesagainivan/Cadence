@@ -1,69 +1,118 @@
-// 🌅 Sunrise over the Grid - A Cadence Live Coding Demo
-// Usage: Run 'cargo run --release', then type 'watch demo.cadence'
-
-// Global Settings
-tempo 110
-
-
-// ============================================
-// 1. THE PALETTE (Variables)
-// ============================================
-
-// Harmonic Bed (Pads) - Uses chords in patterns
-// We use a cycle of 4 chords: CMaj7 -> G6 -> Am7 -> FMaj7
-let chords = "[C, E, G, B] [G, B, D, E] [A, C, E, G] [F, A, C, E]"
-
-// Bassline - Strong root movement
-let bass = "C2 G1 A1 F1"
-
-// Arpeggios - Fast flowing notes
-// Using 'fast' to double the speed (8 notes per cycle)
-let arp = "fast(\"C E G B\", 2)"
-
-// Rhythmic Pattern - Syncopated hits
-// _ is a rest
-let rhythm = "C _ _ G _ C _ _"
-
-
+// � Midnight Bloom - A Cadence Live Coding Showcase
+// ====================================================
+// This demo showcases all Cadence features with a dreamy progression.
+// 
+// Usage: 
+//   1. cargo run --release
+//   2. watch demo.cadence
+//   3. Uncomment tracks one by one and save to build the arrangement!
+//   4. Try changing variables - the music updates instantly!
 
 // ============================================
-// 2. THE ARRANGEMENT (Uncomment to Play!)
+// 🎛️ GLOBAL SETTINGS
+// ============================================
+tempo 85
+
+// ============================================
+// 🎨 THE SOUND PALETTE
+// Define your musical elements here.
+// Change these and save - the music updates live!
 // ============================================
 
-// PHASE A: Intro - Just chords
-// track 1 play slow(chords, 1) loop
+// The Progression: C - C - Bb - Bb - F (held for 2 beats each = 10 beat cycle)
+// Using pattern mini-notation with chords
+//let pads = "[C4, E4, G4] [C4, E4, G4] [Bb3, D4, F4] [Bb3, D4, F4] [F3, A3, C4]"
+let pads = "[C4, E4, G4] [C4, E4, G4] [Bb3, D4, F4] [F3, A3, C4]"
 
-// PHASE B: Bring in the deep bass
+// Bass: Strong root notes following the harmony
+// Using slow() to make each note last 2 beats
+let bass = slow("C2 C2 Bb1 Bb1 F1", 2)
+
+// Arpeggios: Fast broken chords - the shimmer layer
+// fast() doubles the speed, giving us flowing 8th notes  
+// let shimmer = fast("C4 E4 G4 C5 G4 E4 C4 E4", 2)
+let shimmer = fast("C4 E4 G4 C5 G4 E4 C4 E4", 2) 
+
+// Counter-melody: Every 2 cycles, reverse for variation
+// The every() operator transforms patterns cyclically
+let melody = every(2, "rev", "G5 _ E5 _ C5 _")
+
+// Rhythmic hits: Syncopated pattern with rests (_)
+let pulse = "C3 _ C3 _ _ C3 _ C3"
+
+let shine = slow("C4 _ E4 G4 _ C5 G4", 2);
+// let shine = F;
+
+// ============================================
+// 🎼 THE ARRANGEMENT
+// Uncomment tracks to build your piece!
+// The music builds as you add layers...
+// ============================================
+
+// Layer 1: Foundational Pads (the bed)
+track 1 play slow(pads, 2) loop
+
+// Layer 2: Bass (the anchor)
 // track 2 play bass loop
 
-// PHASE C: Add movement (Pattern transformation)
-// 'rev' reverses the arp pattern every cycle for variation
-// track 3 play every(2, "rev", arp) loop
+// Layer 3: Shimmering arpeggios (the sparkle)
+// track 3 play shimmer loop
 
-// PHASE D: Rhythmic interest
-// track 4 play rhythm loop
+// Layer 4: Counter-melody with variation
+track 4 play melody loop
 
+on 5 play shine queue loop; track 5 volume 30;
+
+on 6 play rev(shine) queue loop;
+
+// ============================================  
+// 🎚️ THE MIXER
+// Adjust the blend of each track.
+// Volume is 0-100, change and save to hear the difference!
 // ============================================
-// 3. THE MIXER (Tracks)
-// ============================================
 
-// Track 1: Pads (The Foundation)
-track 1 volume 0
+// Track 1: Pads - warm foundation
+track 1 volume 40
 
-// Track 2: Bass (The anchor)
+// Track 2: Bass - subtle but present
 track 2 volume 50
 
-// Track 3: Arps (The Texture)
-track 3 volume 30
+// Track 3: Shimmer - gentle texture
+track 3 volume 25
 
-// Track 4: Lead/Rhythm
-track 4 volume 10
+// Track 4: Melody - featured
+track 4 volume 0
 
+
+track 6 volume 10
 // ============================================
-// 4. LIVE CODING EXPERIMENTS
+// 🧪 LIVE CODING EXPERIMENTS
 // ============================================
-// Try changing the 'bass' variable above to:
-// let bass = "C2 _ C2 G1"
-// ...and save the file. The music will update instantly!
+// 
+// Try these while the music is playing:
+//
+// 1. CHANGE THE BASS PATTERN:
+//    let bass = slow("C2 _ C2 Bb1 _ Bb1 F1 F1", 2)
+//
+// 2. ADD SYNCOPATION TO SHIMMER:
+//    let shimmer = fast("C4 _ E4 G4 _ C5 G4 _", 2)
+//
+// 3. CHANGE THE PROGRESSION ENTIRELY:
+//    let pads = "[A3, C4, E4] [F3, A3, C4] [G3, B3, D4] [E3, G3, B3]"
+//
+// 4. EXPERIMENT WITH every():
+//    let melody = every(3, "rev", "G5 E5 C5 G4 C5 E5 G5 C6")
+//
+// 5. TRY PATTERN TRANSFORMATIONS:
+//    play fast(pads, 2) loop  -- doubles the speed!
+//    play slow(bass, 2) loop  -- halves the speed!
+//
+// ============================================
+// 🛑 CONTROLS
+// ============================================
+// 
+// stop          -- stops all tracks
+// track 2 stop  -- stops just track 2
+// 
 
-// stop
+let shimmer = slow("C4 _ E4 G4 _ C5 G4", 2)

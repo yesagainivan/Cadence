@@ -32,6 +32,32 @@ impl ClockTick {
     pub fn is_beat_boundary(&self) -> bool {
         self.tick_in_beat == 0
     }
+
+    /// Returns true if this tick is on a subdivision boundary.
+    /// - subdivision 2: 8th notes (every 12 ticks)
+    /// - subdivision 4: 16th notes (every 6 ticks)
+    /// - subdivision 3: triplets (every 8 ticks)
+    /// - subdivision 6: 16th triplets (every 4 ticks)
+    pub fn is_subdivision_boundary(&self, subdivision: u8) -> bool {
+        if subdivision == 0 {
+            return false;
+        }
+        let ticks_per_subdivision = TICKS_PER_BEAT / subdivision;
+        if ticks_per_subdivision == 0 {
+            return true; // subdivision finer than our resolution, treat every tick as a boundary
+        }
+        self.tick_in_beat % ticks_per_subdivision == 0
+    }
+
+    /// Returns true if this tick is on a half-beat (8th note) boundary
+    pub fn is_half_beat(&self) -> bool {
+        self.is_subdivision_boundary(2)
+    }
+
+    /// Returns true if this tick is on a quarter-beat (16th note) boundary
+    pub fn is_quarter_beat(&self) -> bool {
+        self.is_subdivision_boundary(4)
+    }
 }
 
 /// Commands that can be sent to the clock thread
