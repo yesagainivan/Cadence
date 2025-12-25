@@ -27,4 +27,4 @@ pub mod types;
 
 // Re-export commonly used types and functions for convenience
 pub use crate::parser::{Expression, Value, eval};
-pub use crate::types::{Chord, CommonProgressions, Note, Progression, RomanNumeral, VoiceLeading};
+pub use crate::types::{Chord, CommonProgressions, Note, Pattern, RomanNumeral, VoiceLeading};

@@ -843,7 +843,6 @@ pub fn optimize_chord_sequence(chords: Vec<Chord>) -> Vec<Chord> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::str::FromStr;
 
     #[test]
     fn test_voice_leading_analysis() {

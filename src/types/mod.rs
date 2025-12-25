@@ -3,13 +3,11 @@
 pub mod chord;
 pub mod note;
 pub mod pattern;
-pub mod progression;
 pub mod roman_numeral;
 pub mod voice_leading;
 
 pub use chord::Chord;
 pub use note::Note;
 pub use pattern::{Pattern, PatternStep};
-pub use progression::Progression;
 pub use roman_numeral::*;
 pub use voice_leading::VoiceLeading;
