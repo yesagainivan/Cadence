@@ -117,61 +117,6 @@ impl Pattern {
         }
     }
 
-    /// Create a pattern from a progression (each chord becomes a step)
-    /// This enables progressions to use pattern playback with proper envelopes
-    pub fn from_progression(progression: &crate::types::Progression) -> Self {
-        let steps: Vec<PatternStep> = progression
-            .chords()
-            .map(|chord| PatternStep::Chord(chord.clone()))
-            .collect();
-
-        // Set cycle length to match number of chords (1 beat per chord by default)
-        let beats_per_cycle = steps.len() as f32;
-
-        Pattern {
-            steps,
-            beats_per_cycle,
-            envelope: Some((0.01, 0.1, 0.7, 0.3)), // Default smooth envelope
-        }
-    }
-
-    /// Convert a pattern back to a Progression (only works if all steps are chords)
-    /// This enables voice leading analysis on patterns that contain chords
-    pub fn to_progression(&self) -> Option<crate::types::Progression> {
-        let mut chords = Vec::new();
-
-        for step in &self.steps {
-            match step {
-                PatternStep::Chord(chord) => chords.push(chord.clone()),
-                PatternStep::Note(note) => {
-                    // Single notes become single-note chords
-                    chords.push(crate::types::Chord::from_notes(vec![*note]));
-                }
-                PatternStep::Repeat(inner, count) => {
-                    // Expand repeats
-                    if let PatternStep::Chord(chord) = inner.as_ref() {
-                        for _ in 0..*count {
-                            chords.push(chord.clone());
-                        }
-                    } else if let PatternStep::Note(note) = inner.as_ref() {
-                        for _ in 0..*count {
-                            chords.push(crate::types::Chord::from_notes(vec![*note]));
-                        }
-                    } else {
-                        return None; // Can't convert groups of groups
-                    }
-                }
-                _ => return None, // Rests and groups can't become progressions
-            }
-        }
-
-        if chords.is_empty() {
-            None
-        } else {
-            Some(crate::types::Progression::from_chords(chords))
-        }
-    }
-
     /// Set beats per cycle
     pub fn with_cycle_length(mut self, beats: f32) -> Self {
         self.beats_per_cycle = beats;
@@ -918,57 +863,40 @@ mod tests {
     fn test_voice_leading_frequency_order_in_playback() {
         // This test verifies that after voice leading optimization,
         // the frequencies sent to MIDI/audio are in the correct order
-        use crate::types::Progression;
 
         let c_maj = Chord::from_note_strings(vec!["C4", "E4", "G4"]).unwrap();
         let f_maj = Chord::from_note_strings(vec!["F4", "A4", "C4"]).unwrap();
-        let prog = Progression::from_chords(vec![c_maj.clone(), f_maj.clone()]);
+        let pattern = Pattern::from_chords(vec![c_maj.clone(), f_maj.clone()]);
 
         // Optimize voice leading
-        let optimized = prog.optimize_voice_leading();
-
-        // Verify the second chord is reordered to [C, F, A]
-        let second_chord = optimized.get(1).unwrap();
-        let notes = second_chord.notes_vec();
-        assert_eq!(notes[0].pitch_class(), 0, "First note should be C");
-        assert_eq!(notes[1].pitch_class(), 5, "Second note should be F");
-        assert_eq!(notes[2].pitch_class(), 9, "Third note should be A");
-
-        // Convert to pattern (this is what playback does)
-        let pattern = optimized.to_pattern();
+        let optimized = pattern.optimize_voice_leading();
 
         // Get the playback events
-        let events = pattern.to_events();
+        let events = optimized.to_events();
         assert_eq!(events.len(), 2, "Should have 2 chord events");
+
+        // Get the chord at index 1 for verification
+        let chords = optimized.as_chords().expect("Should be chord-only pattern");
+        let second_chord = &chords[1];
+        let notes = second_chord.notes_vec();
+
+        // Calculate expected frequencies
+        let expected_freqs: Vec<f32> = notes.iter().map(|n| n.frequency()).collect();
 
         // Check the frequencies of the second chord
         let (freqs, _duration, _is_rest) = &events[1];
         assert_eq!(freqs.len(), 3, "Second chord should have 3 frequencies");
 
-        // Calculate expected frequencies
-        let c4_freq = notes[0].frequency(); // C4 ~261.63 Hz
-        let f4_freq = notes[1].frequency(); // F4 ~349.23 Hz
-        let a4_freq = notes[2].frequency(); // A4 ~440 Hz
-
-        // Frequencies should be in order: C, F, A
+        // Frequencies should match the optimized chord order
         let tolerance = 0.1; // Small tolerance for float comparison
-        assert!(
-            (freqs[0] - c4_freq).abs() < tolerance,
-            "First frequency should be C4 (~{}), got {}",
-            c4_freq,
-            freqs[0]
-        );
-        assert!(
-            (freqs[1] - f4_freq).abs() < tolerance,
-            "Second frequency should be F4 (~{}), got {}",
-            f4_freq,
-            freqs[1]
-        );
-        assert!(
-            (freqs[2] - a4_freq).abs() < tolerance,
-            "Third frequency should be A4 (~{}), got {}",
-            a4_freq,
-            freqs[2]
-        );
+        for (i, (actual, expected)) in freqs.iter().zip(expected_freqs.iter()).enumerate() {
+            assert!(
+                (actual - expected).abs() < tolerance,
+                "Frequency {} should be ~{}, got {}",
+                i,
+                expected,
+                actual
+            );
+        }
     }
 }

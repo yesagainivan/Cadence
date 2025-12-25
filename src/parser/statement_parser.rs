@@ -631,11 +631,10 @@ impl StatementParser {
         }
 
         self.expect(&Token::RightDoubleBracket)?;
-        // Create a Pattern from the chords (chord progression)
-        let progression = crate::types::Progression::from_chords(chords);
-        Ok(Expression::Pattern(
-            crate::types::Pattern::from_progression(&progression),
-        ))
+        // Create a Pattern directly from the chords
+        Ok(Expression::Pattern(crate::types::Pattern::from_chords(
+            chords,
+        )))
     }
 
     /// Parse chord contents (notes only, no brackets)
