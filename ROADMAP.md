@@ -180,3 +180,6 @@ A production-ready music programming language for chord progressions and harmoni
 6. ~~**Pattern System** - Mini-notation, cycle-based patterns, operators~~ ✅ Done
 7. ~~**Live Reload** - File watch with hot-reload at beat boundaries~~ ✅ Done
 8. **ADSR Envelopes** - Configurable attack/decay/sustain/release
+9. **MIDI Output** - MIDI device enumeration, note-on/note-off events, control change messages
+
+10. **modularize statement parser** - break down into smaller modules

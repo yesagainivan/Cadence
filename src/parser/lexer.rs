@@ -21,6 +21,7 @@ pub enum Token {
     LeftBrace,          // {
     RightBrace,         // }
     Comma,              // ,
+    Dot,                // .
     Semicolon,          // ;
     Newline,            // significant newline (for statement separation)
 
@@ -76,6 +77,7 @@ impl fmt::Display for Token {
             Token::LeftBrace => write!(f, "{{"),
             Token::RightBrace => write!(f, "}}"),
             Token::Comma => write!(f, ","),
+            Token::Dot => write!(f, "."),
             Token::Semicolon => write!(f, ";"),
             Token::Newline => write!(f, "\\n"),
             Token::Plus => write!(f, "+"),
@@ -417,6 +419,11 @@ impl Lexer {
                     return Ok(Token::Comma);
                 }
 
+                Some('.') => {
+                    self.advance();
+                    return Ok(Token::Dot);
+                }
+
                 Some('+') => {
                     self.advance();
                     return Ok(Token::Plus);
@@ -642,7 +649,7 @@ mod tests {
 
     #[test]
     fn test_basic_tokens() {
-        let mut lexer = Lexer::new("[](),+-&|^");
+        let mut lexer = Lexer::new("[]().,+-&|^");
         let tokens = lexer.tokenize().unwrap();
 
         assert_eq!(
@@ -652,6 +659,7 @@ mod tests {
                 Token::RightBracket,
                 Token::LeftParen,
                 Token::RightParen,
+                Token::Dot,
                 Token::Comma,
                 Token::Plus,
                 Token::Minus,

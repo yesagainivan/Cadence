@@ -410,9 +410,9 @@ impl StatementParser {
     }
 
     /// Parse additive operations (+, -) - higher precedence than sets
-    /// Grammar: additive_expr = primary_expr (('+' | '-') number)?
+    /// Grammar: additive_expr = postfix_expr (('+' | '-') number)?
     fn parse_additive_expression(&mut self) -> Result<Expression> {
-        let mut expr = self.parse_primary_expression()?;
+        let mut expr = self.parse_postfix_expression()?;
 
         if matches!(self.current(), Token::Plus | Token::Minus) {
             let is_plus = matches!(self.current(), Token::Plus);
@@ -430,6 +430,49 @@ impl StatementParser {
             } else {
                 return Err(anyhow!("Expected number after +/- operator"));
             }
+        }
+
+        Ok(expr)
+    }
+
+    /// Parse postfix operations (method calls)
+    /// Grammar: postfix_expr = primary_expr ('.' identifier '(' args ')')*
+    /// Desugars method calls to function calls: expr.method(a, b) → method(expr, a, b)
+    fn parse_postfix_expression(&mut self) -> Result<Expression> {
+        let mut expr = self.parse_primary_expression()?;
+
+        // Handle chained method calls
+        while matches!(self.current(), Token::Dot) {
+            self.advance(); // consume '.'
+
+            let method_name = match self.current().clone() {
+                Token::Identifier(name) => name,
+                _ => {
+                    let span = self.current_span();
+                    return Err(anyhow!(
+                        "at {}: Expected method name after '.', found {:?}",
+                        span,
+                        self.current()
+                    ));
+                }
+            };
+            self.advance();
+
+            // Parse method arguments (must have parentheses)
+            self.expect(&Token::LeftParen)?;
+            let mut args = vec![expr]; // receiver is first argument
+
+            if !matches!(self.current(), Token::RightParen) {
+                args.push(self.parse_expression()?);
+                while matches!(self.current(), Token::Comma) {
+                    self.advance();
+                    args.push(self.parse_expression()?);
+                }
+            }
+            self.expect(&Token::RightParen)?;
+
+            // Desugar to function call: receiver.method(a, b) → method(receiver, a, b)
+            expr = Expression::function_call(method_name, args);
         }
 
         Ok(expr)
@@ -940,5 +983,86 @@ mod expression_tests {
     fn test_parse_error_missing_bracket() {
         let result = parse("[C, E, G");
         assert!(result.is_err());
+    }
+
+    // =========================================================================
+    // Method Chaining Tests
+    // =========================================================================
+
+    #[test]
+    fn test_parse_method_call_simple() {
+        // "C E G".fast(2) should desugar to fast("C E G", 2)
+        let expr = parse("\"C E G\".fast(2)").unwrap();
+        assert!(matches!(expr, Expression::FunctionCall { .. }));
+
+        if let Expression::FunctionCall { name, args } = expr {
+            assert_eq!(name, "fast");
+            assert_eq!(args.len(), 2);
+            // First arg should be the pattern
+            assert!(matches!(args[0], Expression::Pattern(_)));
+        }
+    }
+
+    #[test]
+    fn test_parse_method_call_no_args() {
+        // "C E G".rev() should desugar to rev("C E G")
+        let expr = parse("\"C E G\".rev()").unwrap();
+        assert!(matches!(expr, Expression::FunctionCall { .. }));
+
+        if let Expression::FunctionCall { name, args } = expr {
+            assert_eq!(name, "rev");
+            assert_eq!(args.len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_parse_method_chaining() {
+        // "C E G".fast(2).rev() should desugar to rev(fast("C E G", 2))
+        let expr = parse("\"C E G\".fast(2).rev()").unwrap();
+        assert!(matches!(expr, Expression::FunctionCall { .. }));
+
+        if let Expression::FunctionCall { name, args } = expr {
+            assert_eq!(name, "rev");
+            assert_eq!(args.len(), 1);
+            // The argument should be the result of fast()
+            assert!(matches!(args[0], Expression::FunctionCall { .. }));
+        }
+    }
+
+    #[test]
+    fn test_parse_method_on_variable() {
+        // x.rev() should desugar to rev(x)
+        let expr = parse("x.rev()").unwrap();
+        assert!(matches!(expr, Expression::FunctionCall { .. }));
+
+        if let Expression::FunctionCall { name, args } = expr {
+            assert_eq!(name, "rev");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expression::Variable(_)));
+        }
+    }
+
+    #[test]
+    fn test_parse_method_with_multiple_args() {
+        // x.every(2, "rev") should desugar to every(x, 2, "rev")
+        let expr = parse("x.every(2, \"rev\")").unwrap();
+        assert!(matches!(expr, Expression::FunctionCall { .. }));
+
+        if let Expression::FunctionCall { name, args } = expr {
+            assert_eq!(name, "every");
+            assert_eq!(args.len(), 3); // receiver + 2 args
+        }
+    }
+
+    #[test]
+    fn test_parse_method_with_transpose() {
+        // [C, E, G].invert() + 2 should be (invert([C, E, G])) + 2
+        let expr = parse("[C, E, G].invert() + 2").unwrap();
+        assert!(matches!(expr, Expression::Transpose { .. }));
+
+        if let Expression::Transpose { target, semitones } = expr {
+            assert_eq!(semitones, 2);
+            assert!(matches!(*target, Expression::FunctionCall { .. }));
+        }
     }
 }
