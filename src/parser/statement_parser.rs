@@ -661,6 +661,12 @@ pub fn parse_statements(input: &str) -> Result<Program> {
     parser.parse_program()
 }
 
+/// Convenience function to parse a string into a single expression
+pub fn parse_expression(input: &str) -> Result<Expression> {
+    let mut parser = StatementParser::new(input)?;
+    parser.parse_expression()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -723,5 +729,216 @@ mod tests {
             }
             _ => panic!("Expected Load statement"),
         }
+    }
+}
+
+#[cfg(test)]
+mod expression_tests {
+    use super::*;
+    use crate::parser::ast::Expression;
+
+    fn parse(input: &str) -> Result<Expression> {
+        parse_expression(input)
+    }
+
+    #[test]
+    fn test_parse_single_note() {
+        let expr = parse("C").unwrap();
+        assert!(matches!(expr, Expression::Note(_)));
+
+        if let Expression::Note(note) = expr {
+            assert_eq!(note.pitch_class(), 0); // C
+        }
+    }
+
+    #[test]
+    fn test_parse_chord() {
+        let expr = parse("[C, E, G]").unwrap();
+        assert!(matches!(expr, Expression::Chord(_)));
+
+        if let Expression::Chord(chord) = expr {
+            assert_eq!(chord.len(), 3);
+            assert!(chord.contains(&"C".parse().unwrap()));
+            assert!(chord.contains(&"E".parse().unwrap()));
+            assert!(chord.contains(&"G".parse().unwrap()));
+        }
+    }
+
+    #[test]
+    fn test_parse_progression() {
+        let expr = parse("[[C, E, G], [F, A, C]]").unwrap();
+        assert!(matches!(expr, Expression::Progression(_)));
+
+        if let Expression::Progression(progression) = expr {
+            assert_eq!(progression.len(), 2);
+
+            // Test first chord is C major
+            let first_chord = &progression[0];
+            assert!(first_chord.contains(&"C".parse().unwrap()));
+            assert!(first_chord.contains(&"E".parse().unwrap()));
+            assert!(first_chord.contains(&"G".parse().unwrap()));
+
+            // Test second chord is F major
+            let second_chord = &progression[1];
+            assert!(second_chord.contains(&"F".parse().unwrap()));
+            assert!(second_chord.contains(&"A".parse().unwrap()));
+            assert!(second_chord.contains(&"C".parse().unwrap()));
+        }
+    }
+
+    #[test]
+    fn test_parse_progression_transpose() {
+        let expr = parse("[[C, E, G], [F, A, C]] + 2").unwrap();
+        assert!(matches!(expr, Expression::Transpose { .. }));
+
+        if let Expression::Transpose { target, semitones } = expr {
+            assert_eq!(semitones, 2);
+            assert!(matches!(*target, Expression::Progression(_)));
+        }
+    }
+
+    #[test]
+    fn test_parse_empty_progression() {
+        let result = parse("[[]]");
+        assert!(result.is_err()); // Should fail because empty chord is invalid
+    }
+
+    #[test]
+    fn test_parse_transpose_positive() {
+        let expr = parse("[C, E, G] + 2").unwrap();
+        assert!(matches!(expr, Expression::Transpose { .. }));
+
+        if let Expression::Transpose { target, semitones } = expr {
+            assert_eq!(semitones, 2);
+            assert!(matches!(*target, Expression::Chord(_)));
+        }
+    }
+
+    #[test]
+    fn test_parse_transpose_negative() {
+        let expr = parse("[C, E, G] - 5").unwrap();
+        assert!(matches!(expr, Expression::Transpose { .. }));
+
+        if let Expression::Transpose { target, semitones } = expr {
+            assert_eq!(semitones, -5);
+            assert!(matches!(*target, Expression::Chord(_)));
+        }
+    }
+
+    #[test]
+    fn test_parse_set_intersection() {
+        let expr = parse("[C, E, G] & [A, C, E]").unwrap();
+        assert!(matches!(expr, Expression::Intersection { .. }));
+
+        if let Expression::Intersection { left, right } = expr {
+            assert!(matches!(*left, Expression::Chord(_)));
+            assert!(matches!(*right, Expression::Chord(_)));
+        }
+    }
+
+    #[test]
+    fn test_parse_set_union() {
+        let expr = parse("[C, E, G] | [F, A, C]").unwrap();
+        assert!(matches!(expr, Expression::Union { .. }));
+    }
+
+    #[test]
+    fn test_parse_set_difference() {
+        let expr = parse("[C, E, G] ^ [A, C, E]").unwrap();
+        assert!(matches!(expr, Expression::Difference { .. }));
+    }
+
+    #[test]
+    fn test_parse_function_call() {
+        let expr = parse("invert([C, E, G])").unwrap();
+        assert!(matches!(expr, Expression::FunctionCall { .. }));
+
+        if let Expression::FunctionCall { name, args } = expr {
+            assert_eq!(name, "invert");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expression::Chord(_)));
+        }
+    }
+
+    #[test]
+    fn test_parse_function_call_multiple_args() {
+        let expr = parse("test(C, [D, F#, A])").unwrap();
+        assert!(matches!(expr, Expression::FunctionCall { .. }));
+
+        if let Expression::FunctionCall { name, args } = expr {
+            assert_eq!(name, "test");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(args[0], Expression::Note(_)));
+            assert!(matches!(args[1], Expression::Chord(_)));
+        }
+    }
+
+    #[test]
+    fn test_parse_parentheses() {
+        let expr = parse("([C, E, G] + 2)").unwrap();
+        assert!(matches!(expr, Expression::Transpose { .. }));
+    }
+
+    #[test]
+    fn test_operator_precedence() {
+        // Set operations should have lower precedence than arithmetic
+        let expr = parse("[C, E, G] + 2 & [A, C, E]").unwrap();
+        assert!(matches!(expr, Expression::Intersection { .. }));
+
+        if let Expression::Intersection { left, right } = expr {
+            // Left side should be a transpose operation
+            assert!(matches!(*left, Expression::Transpose { .. }));
+            assert!(matches!(*right, Expression::Chord(_)));
+        }
+    }
+
+    #[test]
+    fn test_whitespace_handling() {
+        let expr = parse("  [ C , E , G ]  + 2  ").unwrap();
+        assert!(matches!(expr, Expression::Transpose { .. }));
+    }
+
+    #[test]
+    fn test_parse_error_invalid_note() {
+        // X is not a valid note name, so lexer treats it as identifier
+        // Parser expects a note in chord, gets identifier -> specific error message
+        let result = parse("[X, E, G]");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Expected note in chord")
+        );
+    }
+
+    #[test]
+    fn test_parse_error_invalid_note_name() {
+        // H is not a valid note (only A-G)
+        let result = parse("H"); // H becomes Identifier("H")
+
+        // With our new parser logic, H gets parsed as a variable reference
+        // This should succeed at parse time, but would fail at evaluation time
+        assert!(result.is_ok());
+
+        if let Ok(Expression::Variable(name)) = result {
+            assert_eq!(name, "H");
+        } else {
+            panic!("Expected H to be parsed as a variable");
+        }
+    }
+
+    #[test]
+    fn test_parse_error_unexpected_token() {
+        let result = parse("@"); // @ is truly unexpected
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Unexpected token") || err.contains("Unexpected character"));
+    }
+
+    #[test]
+    fn test_parse_error_missing_bracket() {
+        let result = parse("[C, E, G");
+        assert!(result.is_err());
     }
 }
