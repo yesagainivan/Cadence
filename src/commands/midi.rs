@@ -1,33 +1,36 @@
 //! MIDI REPL commands
 
-use crate::audio::midi::{MidiChannelMode, MidiOutputHandle};
+use crate::audio::midi::MidiChannelMode;
 use crate::commands::{CommandContext, CommandResult};
 use colored::*;
 
 /// Handle `midi devices` command - list available MIDI output ports
-pub fn cmd_midi_devices(_args: &str, _ctx: &mut CommandContext) -> CommandResult {
-    match MidiOutputHandle::list_ports() {
-        Ok(ports) => {
-            if ports.is_empty() {
-                CommandResult::Message(
-                    "No MIDI output ports found. Make sure a MIDI device or virtual port is connected."
-                        .yellow()
-                        .to_string(),
-                )
-            } else {
-                let mut output = format!("{}\n", "🎹 Available MIDI Output Ports:".bold());
-                for (i, port) in ports.iter().enumerate() {
-                    output.push_str(&format!("  {}. {}\n", i + 1, port.cyan()));
+pub fn cmd_midi_devices(_args: &str, ctx: &mut CommandContext) -> CommandResult {
+    match &ctx.midi_handle {
+        Some(handle) => match handle.list_ports() {
+            Ok(ports) => {
+                if ports.is_empty() {
+                    CommandResult::Message(
+                        "No MIDI output ports found. Make sure a MIDI device or virtual port is connected."
+                            .yellow()
+                            .to_string(),
+                    )
+                } else {
+                    let mut output = format!("{}\n", "🎹 Available MIDI Output Ports:".bold());
+                    for (i, port) in ports.iter().enumerate() {
+                        output.push_str(&format!("  {}. {}\n", i + 1, port.cyan()));
+                    }
+                    output.push_str(&format!(
+                        "\n{} {}",
+                        "Use".dimmed(),
+                        "midi connect <port name>".green()
+                    ));
+                    CommandResult::Message(output)
                 }
-                output.push_str(&format!(
-                    "\n{} {}",
-                    "Use".dimmed(),
-                    "midi connect <port name>".green()
-                ));
-                CommandResult::Message(output)
             }
-        }
-        Err(e) => CommandResult::Error(format!("Failed to list MIDI ports: {}", e)),
+            Err(e) => CommandResult::Error(format!("Failed to list MIDI ports: {}", e)),
+        },
+        None => CommandResult::Error("MIDI output not initialized".to_string()),
     }
 }
 

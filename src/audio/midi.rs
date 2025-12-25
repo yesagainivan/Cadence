@@ -170,6 +170,8 @@ pub struct MidiOutputHandle {
     connected: RwLock<bool>,
     /// Name of the connected port
     port_name: RwLock<Option<String>>,
+    /// Cached MidiOutput for port enumeration (avoids creating new CoreMIDI client each time)
+    port_enumerator: Mutex<Option<MidiOutput>>,
 }
 
 impl MidiOutputHandle {
@@ -182,6 +184,9 @@ impl MidiOutputHandle {
             internal.run();
         });
 
+        // Create initial MidiOutput for port enumeration
+        let port_enumerator = MidiOutput::new("Cadence-Enumerator").ok();
+
         Ok(Self {
             command_tx: tx,
             _thread: thread,
@@ -189,36 +194,40 @@ impl MidiOutputHandle {
             active_notes: Mutex::new(std::collections::HashSet::new()),
             connected: RwLock::new(false),
             port_name: RwLock::new(None),
+            port_enumerator: Mutex::new(port_enumerator),
         })
     }
 
     /// List available MIDI output ports
-    /// Note: Creates a temporary MIDI client, which can sometimes fail on macOS.
-    /// Retries up to 3 times with a small delay.
-    pub fn list_ports() -> Result<Vec<String>> {
-        let mut last_err = None;
-        for attempt in 0..3 {
-            if attempt > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            match MidiOutput::new("Cadence") {
-                Ok(midi_out) => {
-                    let ports = midi_out.ports();
-                    let names: Vec<String> = ports
-                        .iter()
-                        .filter_map(|p| midi_out.port_name(p).ok())
-                        .collect();
-                    return Ok(names);
-                }
-                Err(e) => {
-                    last_err = Some(e);
-                }
-            }
+    /// Uses cached MidiOutput to avoid creating new CoreMIDI client each time.
+    /// Falls back to creating new one if cache is empty.
+    pub fn list_ports(&self) -> Result<Vec<String>> {
+        let mut enumerator = self.port_enumerator.lock().unwrap();
+
+        // If we have a cached enumerator, use it
+        if let Some(ref midi_out) = *enumerator {
+            let ports = midi_out.ports();
+            let names: Vec<String> = ports
+                .iter()
+                .filter_map(|p| midi_out.port_name(p).ok())
+                .collect();
+            return Ok(names);
         }
-        Err(anyhow!(
-            "MIDI initialization failed after 3 attempts: {:?}",
-            last_err
-        ))
+
+        // Otherwise try to create a new one
+        match MidiOutput::new("Cadence-Enumerator") {
+            Ok(midi_out) => {
+                let ports = midi_out.ports();
+                let names: Vec<String> = ports
+                    .iter()
+                    .filter_map(|p| midi_out.port_name(p).ok())
+                    .collect();
+                // Cache for next time
+                *enumerator = Some(midi_out);
+                Ok(names)
+            }
+            Err(e) => Err(anyhow!("Failed to initialize MIDI: {:?}", e)),
+        }
     }
 
     /// Connect to a MIDI output port by name (partial match supported)
@@ -474,7 +483,8 @@ mod tests {
     fn test_list_ports() {
         // This test just verifies the function doesn't panic
         // Actual ports depend on the system
-        let result = MidiOutputHandle::list_ports();
+        let handle = MidiOutputHandle::new().unwrap();
+        let result = handle.list_ports();
         assert!(result.is_ok());
     }
 }
