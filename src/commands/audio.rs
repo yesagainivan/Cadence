@@ -45,12 +45,24 @@ pub fn cmd_audio_play_progression(args: &str, ctx: &mut CommandContext) -> Comma
     }
 
     match ctx.eval(expr_str) {
-        Ok(Value::Progression(prog)) => {
-            // Convert progression to frequencies
-            let frequencies_vec: Vec<Vec<f32>> = prog
-                .chords()
+        Ok(Value::Pattern(prog)) => {
+            // Convert pattern to frequencies via as_chords()
+            let chords = match prog.as_chords() {
+                Some(c) => c,
+                None => {
+                    return CommandResult::Error(
+                        "Pattern contains rests or groups - cannot convert to progression"
+                            .to_string(),
+                    );
+                }
+            };
+
+            let frequencies_vec: Vec<Vec<f32>> = chords
+                .iter()
                 .map(|chord| chord.notes().map(|n| n.frequency()).collect())
                 .collect();
+
+            let chord_count = chords.len();
 
             // Create progression config
             let mut config = ProgressionConfig::new(frequencies_vec)
@@ -59,8 +71,6 @@ pub fn cmd_audio_play_progression(args: &str, ctx: &mut CommandContext) -> Comma
             if loop_enabled {
                 config = config.with_looping();
             }
-
-            let chord_count = prog.chords().count();
 
             // Start playback
             let result = if queue_enabled {
@@ -102,7 +112,7 @@ pub fn cmd_audio_play_progression(args: &str, ctx: &mut CommandContext) -> Comma
                 }
             }
         }
-        Ok(_) => CommandResult::Error("Expression is not a progression".to_string()),
+        Ok(_) => CommandResult::Error("Expression is not a pattern/progression".to_string()),
         Err(e) => CommandResult::Error(e.to_string()),
     }
 }
@@ -179,17 +189,12 @@ fn get_frequencies_from_value(value: &Value) -> anyhow::Result<Vec<f32>> {
                 frequencies.push(note.frequency());
             }
         }
-        Value::Progression(_) => {
-            return Err(anyhow::anyhow!(
-                "Cannot play a progression directly as frequencies"
-            ));
-        }
-        Value::Boolean(_) => return Err(anyhow::anyhow!("Cannot play a boolean")),
         Value::Pattern(_) => {
             return Err(anyhow::anyhow!(
                 "Cannot play a pattern directly as frequencies"
             ));
         }
+        Value::Boolean(_) => return Err(anyhow::anyhow!("Cannot play a boolean")),
         Value::Number(_) => return Err(anyhow::anyhow!("Cannot play a number")),
         Value::String(_) => return Err(anyhow::anyhow!("Cannot play a string")),
     }

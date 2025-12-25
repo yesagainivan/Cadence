@@ -516,14 +516,18 @@ impl fmt::Display for RomanNumeral {
     }
 }
 
-/// Analyze an entire progression for Roman numerals
+/// Analyze an entire pattern (chord sequence) for Roman numerals
 pub fn analyze_progression(
-    progression: &crate::types::Progression,
+    pattern: &crate::types::Pattern,
     key: Note,
 ) -> Result<Vec<RomanNumeral>> {
+    let chords = pattern.as_chords().ok_or_else(|| {
+        anyhow!("Pattern contains rests or groups - cannot analyze for Roman numerals")
+    })?;
+
     let mut roman_numerals = Vec::new();
 
-    for chord in progression.chords() {
+    for chord in &chords {
         let analysis = RomanNumeral::analyze(chord, key)?;
         roman_numerals.push(analysis);
     }
@@ -1334,7 +1338,7 @@ mod tests {
             CommonProgressions::get_progression("I_V_vi_IV", "C".parse().unwrap()).unwrap();
         assert_eq!(progression.len(), 4);
 
-        let analysis = analyze_progression(&progression, "C".parse().unwrap()).unwrap();
+        let analysis = analyze_progression(&crate::types::Pattern::from_progression(&progression), "C".parse().unwrap()).unwrap();
         assert_eq!(analysis[0].to_string(), "I");
         assert_eq!(analysis[1].to_string(), "V");
         assert_eq!(analysis[2].to_string(), "vi");
@@ -1379,7 +1383,7 @@ mod tests {
             CommonProgressions::get_progression("ii_V_I", "C".parse().unwrap()).unwrap();
         assert_eq!(progression.len(), 3);
 
-        let analysis = analyze_progression(&progression, "C".parse().unwrap()).unwrap();
+        let analysis = analyze_progression(&crate::types::Pattern::from_progression(&progression), "C".parse().unwrap()).unwrap();
         assert_eq!(analysis[0].to_string(), "ii");
         assert_eq!(analysis[1].to_string(), "V");
         assert_eq!(analysis[2].to_string(), "I");
@@ -1626,7 +1630,7 @@ mod numeric_progression_tests {
         assert_eq!(prog.len(), 3);
 
         // Check the chords are correct
-        let analysis = analyze_progression(&prog, key).unwrap();
+        let analysis = analyze_progression(&crate::types::Pattern::from_progression(&prog), key).unwrap();
         assert_eq!(analysis[0].to_string(), "ii");
         assert_eq!(analysis[1].to_string(), "V");
         assert_eq!(analysis[2].to_string(), "I");
@@ -1635,7 +1639,7 @@ mod numeric_progression_tests {
         let prog = CommonProgressions::get_progression("16251", key).unwrap();
         assert_eq!(prog.len(), 5);
 
-        let analysis = analyze_progression(&prog, key).unwrap();
+        let analysis = analyze_progression(&crate::types::Pattern::from_progression(&prog), key).unwrap();
         assert_eq!(analysis[0].to_string(), "I");
         assert_eq!(analysis[1].to_string(), "vi");
         assert_eq!(analysis[2].to_string(), "ii");
@@ -1674,7 +1678,7 @@ mod numeric_progression_tests {
                 .any(|n| n.pitch_class() == "F#".parse::<Note>().unwrap().pitch_class())
         ); // Should NOT contain F#
 
-        let analysis = analyze_progression(&prog, key).unwrap();
+        let analysis = analyze_progression(&crate::types::Pattern::from_progression(&prog), key).unwrap();
         assert_eq!(analysis[0].to_string(), "I");
         assert_eq!(analysis[1].to_string(), "vii°");
     }
@@ -1710,7 +1714,7 @@ mod numeric_progression_tests {
                 .any(|n| n.pitch_class() == "F#".parse::<Note>().unwrap().pitch_class())
         ); // Should NOT contain F#
 
-        let analysis = analyze_progression(&prog, key).unwrap();
+        let analysis = analyze_progression(&crate::types::Pattern::from_progression(&prog), key).unwrap();
         assert_eq!(analysis[6].to_string(), "vii°");
     }
 
@@ -1756,7 +1760,7 @@ mod numeric_progression_tests {
         let prog = CommonProgressions::get_progression("36251", key).unwrap();
         assert_eq!(prog.len(), 5);
 
-        let analysis = analyze_progression(&prog, key).unwrap();
+        let analysis = analyze_progression(&crate::types::Pattern::from_progression(&prog), key).unwrap();
         assert_eq!(analysis[0].to_string(), "iii");
         assert_eq!(analysis[1].to_string(), "vi");
         assert_eq!(analysis[2].to_string(), "ii");
@@ -1767,7 +1771,7 @@ mod numeric_progression_tests {
         let prog = CommonProgressions::get_progression("4513", key).unwrap();
         assert_eq!(prog.len(), 4);
 
-        let analysis = analyze_progression(&prog, key).unwrap();
+        let analysis = analyze_progression(&crate::types::Pattern::from_progression(&prog), key).unwrap();
         assert_eq!(analysis[0].to_string(), "IV");
         assert_eq!(analysis[1].to_string(), "V");
         assert_eq!(analysis[2].to_string(), "I");
@@ -1936,7 +1940,7 @@ mod roman_numeral_parser_tests {
         let prog = CommonProgressions::get_progression("I-V-vi-IV", key).unwrap();
         assert_eq!(prog.len(), 4);
 
-        let analysis = analyze_progression(&prog, key).unwrap();
+        let analysis = analyze_progression(&crate::types::Pattern::from_progression(&prog), key).unwrap();
         assert_eq!(analysis[0].to_string(), "I");
         assert_eq!(analysis[1].to_string(), "V");
         assert_eq!(analysis[2].to_string(), "vi");
@@ -1973,7 +1977,7 @@ mod roman_numeral_parser_tests {
         let prog = CommonProgressions::get_progression("I-III-iv", key).unwrap();
         assert_eq!(prog.len(), 3);
 
-        let analysis = analyze_progression(&prog, key).unwrap();
+        let analysis = analyze_progression(&crate::types::Pattern::from_progression(&prog), key).unwrap();
         assert_eq!(analysis[0].to_string(), "I"); // C major
         assert_eq!(analysis[1].to_string(), "III"); // E major
         assert_eq!(analysis[2].to_string(), "iv"); // F minor
@@ -1982,7 +1986,7 @@ mod roman_numeral_parser_tests {
         let prog = CommonProgressions::get_progression("ii-♭V-I", key).unwrap();
         assert_eq!(prog.len(), 3);
 
-        let analysis = analyze_progression(&prog, key).unwrap();
+        let analysis = analyze_progression(&crate::types::Pattern::from_progression(&prog), key).unwrap();
         assert_eq!(analysis[0].to_string(), "ii"); // D minor
         // Note: ♭V (Gb) may be analyzed as #IV or ♭V depending on enharmonic choice
         let tritone_sub = analysis[1].to_string();

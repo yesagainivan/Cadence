@@ -257,6 +257,303 @@ impl Pattern {
         self
     }
 
+    // ========================================================================
+    // Voice Leading & Analysis Methods (from Progression)
+    // ========================================================================
+
+    /// Check if this pattern contains only chords (no rests, groups, or single notes)
+    pub fn is_chord_pattern(&self) -> bool {
+        self.steps.iter().all(|step| match step {
+            PatternStep::Chord(_) => true,
+            PatternStep::Note(_) => true, // Single notes can be treated as chords
+            PatternStep::Repeat(inner, _) => {
+                matches!(**inner, PatternStep::Chord(_) | PatternStep::Note(_))
+            }
+            _ => false,
+        })
+    }
+
+    /// Extract chords from pattern, expanding repeats.
+    /// Returns None if pattern contains rests or groups.
+    pub fn as_chords(&self) -> Option<Vec<Chord>> {
+        let mut chords = Vec::new();
+
+        for step in &self.steps {
+            match step {
+                PatternStep::Chord(chord) => chords.push(chord.clone()),
+                PatternStep::Note(note) => {
+                    chords.push(Chord::from_notes(vec![*note]));
+                }
+                PatternStep::Repeat(inner, count) => match inner.as_ref() {
+                    PatternStep::Chord(chord) => {
+                        for _ in 0..*count {
+                            chords.push(chord.clone());
+                        }
+                    }
+                    PatternStep::Note(note) => {
+                        for _ in 0..*count {
+                            chords.push(Chord::from_notes(vec![*note]));
+                        }
+                    }
+                    _ => return None,
+                },
+                _ => return None,
+            }
+        }
+
+        if chords.is_empty() {
+            None
+        } else {
+            Some(chords)
+        }
+    }
+
+    /// Create a pattern from a vector of chords
+    pub fn from_chords(chords: Vec<Chord>) -> Self {
+        let steps: Vec<PatternStep> = chords.into_iter().map(PatternStep::Chord).collect();
+
+        let beats_per_cycle = steps.len() as f32;
+
+        Pattern {
+            steps,
+            beats_per_cycle,
+            envelope: Some((0.01, 0.1, 0.7, 0.3)),
+        }
+    }
+
+    /// Apply a function to all chords in the pattern
+    pub fn map_chords<F>(mut self, f: F) -> Self
+    where
+        F: Fn(Chord) -> Chord + Clone,
+    {
+        self.steps = self
+            .steps
+            .into_iter()
+            .map(|step| match step {
+                PatternStep::Chord(chord) => PatternStep::Chord(f(chord)),
+                PatternStep::Note(note) => {
+                    let chord = Chord::from_notes(vec![note]);
+                    PatternStep::Chord(f(chord))
+                }
+                PatternStep::Repeat(inner, count) => {
+                    let mapped_inner = match *inner {
+                        PatternStep::Chord(chord) => PatternStep::Chord(f(chord)),
+                        PatternStep::Note(note) => {
+                            let chord = Chord::from_notes(vec![note]);
+                            PatternStep::Chord(f(chord))
+                        }
+                        other => other,
+                    };
+                    PatternStep::Repeat(Box::new(mapped_inner), count)
+                }
+                other => other,
+            })
+            .collect();
+        self
+    }
+
+    /// Optimize voice leading for this pattern.
+    /// Only works on chord-only patterns.
+    pub fn optimize_voice_leading(self) -> Self {
+        use crate::types::voice_leading;
+
+        if let Some(chords) = self.as_chords() {
+            let optimized = voice_leading::optimize_chord_sequence(chords);
+            let mut result = Pattern::from_chords(optimized);
+            result.beats_per_cycle = self.beats_per_cycle;
+            result.envelope = self.envelope;
+            result
+        } else {
+            println!("Cannot optimize voice leading: pattern contains rests or groups");
+            self
+        }
+    }
+
+    /// Analyze voice leading between adjacent chords
+    pub fn analyze_voice_leading(&self) -> Vec<crate::types::voice_leading::VoiceLeading> {
+        use crate::types::voice_leading;
+
+        if let Some(chords) = self.as_chords() {
+            voice_leading::analyze_chord_sequence(&chords)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Get average voice leading quality score (lower is better)
+    pub fn average_voice_leading_quality(&self) -> f32 {
+        use crate::types::voice_leading;
+
+        if let Some(chords) = self.as_chords() {
+            voice_leading::average_quality(&chords)
+        } else {
+            0.0
+        }
+    }
+
+    /// Check if this pattern has good voice leading
+    pub fn has_good_voice_leading(&self) -> bool {
+        use crate::types::voice_leading;
+
+        if let Some(chords) = self.as_chords() {
+            voice_leading::has_good_voice_leading(&chords)
+        } else {
+            false
+        }
+    }
+
+    /// Get detailed voice leading analysis
+    pub fn detailed_voice_leading_analysis(
+        &self,
+    ) -> Vec<crate::types::voice_leading::VoiceLeadingAnalysis> {
+        use crate::types::voice_leading;
+
+        if let Some(chords) = self.as_chords() {
+            voice_leading::detailed_analysis(&chords)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Get a comprehensive voice leading report
+    pub fn voice_leading_report(&self) -> String {
+        use crate::types::voice_leading::VoiceLeadingViolation;
+
+        let chords = match self.as_chords() {
+            Some(c) => c,
+            None => {
+                return "Pattern contains rests or groups - voice leading analysis not available"
+                    .to_string();
+            }
+        };
+
+        if chords.len() < 2 {
+            return "Pattern too short for voice leading analysis".to_string();
+        }
+
+        let mut report = String::new();
+        let analysis = self.detailed_voice_leading_analysis();
+        let avg_quality = self.average_voice_leading_quality();
+        let has_good_vl = self.has_good_voice_leading();
+
+        report.push_str("=== Voice Leading Report ===\n");
+        report.push_str(&format!("Pattern: {}\n\n", self));
+
+        report.push_str("Transitions:\n");
+        for item in &analysis {
+            report.push_str(&format!("  {}\n", item));
+
+            if !item.voice_leading.violations.is_empty() {
+                for violation in &item.voice_leading.violations {
+                    let violation_desc = match violation {
+                        VoiceLeadingViolation::ParallelFifths { voice1, voice2 } => {
+                            format!("    ‖5: voices {} and {}", voice1, voice2)
+                        }
+                        VoiceLeadingViolation::ParallelOctaves { voice1, voice2 } => {
+                            format!("    ‖8: voices {} and {}", voice1, voice2)
+                        }
+                        VoiceLeadingViolation::LargeLeap { voice, semitones } => {
+                            format!("    Large leap: voice {} ({} semitones)", voice, semitones)
+                        }
+                        _ => format!("    Other violation: {:?}", violation),
+                    };
+                    report.push_str(&format!("{}\n", violation_desc));
+                }
+            }
+        }
+
+        report.push_str("\nSummary:\n");
+        report.push_str(&format!("  Average quality score: {:.1}\n", avg_quality));
+        report.push_str(&format!(
+            "  Overall assessment: {}\n",
+            if has_good_vl {
+                "✓ Good voice leading"
+            } else {
+                "⚠ Needs improvement"
+            }
+        ));
+
+        if !has_good_vl {
+            report.push_str("\nSuggestions:\n");
+            report.push_str("  - Try running smooth_voice_leading() to optimize inversions\n");
+            report.push_str("  - Look for common tones between chords\n");
+            report.push_str("  - Minimize large leaps in individual voices\n");
+        }
+
+        report
+    }
+
+    /// Get the key signature that best fits this pattern
+    pub fn analyze_key(&self) -> Option<Note> {
+        let chords = self.as_chords()?;
+
+        if chords.is_empty() {
+            return None;
+        }
+
+        let mut root_counts = std::collections::HashMap::new();
+
+        for chord in &chords {
+            if let Some(root) = chord.root() {
+                *root_counts.entry(root).or_insert(0) += 1;
+            }
+        }
+
+        root_counts
+            .into_iter()
+            .max_by_key(|(_, count)| *count)
+            .map(|(note, _)| note)
+    }
+
+    /// Get all unique notes used in this pattern
+    pub fn get_all_notes(&self) -> Vec<Note> {
+        let mut all_notes = std::collections::BTreeSet::new();
+
+        fn collect_notes(step: &PatternStep, notes: &mut std::collections::BTreeSet<Note>) {
+            match step {
+                PatternStep::Note(n) => {
+                    notes.insert(*n);
+                }
+                PatternStep::Chord(c) => {
+                    for note in c.notes() {
+                        notes.insert(*note);
+                    }
+                }
+                PatternStep::Group(steps) => {
+                    for s in steps {
+                        collect_notes(s, notes);
+                    }
+                }
+                PatternStep::Repeat(inner, _) => {
+                    collect_notes(inner, notes);
+                }
+                PatternStep::Rest => {}
+            }
+        }
+
+        for step in &self.steps {
+            collect_notes(step, &mut all_notes);
+        }
+
+        all_notes.into_iter().collect()
+    }
+
+    /// Get the number of steps in this pattern (not counting expanded repeats)
+    pub fn len(&self) -> usize {
+        self.steps.len()
+    }
+
+    /// Check if this pattern has no steps
+    pub fn is_empty(&self) -> bool {
+        self.steps.is_empty()
+    }
+
+    /// Reverse the order of steps in the pattern (retrograde)
+    pub fn retrograde(mut self) -> Self {
+        self.steps.reverse();
+        self
+    }
+
     /// Parse from mini-notation string
     ///
     /// Syntax:
@@ -272,6 +569,32 @@ impl Pattern {
 
         let steps = parse_steps(notation)?;
         Ok(Pattern::with_steps(steps))
+    }
+}
+
+// Arithmetic operations for transposition
+impl std::ops::Add<i8> for Pattern {
+    type Output = Pattern;
+
+    fn add(self, semitones: i8) -> Self::Output {
+        self.transpose(semitones)
+    }
+}
+
+impl std::ops::Sub<i8> for Pattern {
+    type Output = Pattern;
+
+    fn sub(self, semitones: i8) -> Self::Output {
+        self.transpose(-semitones)
+    }
+}
+
+// Index access to steps
+impl std::ops::Index<usize> for Pattern {
+    type Output = PatternStep;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.steps[index]
     }
 }
 

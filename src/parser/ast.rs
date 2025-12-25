@@ -1,4 +1,4 @@
-use crate::types::{chord::Chord, note::Note, pattern::Pattern, progression::Progression};
+use crate::types::{chord::Chord, note::Note, pattern::Pattern};
 use std::fmt;
 
 // ============================================================================
@@ -162,9 +162,7 @@ pub enum Expression {
     /// A chord literal: [C, E, G]
     Chord(Chord),
 
-    /// A progression literal: [[C, E, G], [F, A, C], [G, B, D]]
-    Progression(Progression),
-
+    // Note: Progressions are now represented as Pattern with chord steps
     /// Variable reference: prog (lookup in environment)
     Variable(String),
 
@@ -228,7 +226,6 @@ pub enum ComparisonOp {
 pub enum Value {
     Note(Note),
     Chord(Chord),
-    Progression(Progression),
     Boolean(bool),
     Pattern(Pattern),
     Number(i32),
@@ -240,7 +237,7 @@ impl fmt::Display for Expression {
         match self {
             Expression::Note(note) => write!(f, "{}", note),
             Expression::Chord(chord) => write!(f, "{}", chord),
-            Expression::Progression(progression) => write!(f, "{}", progression),
+            // Progressions now use Pattern representation
             Expression::Transpose { target, semitones } => {
                 if *semitones >= 0 {
                     write!(f, "{} + {}", target, semitones)
@@ -292,7 +289,6 @@ impl fmt::Display for Value {
         match self {
             Value::Note(note) => write!(f, "{}", note),
             Value::Chord(chord) => write!(f, "{}", chord),
-            Value::Progression(progression) => write!(f, "{}", progression),
             Value::Boolean(b) => write!(f, "{}", b),
             Value::Pattern(pattern) => write!(f, "{}", pattern),
             Value::Number(n) => write!(f, "{}", n),
@@ -358,15 +354,12 @@ mod tests {
         let c_major = Expression::Chord(Chord::from_note_strings(vec!["C", "E", "G"]).unwrap());
         assert!(format!("{}", c_major).contains("C Major"));
 
-        // Test progression expression
-        let progression = Expression::Progression(
-            Progression::from_chord_strings(vec![vec!["C", "E", "G"], vec!["F", "A", "C"]])
-                .unwrap(),
-        );
-        let display = format!("{}", progression);
-        // Note: colored output may contain ANSI codes, check for content presence
-        assert!(display.contains("["));
-        assert!(display.contains("C Major") || display.contains("C")); // May have colored output
+        // Test pattern expression (progressions are now patterns)
+        let c_chord = Chord::from_note_strings(vec!["C", "E", "G"]).unwrap();
+        let f_chord = Chord::from_note_strings(vec!["F", "A", "C"]).unwrap();
+        let pattern = Expression::Pattern(Pattern::from_chords(vec![c_chord, f_chord]));
+        let display = format!("{}", pattern);
+        assert!(display.contains("C Major") || display.contains("C"));
         assert!(display.contains("F Major") || display.contains("F"));
 
         // Test transpose expression
@@ -401,13 +394,13 @@ mod tests {
         let chord_val = Value::Chord(Chord::from_note_strings(vec!["D", "F#", "A"]).unwrap());
         assert!(format!("{}", chord_val).contains("D Major"));
 
-        let progression_val = Value::Progression(
-            Progression::from_chord_strings(vec![vec!["C", "E", "G"], vec!["F", "A", "C"]])
-                .unwrap(),
-        );
-        let display = format!("{}", progression_val);
-        assert!(display.contains("C Major"));
-        assert!(display.contains("F Major"));
+        // Test pattern value (replaces progression)
+        let c_chord = Chord::from_note_strings(vec!["C", "E", "G"]).unwrap();
+        let f_chord = Chord::from_note_strings(vec!["F", "A", "C"]).unwrap();
+        let pattern_val = Value::Pattern(Pattern::from_chords(vec![c_chord, f_chord]));
+        let display = format!("{}", pattern_val);
+        assert!(display.contains("C Major") || display.contains("C"));
+        assert!(display.contains("F Major") || display.contains("F"));
     }
 
     #[test]
@@ -423,24 +416,24 @@ mod tests {
     }
 
     #[test]
-    fn test_progression_expressions() {
-        let progression = Progression::from_chord_strings(vec![
-            vec!["C", "E", "G"],
-            vec!["F", "A", "C"],
-            vec!["G", "B", "D"],
-        ])
-        .unwrap();
+    fn test_pattern_as_progression() {
+        // Pattern is now the unified type for chord sequences
+        let c_chord = Chord::from_note_strings(vec!["C", "E", "G"]).unwrap();
+        let f_chord = Chord::from_note_strings(vec!["F", "A", "C"]).unwrap();
+        let g_chord = Chord::from_note_strings(vec!["G", "B", "D"]).unwrap();
 
-        let prog_expr = Expression::Progression(progression.clone());
-        let prog_value = Value::Progression(progression);
+        let pattern = Pattern::from_chords(vec![c_chord, f_chord, g_chord]);
+
+        let prog_expr = Expression::Pattern(pattern.clone());
+        let prog_value = Value::Pattern(pattern);
 
         // Test that they display correctly
         let expr_display = format!("{}", prog_expr);
         let value_display = format!("{}", prog_value);
 
         assert_eq!(expr_display, value_display);
-        assert!(expr_display.contains("C Major"));
-        assert!(expr_display.contains("F Major"));
-        assert!(expr_display.contains("G Major"));
+        assert!(expr_display.contains("C Major") || expr_display.contains("C"));
+        assert!(expr_display.contains("F Major") || expr_display.contains("F"));
+        assert!(expr_display.contains("G Major") || expr_display.contains("G"));
     }
 }

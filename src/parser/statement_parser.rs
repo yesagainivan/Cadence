@@ -631,8 +631,10 @@ impl StatementParser {
         }
 
         self.expect(&Token::RightDoubleBracket)?;
-        Ok(Expression::Progression(
-            crate::types::Progression::from_chords(chords),
+        // Create a Pattern from the chords (chord progression)
+        let progression = crate::types::Progression::from_chords(chords);
+        Ok(Expression::Pattern(
+            crate::types::Pattern::from_progression(&progression),
         ))
     }
 
@@ -819,19 +821,20 @@ mod expression_tests {
     #[test]
     fn test_parse_progression() {
         let expr = parse("[[C, E, G], [F, A, C]]").unwrap();
-        assert!(matches!(expr, Expression::Progression(_)));
+        assert!(matches!(expr, Expression::Pattern(_)));
 
-        if let Expression::Progression(progression) = expr {
-            assert_eq!(progression.len(), 2);
+        if let Expression::Pattern(pattern) = expr {
+            let chords = pattern.as_chords().expect("Should be chord-only pattern");
+            assert_eq!(chords.len(), 2);
 
             // Test first chord is C major
-            let first_chord = &progression[0];
+            let first_chord = &chords[0];
             assert!(first_chord.contains(&"C".parse().unwrap()));
             assert!(first_chord.contains(&"E".parse().unwrap()));
             assert!(first_chord.contains(&"G".parse().unwrap()));
 
             // Test second chord is F major
-            let second_chord = &progression[1];
+            let second_chord = &chords[1];
             assert!(second_chord.contains(&"F".parse().unwrap()));
             assert!(second_chord.contains(&"A".parse().unwrap()));
             assert!(second_chord.contains(&"C".parse().unwrap()));
@@ -845,7 +848,7 @@ mod expression_tests {
 
         if let Expression::Transpose { target, semitones } = expr {
             assert_eq!(semitones, 2);
-            assert!(matches!(*target, Expression::Progression(_)));
+            assert!(matches!(*target, Expression::Pattern(_)));
         }
     }
 
