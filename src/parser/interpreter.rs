@@ -48,6 +48,8 @@ pub struct Interpreter {
     pub volume: f32,
     /// Current track ID (default 1)
     pub current_track: usize,
+    /// Whether we're inside a track N { } block
+    in_track_block: bool,
     /// Last evaluated expression result
     last_eval_result: Option<Value>,
     /// Actions collected during execution (for host to execute)
@@ -63,6 +65,7 @@ impl Interpreter {
             tempo: 120.0,
             volume: 0.5,
             current_track: 1,
+            in_track_block: false,
             last_eval_result: None,
             actions: Vec::new(),
         }
@@ -155,12 +158,12 @@ impl Interpreter {
             }
 
             Statement::Stop => {
-                // At top-level (default track 1), stop ALL tracks.
+                // At top-level, stop ALL tracks.
                 // Inside a `track N { stop }` block, stop only that track.
-                let stop_target = if self.current_track == 1 {
-                    None // Stop all tracks
-                } else {
+                let stop_target = if self.in_track_block {
                     Some(self.current_track) // Stop specific track
+                } else {
+                    None // Stop all tracks
                 };
 
                 self.actions.push(InterpreterAction::Stop {
@@ -199,13 +202,16 @@ impl Interpreter {
 
             Statement::Track { id, body } => {
                 let old_track = self.current_track;
+                let old_in_block = self.in_track_block;
                 self.current_track = *id;
+                self.in_track_block = true;
 
                 // Execute body
                 let result = self.run_statement(body);
 
-                // Restore track
+                // Restore track context
                 self.current_track = old_track;
+                self.in_track_block = old_in_block;
 
                 result
             }

@@ -188,4 +188,4 @@ A production-ready music programming language for chord progressions and harmoni
 8. ~~**ADSR Envelopes** - Configurable attack/decay/sustain/release~~ ✅ Done
 9. **MIDI Output** - MIDI device enumeration, note-on/note-off events, control change messages
 10. **Multiple Waveforms** - saw, square, triangle waveforms
-11. **modularize statement parser** - break down into smaller modules
+11. **modularize statement parser** - break down into smaller modules if needed
