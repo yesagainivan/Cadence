@@ -40,6 +40,8 @@ track 1 { play "C E G".wave("square") loop }
 //
 
 
+cadence> stop
+cadence> Stopping all playback
 cadence> bass = "D D D F"
 cadence> play bass
 Playing "D D D F" (Track 1)
@@ -137,4 +139,56 @@ cadence> bass = "D3*2 A2 D3 F"
 cadence> bass = "D3*2 A2 D3 F"
 cadence> bass = "D3*2 A2 D3 F"
 cadence> bass = "D3*3 A2 D3 F"
-cadence> 
+cadence> bass = "D3*3 A2*2 D3 F"
+cadence> on 1 play bass queue bar loop
+Playing "D3*3 A2*2 D3 F" (looping, Track 1)
+🔁 Queued "D3*3 A2*2 D3 F" for next bar... (Track 1)
+cadence> on 1 play bass queue bar loop
+Playing "D3*3 A2*2 D3 F" (looping, Track 1)
+🔁 Queued "D3*3 A2*2 D3 F" for next bar... (Track 1)
+cadence> on 1 play bass queue bar loop
+cadence> Playing "D3*3 A2*2 D3 F" (looping, Track 1)
+🔁 Queued "D3*3 A2*2 D3 F" for next bar... (Track 1)
+cadence> on 7 play C3 queue loop 
+cadence> Playing C3 (looping, Track 7)
+🔁 Queued C3 for next beat... (Track 7)
+cadence> on 7 play "C4 _ C4 _" queue loop
+Playing "C _ C _" (looping, Track 7)
+cadence> 🔁 Queued "C _ C _" for next beat... (Track 7)
+cadence> on 8 play "_ C4 _ C4" queue loop
+cadence> Playing "_ C _ C" (looping, Track 8)
+🔁 Queued "_ C _ C" for next beat... (Track 8)
+cadence> on 8 stop
+Stopping playback (Track 8)
+cadence> on 8 play "_ C4 _ C4" queue loop
+Playing "_ C _ C" (looping, Track 8)
+🔁 Queued "_ C _ C" for next beat... (Track 8)
+cadence> on 8 play "C4 C4 C4 C4 C4 C4 C4 C4" queue loop
+Playing "C C C C C C C C" (looping, Track 8)
+🔁 Queued "C C C C C C C C" for next beat... (Track 8)
+cadence> on 8 play "_ C4 _ C4" queue loop
+cadence> Playing "_ C _ C" (looping, Track 8)
+🔁 Queued "_ C _ C" for next beat... (Track 8)
+cadence> on 8 stop
+Stopping playback (Track 8)
+cadence> on 8 play "_ C4 _ C4" queue loop
+cadence> Playing "_ C _ C" (looping, Track 8)
+🔁 Queued "_ C _ C" for next beat... (Track 8)
+cadence> on 9 play "C4 C4 C4 C4 C4 C4 C4 C4" queue loop
+Playing "C C C C C C C C" (looping, Track 9)
+cadence> 🔁 Queued "C C C C C C C C" for next beat... (Track 9)
+cadence> on 9 play "C4 C4 C4 C4" queue loop
+Playing "C C C C" (looping, Track 9)
+🔁 Queued "C C C C" for next beat... (Track 9)
+cadence> on 1 stop
+Stopping playback (Track 1)
+cadence> let bass2 = "D3*2 _ _ _";
+cadence> on 1 play bass2 queue loop
+cadence> Playing "D3*2 _ _ _" (looping, Track 1)
+🔁 Queued "D3*2 _ _ _" for next beat... (Track 1)
+cadence> let bass2 = "D4*2 _ _ _";
+cadence> let bass2 = "D3*2 _ _ _";
+cadence> on 1 play bass2 queue loop
+Playing "D3*2 _ _ _" (looping, Track 1)
+cadence> 🔁 Queued "D3*2 _ _ _" for next beat... (Track 1)
+cadence> on 1 play bass2 queue loop

@@ -10,7 +10,7 @@
 
 use crate::parser::ast::{Expression, Program, Statement};
 use crate::parser::lexer::{Lexer, Span, SpannedToken, Token};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
 /// Parses statements and programs (sequences of statements)
 pub struct StatementParser {
@@ -55,6 +55,14 @@ impl StatementParser {
             .unwrap_or(&Token::Eof)
     }
 
+    /// Check if current token should be skipped (whitespace-like tokens)
+    fn is_skippable(&self) -> bool {
+        matches!(
+            self.current(),
+            Token::Semicolon | Token::Newline | Token::Comment(_)
+        )
+    }
+
     /// Advance to the next token
     fn advance(&mut self) {
         if self.position < self.tokens.len() {
@@ -88,8 +96,8 @@ impl StatementParser {
         let mut program = Program::new();
 
         while !self.check(&Token::Eof) {
-            // Skip semicolons and newlines between statements
-            while self.check(&Token::Semicolon) || self.check(&Token::Newline) {
+            // Skip semicolons, newlines, and comments between statements
+            while self.is_skippable() {
                 self.advance();
             }
 
@@ -440,8 +448,8 @@ impl StatementParser {
         let mut statements = Vec::new();
 
         while !self.check(&Token::RightBrace) && !self.check(&Token::Eof) {
-            // Skip semicolons between statements
-            while self.check(&Token::Semicolon) || self.check(&Token::Newline) {
+            // Skip semicolons, newlines, and comments between statements
+            while self.is_skippable() {
                 self.advance();
             }
 
@@ -1025,12 +1033,10 @@ mod expression_tests {
         // Parser expects a note in chord, gets identifier -> specific error message
         let result = parse("[X, E, G]");
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Expected note in chord")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected note in chord"));
     }
 
     #[test]
