@@ -13,8 +13,12 @@ import { bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { cadenceWasm } from './lang-cadence-wasm';
-import { initWasm, parseCode, isWasmReady } from './cadence-wasm';
+import { initWasm, parseCode, isWasmReady, runScript } from './cadence-wasm';
 import { audioEngine } from './audio-engine';
+import { PianoRoll } from './piano-roll';
+
+// Global piano roll instance
+let pianoRoll: PianoRoll | null = null;
 
 // Sample Cadence code
 const SAMPLE_CODE = `// Welcome to Cadence! 🎵
@@ -150,9 +154,22 @@ function scheduleValidation(view: EditorView): void {
 
   validationTimer = window.setTimeout(() => {
     const result = validateCode(view);
-    // Live update if valid and playing
+    const code = view.state.doc.toString();
+
+    // Update piano roll visualization
+    if (result && result.success && pianoRoll) {
+      const scriptResult = runScript(code);
+      if (scriptResult.success && scriptResult.actions.length > 0) {
+        // Find the first Play action and show its events
+        const playAction = scriptResult.actions.find(a => a.type === 'Play');
+        if (playAction && playAction.type === 'Play') {
+          pianoRoll.update(playAction.events);
+        }
+      }
+    }
+
+    // Live update audio if valid and playing
     if (result && result.success && audioEngine.playing) {
-      const code = view.state.doc.toString();
       audioEngine.updateScript(code);
     }
   }, 200);
@@ -224,8 +241,17 @@ async function init(): Promise<void> {
 
   const editor = createEditor(editorContainer);
 
-  // Validate initial code
+  // Initialize piano roll
+  try {
+    pianoRoll = new PianoRoll('piano-roll');
+    log('✓ Piano roll initialized');
+  } catch (e) {
+    log(`⚠ Piano roll failed: ${e}`);
+  }
+
+  // Validate initial code and update piano roll
   validateCode(editor);
+  scheduleValidation(editor);
 
   // Play button
   const playBtn = document.getElementById('play-btn');

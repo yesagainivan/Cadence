@@ -10,7 +10,7 @@
   --accent-primary: #e94560;
   --accent-secondary: #533483;
   --accent-tertiary: #0f3460;
-  
+
   /* Syntax highlighting */
   --syn-keyword: #e94560;
   --syn-keyword-control: #ff7b9c;
@@ -21,7 +21,7 @@
   --syn-operator: #f4a261;
   --syn-punctuation: #888;
   --syn-comment: #5c6370;
-  
+
   /* Spacing */
   --header-height: 60px;
   --footer-height: 28px;
@@ -131,9 +131,32 @@ body {
   overflow: hidden;
 }
 
+.editor-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 #editor {
   flex: 1;
   overflow: hidden;
+  min-height: 200px;
+}
+
+/* Piano Roll */
+#piano-roll-container {
+  height: 180px;
+  min-height: 120px;
+  background: var(--bg-primary);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
+}
+
+#piano-roll {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 /* CodeMirror customization */
@@ -179,15 +202,44 @@ body {
 }
 
 /* Syntax highlighting */
-.cm-cadence-keyword { color: var(--syn-keyword); font-weight: 600; }
-.cm-cadence-keyword-control { color: var(--syn-keyword-control); }
-.cm-cadence-note { color: var(--syn-note); font-weight: 500; }
-.cm-cadence-number { color: var(--syn-number); }
-.cm-cadence-string { color: var(--syn-string); }
-.cm-cadence-variable { color: var(--syn-variable); }
-.cm-cadence-operator { color: var(--syn-operator); }
-.cm-cadence-punctuation { color: var(--syn-punctuation); }
-.cm-cadence-comment { color: var(--syn-comment); font-style: italic; }
+.cm-cadence-keyword {
+  color: var(--syn-keyword);
+  font-weight: 600;
+}
+
+.cm-cadence-keyword-control {
+  color: var(--syn-keyword-control);
+}
+
+.cm-cadence-note {
+  color: var(--syn-note);
+  font-weight: 500;
+}
+
+.cm-cadence-number {
+  color: var(--syn-number);
+}
+
+.cm-cadence-string {
+  color: var(--syn-string);
+}
+
+.cm-cadence-variable {
+  color: var(--syn-variable);
+}
+
+.cm-cadence-operator {
+  color: var(--syn-operator);
+}
+
+.cm-cadence-punctuation {
+  color: var(--syn-punctuation);
+}
+
+.cm-cadence-comment {
+  color: var(--syn-comment);
+  font-style: italic;
+}
 
 /* Sidebar */
 #sidebar {
