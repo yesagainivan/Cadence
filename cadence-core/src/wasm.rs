@@ -266,13 +266,13 @@ mod tests {
 
         assert_eq!(spans[2].start_col, 3); // ,
 
-        assert_eq!(spans[3].start_col, 4); // E (space is skipped)
+        assert_eq!(spans[3].start_col, 5); // E (after ", ")
         assert_eq!(spans[3].text, "E");
         assert_eq!(spans[3].token_type, "constant.note");
 
         assert_eq!(spans[4].start_col, 6); // ,
 
-        assert_eq!(spans[5].start_col, 7); // G
+        assert_eq!(spans[5].start_col, 8); // G
         assert_eq!(spans[5].text, "G");
         assert_eq!(spans[5].token_type, "constant.note");
 

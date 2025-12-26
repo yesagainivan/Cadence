@@ -631,8 +631,12 @@ impl Lexer {
     }
 
     /// Get the next token with its span (position info)
+    /// Note: Span is captured AFTER skipping whitespace to get accurate token positions
     pub fn next_spanned_token(&mut self) -> Result<SpannedToken> {
-        // Capture span before consuming any characters
+        // Skip whitespace FIRST so span reflects actual token position
+        self.skip_horizontal_whitespace();
+
+        // Now capture span at the actual token start position
         let span = self.current_span();
         let token = self.next_token()?;
         Ok(SpannedToken::new(token, span))
