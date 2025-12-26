@@ -6,13 +6,14 @@
  */
 
 import './style.css';
-import { EditorState } from '@codemirror/state';
-import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightActiveLine } from '@codemirror/view';
+import { EditorState, StateEffect, StateField } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightActiveLine, Decoration, DecorationSet } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { cadence } from './lang-cadence';
+import { initWasm, parseCode, tokenizeCode, isWasmReady, type HighlightSpan } from './cadence-wasm';
 
 // Sample Cadence code
 const SAMPLE_CODE = `// Welcome to Cadence! 🎵
@@ -96,19 +97,20 @@ function createEditor(container: HTMLElement): EditorView {
         ...searchKeymap,
       ]),
 
-      // Cadence language support
+      // Cadence language support (uses stream tokenizer as fallback)
       cadence(),
 
       // Theme
       darkTheme,
 
-      // Update listener for cursor position
+      // Update listener for cursor position and validation
       EditorView.updateListener.of((update) => {
         if (update.selectionSet) {
           updateCursorPosition(update.view);
         }
         if (update.docChanged) {
-          validateCode(update.view);
+          // Debounced validation
+          scheduleValidation(update.view);
         }
       }),
     ],
@@ -134,14 +136,71 @@ function updateCursorPosition(view: EditorView): void {
   }
 }
 
+// Validation debounce timer
+let validationTimer: number | null = null;
+
 /**
- * Validate code and update status
- * TODO: Use WASM parse_and_check() for real validation
+ * Schedule validation with debouncing
  */
-function validateCode(_view: EditorView): void {
+function scheduleValidation(view: EditorView): void {
+  if (validationTimer) {
+    clearTimeout(validationTimer);
+  }
+
+  validationTimer = window.setTimeout(() => {
+    validateCode(view);
+  }, 300);
+}
+
+/**
+ * Validate code using WASM parser
+ */
+function validateCode(view: EditorView): void {
   const statusEl = document.getElementById('status');
+
+  if (!isWasmReady()) {
+    if (statusEl) statusEl.textContent = 'WASM loading...';
+    return;
+  }
+
+  const code = view.state.doc.toString();
+  const result = parseCode(code);
+
   if (statusEl) {
-    statusEl.textContent = 'Ready';
+    if (result.success) {
+      statusEl.textContent = '✓ Valid';
+      statusEl.style.color = '#4ecca3';
+    } else {
+      statusEl.textContent = `✗ ${result.error || 'Parse error'}`;
+      statusEl.style.color = '#e94560';
+    }
+  }
+}
+
+/**
+ * Get WASM token info for debugging
+ */
+function debugTokens(code: string): void {
+  if (!isWasmReady()) {
+    log('⚠ WASM not ready');
+    return;
+  }
+
+  const spans = tokenizeCode(code);
+  log(`📝 Tokens (${spans.length}):`);
+
+  // Group tokens by line for cleaner output
+  const byLine: Map<number, HighlightSpan[]> = new Map();
+  for (const span of spans) {
+    if (!byLine.has(span.start_line)) {
+      byLine.set(span.start_line, []);
+    }
+    byLine.get(span.start_line)!.push(span);
+  }
+
+  for (const [line, lineSpans] of byLine) {
+    const tokenSummary = lineSpans.map(s => `${s.token_type}:${s.text}`).join(' ');
+    log(`  L${line}: ${tokenSummary}`);
   }
 }
 
@@ -158,24 +217,59 @@ function log(message: string): void {
 }
 
 /**
+ * Clear output panel
+ */
+function clearOutput(): void {
+  const outputEl = document.getElementById('output');
+  if (outputEl) {
+    outputEl.textContent = '';
+  }
+}
+
+/**
  * Initialize the editor and UI
  */
-function init(): void {
+async function init(): Promise<void> {
   const editorContainer = document.getElementById('editor');
   if (!editorContainer) {
     console.error('Editor container not found');
     return;
   }
 
+  // Initialize WASM
+  log('Loading WASM...');
+  try {
+    await initWasm();
+    log('✓ WASM loaded successfully');
+  } catch (e) {
+    log(`✗ WASM failed to load: ${e}`);
+    console.error('WASM init error:', e);
+  }
+
   const editor = createEditor(editorContainer);
+
+  // Validate initial code
+  validateCode(editor);
 
   // Play button
   const playBtn = document.getElementById('play-btn');
   playBtn?.addEventListener('click', () => {
     const code = editor.state.doc.toString();
-    log(`▶ Playing...`);
-    log(`Code: ${code.split('\n')[0]}...`);
-    // TODO: Send to WASM interpreter
+
+    // First validate
+    const result = parseCode(code);
+    if (!result.success) {
+      log(`✗ Cannot play: ${result.error}`);
+      return;
+    }
+
+    log('▶ Playing...');
+
+    // Debug: show tokens from WASM
+    debugTokens(code);
+
+    // TODO: Send to Web Audio / MIDI
+    log('🎵 (Audio playback not yet implemented)');
   });
 
   // Stop button
@@ -192,12 +286,11 @@ function init(): void {
     if (tempoValue) {
       tempoValue.textContent = tempoSlider.value;
     }
-    log(`Tempo: ${tempoSlider.value} BPM`);
   });
 
   // Initial log
-  log('Cadence Editor initialized');
-  log('Ready to make music! 🎵');
+  log('🎵 Cadence Editor initialized');
+  log('Ready to make music!');
 
   // Focus editor
   editor.focus();
