@@ -5,8 +5,9 @@
 use crate::parser::ast::{Expression, Program, Statement, Value};
 use crate::parser::environment::{Environment, SharedEnvironment};
 use crate::parser::evaluator::Evaluator;
+use crate::parser::statement_parser::parse_statements;
 use crate::types::QueueMode;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::sync::{Arc, RwLock};
 
 /// Control flow signals for break/continue/return
@@ -235,14 +236,21 @@ impl Interpreter {
             }
 
             Statement::Load(path) => {
-                let contents = std::fs::read_to_string(path)
-                    .map_err(|e| anyhow!("Failed to load '{}': {}", path, e))?;
-                let program = crate::parser::parse_statements(&contents)
-                    .map_err(|e| anyhow!("Parse error in '{}': {}", path, e))?;
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let contents = std::fs::read_to_string(path)
+                        .map_err(|e| anyhow!("Failed to load '{}': {}", path, e))?;
+                    let program = parse_statements(&contents)
+                        .map_err(|e| anyhow!("Parse error in '{}': {}", path, e))?;
 
-                println!("Loaded: {}", path);
-                self.run_program(&program)?;
-                Ok(ControlFlow::Normal)
+                    println!("Loaded: {}", path);
+                    self.run_program(&program)?;
+                    Ok(ControlFlow::Normal)
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    Err(anyhow!("File loading not supported in WASM: {}", path))
+                }
             }
 
             Statement::Loop { body } => loop {
@@ -515,12 +523,10 @@ mod tests {
         let result = interpreter.run_program(&program);
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("undefined variable")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("undefined variable"));
     }
 
     #[test]
@@ -605,11 +611,9 @@ mod tests {
         // Should have 3 SetTempo actions
         let actions = interpreter.take_actions();
         assert_eq!(actions.len(), 3);
-        assert!(
-            actions
-                .iter()
-                .all(|a| matches!(a, InterpreterAction::SetTempo(100.0)))
-        );
+        assert!(actions
+            .iter()
+            .all(|a| matches!(a, InterpreterAction::SetTempo(100.0))));
     }
 
     #[test]
@@ -651,11 +655,9 @@ mod tests {
         let actions = interpreter.take_actions();
         // Should have 3 actions (one per iteration), all tempo 100
         assert_eq!(actions.len(), 3);
-        assert!(
-            actions
-                .iter()
-                .all(|a| matches!(a, InterpreterAction::SetTempo(100.0)))
-        );
+        assert!(actions
+            .iter()
+            .all(|a| matches!(a, InterpreterAction::SetTempo(100.0))));
     }
 
     #[test]
@@ -679,12 +681,10 @@ mod tests {
         let result = interpreter.run_program(&program);
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Break outside of loop")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Break outside of loop"));
     }
 
     #[test]
