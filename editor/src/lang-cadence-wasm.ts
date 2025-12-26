@@ -43,6 +43,8 @@ function spansToDecorations(spans: HighlightSpan[], doc: any): DecorationSet {
         return a.start_col - b.start_col;
     });
 
+    let lastTo = -1; // Track last range end for debugging
+
     for (const span of sortedSpans) {
         // Skip empty token types
         if (!span.token_type || span.token_type === '') continue;
@@ -57,9 +59,17 @@ function spansToDecorations(spans: HighlightSpan[], doc: any): DecorationSet {
             const from = line.from + (span.start_col - 1);
             const to = from + span.text.length;
 
-            // Ensure we don't go past the document end
-            if (from >= 0 && to <= doc.length && from < to) {
+            // Debug first line tokens
+            if (span.start_line <= 2) {
+                console.log(`Token: ${span.token_type} "${span.text}" at L${span.start_line}:${span.start_col} → doc[${from}:${to}] (lastTo=${lastTo})`);
+            }
+
+            // Ensure we don't go past the document end and ranges are in order
+            if (from >= 0 && to <= doc.length && from < to && from >= lastTo) {
                 builder.add(from, to, mark);
+                lastTo = to;
+            } else if (from < lastTo) {
+                console.warn(`Skipping out-of-order token: ${span.text} at ${from}, lastTo=${lastTo}`);
             }
         } catch (e) {
             // Line doesn't exist, skip

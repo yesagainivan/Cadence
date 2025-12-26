@@ -99,6 +99,9 @@ impl HighlightSpan {
             // Booleans
             Token::Boolean(_) => "constant.boolean".to_string(),
 
+            // Comments
+            Token::Comment(_) => "comment".to_string(),
+
             // Newline (not visible)
             Token::Newline => "".to_string(),
 
@@ -109,7 +112,9 @@ impl HighlightSpan {
 
     fn extract_text(token: &Token) -> String {
         match token {
-            Token::Note(s) | Token::Identifier(s) | Token::StringLiteral(s) => s.clone(),
+            Token::Note(s) | Token::Identifier(s) => s.clone(),
+            // String literals need quotes for correct span length
+            Token::StringLiteral(s) => format!("\"{}\"", s),
             Token::Number(n) => n.to_string(),
             Token::Float(f) => f.to_string(),
             Token::Boolean(b) => b.to_string(),
@@ -151,6 +156,7 @@ impl HighlightSpan {
             Token::DoubleEquals => "==".to_string(),
             Token::NotEquals => "!=".to_string(),
             Token::Newline => "\n".to_string(),
+            Token::Comment(s) => format!("//{}\n", s), // Include // prefix
             Token::Eof => "".to_string(),
         }
     }
@@ -231,6 +237,46 @@ mod tests {
             .filter(|s| s.token_type == "constant.note")
             .collect();
         assert_eq!(notes.len(), 3); // C, E, G
+    }
+
+    #[test]
+    fn test_token_positions_in_chord() {
+        // Test that all tokens in a chord have correct positions
+        let input = "[C, E, G]";
+        let spans = tokenize_for_highlighting(input);
+
+        // Print spans for debugging
+        for (i, span) in spans.iter().enumerate() {
+            println!(
+                "Span {}: {} at col {} (text: '{}')",
+                i, span.token_type, span.start_col, span.text
+            );
+        }
+
+        // Should have: [ C , E , G ]
+        assert_eq!(spans.len(), 7, "Expected 7 tokens: [ C , E , G ]");
+
+        // Check positions are strictly increasing
+        assert_eq!(spans[0].start_col, 1); // [
+        assert_eq!(spans[0].text, "[");
+
+        assert_eq!(spans[1].start_col, 2); // C
+        assert_eq!(spans[1].text, "C");
+        assert_eq!(spans[1].token_type, "constant.note");
+
+        assert_eq!(spans[2].start_col, 3); // ,
+
+        assert_eq!(spans[3].start_col, 4); // E (space is skipped)
+        assert_eq!(spans[3].text, "E");
+        assert_eq!(spans[3].token_type, "constant.note");
+
+        assert_eq!(spans[4].start_col, 6); // ,
+
+        assert_eq!(spans[5].start_col, 7); // G
+        assert_eq!(spans[5].text, "G");
+        assert_eq!(spans[5].token_type, "constant.note");
+
+        assert_eq!(spans[6].start_col, 9); // ]
     }
 
     #[test]

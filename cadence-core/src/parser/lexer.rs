@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::fmt;
 
 /// Represents different types of tokens in the Cadence language
@@ -58,6 +58,9 @@ pub enum Token {
     // Identifiers (for function names and variables)
     Identifier(String), // invert, transpose, prog, etc.
 
+    // Comments (for syntax highlighting)
+    Comment(String), // // single-line comment
+
     // End of input
     Eof,
 }
@@ -109,6 +112,7 @@ impl fmt::Display for Token {
             Token::Track => write!(f, "track"),
             Token::On => write!(f, "on"),
             Token::Identifier(name) => write!(f, "{}", name),
+            Token::Comment(text) => write!(f, "//{}", text),
             Token::Eof => write!(f, "EOF"),
         }
     }
@@ -206,18 +210,21 @@ impl Lexer {
         }
     }
 
-    /// Skip a single-line comment (// to end of line)
-    fn skip_single_line_comment(&mut self) {
+    /// Read a single-line comment (// to end of line)
+    fn read_single_line_comment(&mut self) -> String {
         // Skip //
         self.advance();
         self.advance();
-        // Skip until newline or EOF
+        let mut comment = String::new();
+        // Read until newline or EOF
         while let Some(ch) = self.current_char {
             if ch == '\n' {
                 break; // Don't consume newline - let next_token handle it
             }
+            comment.push(ch);
             self.advance();
         }
+        comment
     }
 
     /// Skip a multi-line comment (/* to */)
@@ -369,8 +376,8 @@ impl Lexer {
                 Some('/') => {
                     match self.peek() {
                         Some('/') => {
-                            self.skip_single_line_comment();
-                            continue; // Loop back to get next token
+                            let comment_text = self.read_single_line_comment();
+                            return Ok(Token::Comment(comment_text));
                         }
                         Some('*') => {
                             self.skip_multi_line_comment();
@@ -969,12 +976,10 @@ mod tests {
         let mut lexer = Lexer::new("C @ E");
         let result = lexer.tokenize();
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Unexpected character")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unexpected character"));
     }
 
     #[test]
@@ -982,11 +987,12 @@ mod tests {
         let mut lexer = Lexer::new("C // this is a comment\nE");
         let tokens = lexer.tokenize().unwrap();
 
-        // Should have C, Newline, E, Eof - comment is skipped
+        // Should have C, Comment, Newline, E, Eof - comment is now returned
         assert_eq!(tokens[0], Token::Note("C".to_string()));
-        assert_eq!(tokens[1], Token::Newline);
-        assert_eq!(tokens[2], Token::Note("E".to_string()));
-        assert_eq!(tokens[3], Token::Eof);
+        assert_eq!(tokens[1], Token::Comment(" this is a comment".to_string()));
+        assert_eq!(tokens[2], Token::Newline);
+        assert_eq!(tokens[3], Token::Note("E".to_string()));
+        assert_eq!(tokens[4], Token::Eof);
     }
 
     #[test]
@@ -1005,9 +1011,10 @@ mod tests {
         let mut lexer = Lexer::new("[C, E, G] // C major chord");
         let tokens = lexer.tokenize().unwrap();
 
-        // Comment at end is just skipped
+        // Comment at end is now returned as token
         assert!(tokens.contains(&Token::LeftBracket));
         assert!(tokens.contains(&Token::RightBracket));
+        assert!(tokens.iter().any(|t| matches!(t, Token::Comment(_))));
         assert_eq!(tokens.last(), Some(&Token::Eof));
     }
 
