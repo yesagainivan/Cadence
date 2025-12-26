@@ -381,6 +381,9 @@ struct PlaybackLoop {
     // MIDI state
     /// Currently active MIDI notes for this track (for proper Note Off)
     active_midi_notes: Vec<u8>,
+
+    /// Last error message (for deduplication - only show unique errors)
+    last_error: Option<String>,
 }
 
 impl PlaybackLoop {
@@ -410,6 +413,7 @@ impl PlaybackLoop {
             in_gap: false,
             gap_end_beat: 0.0,
             active_midi_notes: Vec::new(),
+            last_error: None,
         }
     }
 
@@ -663,7 +667,11 @@ impl PlaybackLoop {
                 // Filter out control-flow signals (not real errors)
                 let msg = e.to_string();
                 if !msg.contains("Switched to queued") && !msg.contains("Progression complete") {
-                    eprintln!("Failed to evaluate playback source: {}", e);
+                    // Only show error if different from last error (deduplication)
+                    if self.last_error.as_ref() != Some(&msg) {
+                        eprintln!("Failed to evaluate playback source: {}", e);
+                        self.last_error = Some(msg);
+                    }
                 }
                 return;
             }
