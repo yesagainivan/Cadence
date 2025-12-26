@@ -1,18 +1,23 @@
-pub mod ast;
-pub mod environment;
-pub mod evaluator;
+// src/parser/mod.rs
+// Re-export core parser modules from cadence-core
+// Keep interpreter locally (it has audio/MIDI dependencies)
+
+// Re-export modules
+pub use cadence_core::parser::ast;
+pub use cadence_core::parser::environment;
+pub use cadence_core::parser::evaluator;
+pub use cadence_core::parser::lexer;
+pub use cadence_core::parser::statement_parser;
+
+// Re-export commonly used types
+pub use cadence_core::parser::{
+    eval, parse_statements, Environment, Evaluator, Expression, Lexer, Program, SharedEnvironment,
+    Statement, StatementParser, Token, Value,
+};
+
+// Re-export parse function (aliased from parse_expression)
+pub use cadence_core::parser::statement_parser::parse_expression as parse;
+
+// Interpreter stays in cadence (has audio dependencies)
 pub mod interpreter;
-pub mod lexer;
-// pub mod parser; // Removed legacy parser
-pub mod statement_parser;
-
-#[cfg(test)]
-mod evaluator_tests;
-
-pub use ast::{Expression, Program, Statement, Value};
-pub use environment::{Environment, SharedEnvironment};
-pub use evaluator::{Evaluator, eval};
 pub use interpreter::{Interpreter, InterpreterAction};
-pub use lexer::{Lexer, Token};
-// pub use parser::{Parser, parse};
-pub use statement_parser::{StatementParser, parse_expression as parse, parse_statements};

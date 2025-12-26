@@ -1,15 +1,4 @@
 // src/types/mod.rs
+// Re-export all types from cadence-core to avoid code duplication
 
-pub mod audio_config;
-pub mod chord;
-pub mod note;
-pub mod pattern;
-pub mod roman_numeral;
-pub mod voice_leading;
-
-pub use audio_config::{AdsrParams, QueueMode, Waveform};
-pub use chord::Chord;
-pub use note::Note;
-pub use pattern::{Pattern, PatternStep};
-pub use roman_numeral::*;
-pub use voice_leading::VoiceLeading;
+pub use cadence_core::types::*;
