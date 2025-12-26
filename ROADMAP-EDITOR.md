@@ -148,6 +148,9 @@ A web-based editor for the Cadence music programming language with live syntax h
 5. Fixed token positions (span captured after whitespace skip)
 6. Real-time validation with Rust parser
 7. Dark theme with music production colors
+8. **Reactive playback architecture** — Step-sequencer pattern with per-cycle caching
+9. **Phase-preserving updates** — Variable reassignment doesn't stutter playback
+10. **WasmInterpreter** — Stateful interpreter for browser script execution
 
 ---
 
@@ -157,3 +160,4 @@ A web-based editor for the Cadence music programming language with live syntax h
 2. **InterpreterAction Handling** — Route Play/Stop/Tempo actions to Web Audio
 3. **Piano Roll** — Parse patterns and visualize as simple grid
 4. **Web Audio** — Basic oscillator playback from WASM
+

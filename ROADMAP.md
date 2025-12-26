@@ -75,6 +75,8 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] Thread-safe Environment (`Arc<RwLock<Environment>>`)
 - [x] Per-beat expression re-evaluation in PlaybackLoop
 - [x] Variable updates affect playing audio: `play a loop` then `a = E`
+- [x] Per-cycle caching to reduce lock contention (24 reads/sec → 1/cycle)
+- [x] Phase-preserving variable updates (no stuttering on reassignment)
 
 ### 3.2 Live Reload ✅
 - [x] File watch with hot-reload (`watch "file.cadence"`)
@@ -104,6 +106,12 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] `.method()` syntax desugared to function calls
 - [x] Chained transforms: `"C E G".fast(2).rev().env("pluck")`
 
+### 3.7 Queue Modes ✅
+- [x] `queue` - next beat (default)
+- [x] `queue bar` - next bar boundary  
+- [x] `queue cycle` - end of current pattern cycle
+- [x] `queue N` - after N beats (syntax ready, full countdown pending)
+
 ---
 
 ## Phase 4: Production Features
@@ -115,6 +123,7 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] Multiple waveforms (saw, square, triangle)
   - *New `oscillator.rs` module with Waveform enum*
   - *Presets: sine, saw, square, triangle + `wave(pattern, "saw")` or `"C E".wave("saw")`*
+- [x] Same-note retrigger fix (`[C5 C5]` plays two distinct notes)
 - [ ] Basic effects (reverb, delay, filter)
 
 ### 4.2 MIDI Output ✅
@@ -170,6 +179,9 @@ A production-ready music programming language for chord progressions and harmoni
 | Sub-Beat Timing | ✅ 24 PPQN processing, proper every() cycle ordering |
 | Live Coding | ✅ Reactive variables, file watch, hot-reload |
 | MIDI Output | ✅ `midir` integration, parallel audio+MIDI, per-track channels |
+| Per-Cycle Caching | ✅ Reduced lock contention, phase-preserving updates |
+| Same-Note Retrigger | ✅ `[C5 C5]` plays two distinct notes |
+| Queue Modes | ✅ beat/bar/cycle/N beats syntax |
 
 ---
 
@@ -199,4 +211,5 @@ A production-ready music programming language for chord progressions and harmoni
 12. **Basic Effects** - reverb, delay, filter
 13. **modularize statement parser** - break down into smaller modules if needed
 14. **Web Editor** - See [ROADMAP-EDITOR.md](ROADMAP-EDITOR.md) for detailed phases
+15. **Queue N countdown** - Full N-beat countdown for `queue N` syntax
 
