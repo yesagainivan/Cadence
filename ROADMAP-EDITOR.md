@@ -4,7 +4,7 @@ A web-based editor for the Cadence music programming language with live syntax h
 
 ---
 
-## Phase 0: WASM Foundation ✅ *In Progress*
+## Phase 0: WASM Foundation ✅ Complete
 
 ### 0.1 Type Extraction ✅
 - [x] Create `types/audio_config.rs` with WASM-compatible types
@@ -12,49 +12,45 @@ A web-based editor for the Cadence music programming language with live syntax h
 - [x] Update all imports across codebase
 - [x] All 232 tests passing
 
-### 0.2 Crate Split (Next)
-- [ ] Create workspace with `cadence-core` crate
-- [ ] Move types + parser modules to core crate
-- [ ] Add `serde` feature for JSON serialization
-- [ ] Test `wasm32-unknown-unknown` compilation target
-
-**Modules for cadence-core:**
-- `types/` (note, chord, pattern, audio_config, roman_numeral, voice_leading)
-- `parser/` (lexer, ast, evaluator, statement_parser, environment)
-
-**Stays in main crate:**
-- `audio/` (audio.rs, midi.rs, playback_engine, clock) — requires cpal/midir
-- `repl/` — terminal-specific
-- `commands/` — CLI-specific
+### 0.2 Crate Split ✅
+- [x] Create workspace with `cadence-core` crate
+- [x] Move types + parser modules to core crate
+- [x] Add `serde` and `wasm` features for JSON/WASM interop
+- [x] Test `wasm32-unknown-unknown` compilation target
+- [x] Handle `colored` crate with conditional compilation
+- [x] Add Comment token support to lexer
 
 ---
 
-## Phase 1: Syntax Highlighting
+## Phase 1: Syntax Highlighting ✅ Complete
 
-### 1.1 Tokenization API
-- [ ] Create `tokenize_for_highlighting(input: &str) -> Vec<HighlightSpan>` 
-- [ ] Map Token types to highlight classes (keyword, note, chord, operator, etc.)
-- [ ] Handle partial/incomplete input gracefully
+### 1.1 Tokenization API ✅
+- [x] Create `tokenize_for_highlighting(input: &str) -> Vec<HighlightSpan>` 
+- [x] Map Token types to highlight classes (keyword, note, number, operator, etc.)
+- [x] Handle partial/incomplete input gracefully
+- [x] Fix token position after whitespace (span captured after skip)
 
-### 1.2 CodeMirror 6 Integration
-- [ ] Create `editor/` folder with Vite + TypeScript setup
-- [ ] WASM bindings via `wasm-bindgen`
-- [ ] Custom CodeMirror language mode using WASM tokenizer
-- [ ] Real-time highlighting as user types
+### 1.2 CodeMirror 6 Integration ✅
+- [x] Create `editor/` folder with Vite + TypeScript setup
+- [x] WASM bindings via `wasm-bindgen` + `serde-wasm-bindgen`
+- [x] Custom CodeMirror language mode using WASM tokenizer
+- [x] Real-time highlighting as user types
+- [x] Dark theme with music production colors
+- [x] Real-time code validation via `parse_and_check`
 
 ---
 
-## Phase 2: Live MIDI Display
+## Phase 2: Live MIDI Display 🔜 Next
 
-### 2.1 Parser Integration
-- [ ] Expose `parse_to_events(input: &str) -> Vec<MidiEvent>` from WASM
-- [ ] Include timing, pitch, duration, velocity
-- [ ] Handle patterns with cycle timing
-
-### 2.2 Piano Roll Visualization  
+### 2.1 Piano Roll Visualization
 - [ ] Canvas-based piano roll component
-- [ ] Sync playhead with parsed events
-- [ ] Color-code by track/voice
+- [ ] Parse patterns to extract notes with timing
+- [ ] Color-code notes by pitch/velocity
+
+### 2.2 Pattern Parser Integration
+- [ ] Expose pattern parsing to WASM
+- [ ] Include cycle timing from pattern mini-notation
+- [ ] Handle rests and subdivisions
 
 ### 2.3 Staff Notation (Stretch)
 - [ ] VexFlow or similar for traditional notation
@@ -88,8 +84,8 @@ A web-based editor for the Cadence music programming language with live syntax h
 - [ ] Pattern scheduling with Web Audio clock
 
 ### 4.2 Transport Controls
-- [ ] Play/Pause/Stop
-- [ ] Tempo control (BPM slider)
+- [ ] Play/Pause/Stop functionality
+- [ ] Tempo control (BPM slider) connected to engine
 - [ ] Loop/cycle visualization
 
 ---
@@ -113,7 +109,7 @@ A web-based editor for the Cadence music programming language with live syntax h
 │              │  ┌────────────────┐ │                  │
 │              │  │ types/         │ │                  │
 │              │  │ parser/        │ │                  │
-│              │  │ highlighting   │ │                  │
+│              │  │ wasm.rs (API)  │ │                  │
 │              │  └────────────────┘ │                  │
 │              └─────────────────────┘                  │
 └──────────────────────────────────────────────────────┘
@@ -123,21 +119,33 @@ A web-based editor for the Cadence music programming language with live syntax h
 
 ## Key Technologies
 
-| Component | Technology |
-|-----------|------------|
-| Editor | CodeMirror 6 |
-| WASM bindings | wasm-bindgen, wasm-pack |
-| Build tool | Vite |
-| MIDI visualization | Canvas 2D / WebGL |
-| Audio playback | Web Audio API + AudioWorklet |
-| Property editing | Custom reactive UI (Solid.js or Vue) |
+| Component | Technology | Status |
+|-----------|------------|--------|
+| Editor | CodeMirror 6 | ✅ Integrated |
+| WASM bindings | wasm-bindgen, wasm-pack | ✅ Working |
+| Build tool | Vite + TypeScript | ✅ Setup |
+| Tokenization | WASM (Rust lexer) | ✅ Working |
+| Validation | WASM (Rust parser) | ✅ Working |
+| MIDI visualization | Canvas 2D | 🔜 Next |
+| Audio playback | Web Audio API + AudioWorklet | ⬜ Planned |
+| Property editing | Solid.js (recommended) | ⬜ Planned |
+
+---
+
+## Completed This Session
+
+1. Created `cadence-core` workspace crate with WASM support
+2. Implemented `tokenize()` and `parse_and_check()` WASM exports
+3. Built web editor with CodeMirror 6 + custom Cadence language mode
+4. Added Comment token to lexer for syntax highlighting
+5. Fixed token positions (span captured after whitespace skip)
+6. Real-time validation with Rust parser
+7. Dark theme with music production colors
 
 ---
 
 ## Next Steps
 
-1. **Create workspace** — Add `Cargo.toml` workspace config
-2. **Extract cadence-core** — Move parser/types to new crate
-3. **Add serde derives** — Enable JSON serialization for JS interop
-4. **Test WASM build** — Verify `cargo build --target wasm32-unknown-unknown`
-5. **Create editor scaffold** — Vite + CodeMirror 6 skeleton
+1. **Piano Roll** — Parse patterns and visualize as simple grid
+2. **Web Audio** — Basic oscillator playback from WASM
+3. **Properties Panel** — Start with Solid.js component for ADSR
