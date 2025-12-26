@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cadence Editor</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="editor-header">
+        <h1>🎵 Cadence</h1>
+        <div class="controls">
+          <button id="play-btn" class="btn btn-primary">▶ Play</button>
+          <button id="stop-btn" class="btn btn-secondary">■ Stop</button>
+          <label class="tempo-control">
+            <span>Tempo:</span>
+            <input type="range" id="tempo" min="60" max="200" value="120" />
+            <span id="tempo-value">120</span> BPM
+          </label>
+        </div>
+      </header>
+      <main class="editor-main">
+        <div id="editor"></div>
+        <aside id="sidebar">
+          <div class="panel" id="output-panel">
+            <h3>Output</h3>
+            <pre id="output"></pre>
+          </div>
+          <div class="panel" id="properties-panel">
+            <h3>Properties</h3>
+            <p class="placeholder">Select an element to edit its properties</p>
+          </div>
+        </aside>
+      </main>
+      <footer class="editor-footer">
+        <span id="status">Ready</span>
+        <span id="cursor-pos">Ln 1, Col 1</span>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
