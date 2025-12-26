@@ -20,6 +20,12 @@ A web-based editor for the Cadence music programming language with live syntax h
 - [x] Handle `colored` crate with conditional compilation
 - [x] Add Comment token support to lexer
 
+### 0.3 Crate Consolidation ✅ (New)
+- [x] `cadence` re-exports from `cadence-core` (no duplicate code)
+- [x] Interpreter moved to core (WASM-accessible)
+- [x] File loading conditionally compiled (disabled in WASM)
+- [x] Full script execution now possible in browser
+
 ---
 
 ## Phase 1: Syntax Highlighting ✅ Complete
@@ -109,6 +115,7 @@ A web-based editor for the Cadence music programming language with live syntax h
 │              │  ┌────────────────┐ │                  │
 │              │  │ types/         │ │                  │
 │              │  │ parser/        │ │                  │
+│              │  │ interpreter/   │ │  ← NEW!          │
 │              │  │ wasm.rs (API)  │ │                  │
 │              │  └────────────────┘ │                  │
 │              └─────────────────────┘                  │
@@ -146,6 +153,7 @@ A web-based editor for the Cadence music programming language with live syntax h
 
 ## Next Steps
 
-1. **Piano Roll** — Parse patterns and visualize as simple grid
-2. **Web Audio** — Basic oscillator playback from WASM
-3. **Properties Panel** — Start with Solid.js component for ADSR
+1. **Script Execution in Editor** — Use Interpreter from WASM to run .cadence files
+2. **InterpreterAction Handling** — Route Play/Stop/Tempo actions to Web Audio
+3. **Piano Roll** — Parse patterns and visualize as simple grid
+4. **Web Audio** — Basic oscillator playback from WASM
