@@ -10,15 +10,15 @@
 
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::{ClockTick, Duration};
-use crate::audio::midi::{MidiOutputHandle, frequency_to_midi};
+use crate::audio::midi::{frequency_to_midi, MidiOutputHandle};
 use crate::parser::{Evaluator, Expression, SharedEnvironment, Value};
 use crate::types::Waveform;
 use anyhow::Result;
-use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender, select};
+use crossbeam_channel::{select, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 /// Epsilon for floating-point beat comparisons (half a tick at 24 PPQN)
@@ -342,6 +342,52 @@ impl Drop for PlaybackEngine {
     }
 }
 
+/// Cursor for tracking position within a pattern using beat-based timing
+/// This enables phase-preserving variable updates (like the browser editor)
+#[derive(Clone, Debug)]
+struct PlaybackCursor {
+    /// When this pattern started (global clock beat)
+    pattern_start_beat: f64,
+    /// Total duration of the pattern in beats (cached from evaluation)
+    pattern_duration_beats: f32,
+    /// Whether this pattern loops
+    looping: bool,
+}
+
+impl PlaybackCursor {
+    fn new(start_beat: f64, duration_beats: f32, looping: bool) -> Self {
+        Self {
+            pattern_start_beat: start_beat,
+            pattern_duration_beats: duration_beats,
+            looping,
+        }
+    }
+
+    /// Calculate the effective position within the pattern at the given beat
+    /// Returns (local_beat, wrapped_for_loop)
+    fn get_position(&self, current_beat: f64) -> (f32, bool) {
+        let local_beat = (current_beat - self.pattern_start_beat) as f32;
+
+        if self.looping && self.pattern_duration_beats > 0.0 {
+            let wrapped = local_beat % self.pattern_duration_beats;
+            let did_wrap = local_beat >= self.pattern_duration_beats;
+            (wrapped, did_wrap)
+        } else {
+            (local_beat, false)
+        }
+    }
+
+    /// Check if the pattern has completed (for non-looping patterns)
+    fn is_complete(&self, current_beat: f64) -> bool {
+        if self.looping {
+            false
+        } else {
+            let local_beat = (current_beat - self.pattern_start_beat) as f32;
+            local_beat >= self.pattern_duration_beats
+        }
+    }
+}
+
 /// Internal playback loop that runs in a dedicated thread
 ///
 /// Uses crossbeam select! to wait on both clock ticks and commands simultaneously.
@@ -375,6 +421,14 @@ struct PlaybackLoop {
 
     /// Last error message (for deduplication - only show unique errors)
     last_error: Option<String>,
+
+    // Step-sequencer state (new)
+    /// Cursor for tracking pattern position (enables phase preservation)
+    cursor: Option<PlaybackCursor>,
+    /// Cached evaluated events for current cycle (reduces lock contention)
+    cached_events: Vec<(Vec<f32>, f32)>,
+    /// Cycle number when cache was populated
+    cache_cycle: usize,
 }
 
 impl PlaybackLoop {
@@ -405,6 +459,9 @@ impl PlaybackLoop {
             gap_end_beat: 0.0,
             active_midi_notes: Vec::new(),
             last_error: None,
+            cursor: None,
+            cached_events: Vec::new(),
+            cache_cycle: 0,
         }
     }
 
@@ -507,6 +564,20 @@ impl PlaybackLoop {
         match cmd {
             PlaybackCommand::PlayProgression(config) => {
                 // Immediate switch - reset position and start new progression
+                // Initialize cursor and cache for step-sequencer behavior
+                let looping = config.loop_count.is_none();
+
+                // Pre-evaluate to get duration (cache it for timing consistency)
+                if let Ok(events) = config.source.evaluate() {
+                    let duration: f32 = events.iter().map(|(_, d)| d).sum();
+                    self.cached_events = events;
+                    self.cache_cycle = 0;
+                    self.cursor = Some(PlaybackCursor::new(0.0, duration, looping));
+                } else {
+                    self.cached_events.clear();
+                    self.cursor = None;
+                }
+
                 self.current_progression = Some(config);
                 self.pending_queue.clear();
                 self.chord_index = 0;
@@ -527,6 +598,9 @@ impl PlaybackLoop {
                 // Set notes to empty to trigger ADSR release - don't mute volume immediately
                 let _ = self.audio_handle.set_track_notes(self.track_id, vec![]);
                 self.audio_started = false;
+                // Clear cursor and cache
+                self.cursor = None;
+                self.cached_events.clear();
             }
             PlaybackCommand::SetVolume(vol) => {
                 let _ = self.audio_handle.set_track_volume(self.track_id, vol);
@@ -762,21 +836,13 @@ impl PlaybackLoop {
     }
 
     /// Evaluate the current pattern, handling cycle advancement properly.
-    /// This ensures _cycle is updated BEFORE evaluation so every() sees the correct value.
+    /// Uses cached events to reduce lock contention - only re-evaluates on cycle change.
     fn evaluate_with_cycle_check(
         &mut self,
         config: &ProgressionConfig,
     ) -> Result<Vec<(Vec<f32>, f32)>> {
-        // First, do a "peek" evaluation to check if we're at end of pattern
-        // Update environment with current cycle before initial evaluation
-        config
-            .source
-            .update_environment("_cycle", Value::Number(self.iteration as i32))?;
-
-        let mut frequencies = config.source.evaluate()?;
-
-        // Check if we've reached end of progression and need to wrap
-        if self.chord_index >= frequencies.len() {
+        // Check if we've reached end of pattern and need to wrap
+        if self.chord_index >= self.cached_events.len() {
             self.chord_index = 0;
             self.iteration += 1;
 
@@ -798,17 +864,27 @@ impl PlaybackLoop {
                     return Err(anyhow::anyhow!("Progression complete"));
                 }
             }
+        }
 
-            // CRITICAL: Update _cycle to NEW value, then re-evaluate
-            // This is what makes every(2, "rev", pat) work correctly
+        // Only re-evaluate if cycle changed (reduces RwLock contention significantly)
+        if self.iteration != self.cache_cycle {
+            // Update _cycle in environment BEFORE evaluation
             config
                 .source
                 .update_environment("_cycle", Value::Number(self.iteration as i32))?;
 
-            frequencies = config.source.evaluate()?;
+            // Re-evaluate and cache
+            self.cached_events = config.source.evaluate()?;
+            self.cache_cycle = self.iteration;
+
+            // Update cursor duration if pattern length changed (for phase preservation)
+            if let Some(ref mut cursor) = self.cursor {
+                let new_duration: f32 = self.cached_events.iter().map(|(_, d)| d).sum();
+                cursor.pattern_duration_beats = new_duration;
+            }
         }
 
-        Ok(frequencies)
+        Ok(self.cached_events.clone())
     }
 }
 
