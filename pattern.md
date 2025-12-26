@@ -21,3 +21,17 @@ let middle = [[F7], [C6], [C2], [F7]];
 play smooth_voice_leading(big)
 
 let down = "C E G".fast(2).rev();
+
+
+
+// Define a function
+fn jazz_comp(key) {
+    return ii_V_I(key).wave("saw").env("pluck")
+}
+// Use it
+play jazz_comp(C) loop
+play jazz_comp(G) loop
+
+
+play "C E G".wave("saw") loop
+track 1 { play "C E G".wave("square") loop }

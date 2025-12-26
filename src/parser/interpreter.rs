@@ -34,6 +34,8 @@ pub enum InterpreterAction {
     SetTempo(f32),
     /// Set the volume for a specific track (0.0-1.0)
     SetVolume { volume: f32, track_id: usize },
+    /// Set the waveform for a specific track
+    SetWaveform { waveform: String, track_id: usize },
     /// Stop playback (specific track or all)
     Stop { track_id: Option<usize> },
 }
@@ -156,6 +158,15 @@ impl Interpreter {
                     vol * 100.0,
                     self.current_track
                 );
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::Waveform(name) => {
+                self.actions.push(InterpreterAction::SetWaveform {
+                    waveform: name.clone(),
+                    track_id: self.current_track,
+                });
+                println!("Waveform set to {} (Track {})", name, self.current_track);
                 Ok(ControlFlow::Normal)
             }
 

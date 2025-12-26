@@ -63,6 +63,9 @@ pub enum Statement {
     /// Set volume: volume 0.5
     Volume(f32),
 
+    /// Set waveform: waveform "sine"
+    Waveform(String),
+
     /// Infinite loop: loop { ... }
     Loop { body: Vec<Statement> },
 
@@ -132,6 +135,7 @@ impl fmt::Display for Statement {
             Statement::Stop => write!(f, "stop"),
             Statement::Tempo(bpm) => write!(f, "tempo {}", bpm),
             Statement::Volume(vol) => write!(f, "volume {}", vol),
+            Statement::Waveform(name) => write!(f, "waveform \"{}\"", name),
             Statement::Loop { .. } => write!(f, "loop {{ ... }}"),
             Statement::Repeat { count, .. } => write!(f, "repeat {} {{ ... }}", count),
             Statement::If { .. } => write!(f, "if ... {{ ... }}"),

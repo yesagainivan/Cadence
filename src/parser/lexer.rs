@@ -49,6 +49,7 @@ pub enum Token {
     Stop,     // stop
     Tempo,    // tempo
     Volume,   // volume
+    Waveform, // waveform
     Queue,    // queue
     Load,     // load
     Track,    // track
@@ -102,6 +103,7 @@ impl fmt::Display for Token {
             Token::Stop => write!(f, "stop"),
             Token::Tempo => write!(f, "tempo"),
             Token::Volume => write!(f, "volume"),
+            Token::Waveform => write!(f, "waveform"),
             Token::Queue => write!(f, "queue"),
             Token::Load => write!(f, "load"),
             Token::Track => write!(f, "track"),
@@ -578,6 +580,7 @@ impl Lexer {
                         "stop" => Token::Stop,
                         "tempo" => Token::Tempo,
                         "volume" => Token::Volume,
+                        "waveform" => Token::Waveform,
                         "queue" => Token::Queue,
                         "load" => Token::Load,
                         "track" => Token::Track,

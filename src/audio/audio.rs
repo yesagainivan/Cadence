@@ -113,6 +113,8 @@ impl AudioPlayerInternal {
         let mut oscillators: Vec<EnvelopedOscillator> = Vec::new();
         // Track current frequencies per track: Map<TrackId, Vec<Freq>>
         let mut track_frequencies: HashMap<usize, Vec<f32>> = HashMap::new();
+        // Track current waveforms per track to detect changes
+        let mut track_waveforms: HashMap<usize, Waveform> = HashMap::new();
 
         let mut master_amplitude: f32 = 0.0;
         // Master fade rate should match or exceed ADSR release time (200ms default)
@@ -143,14 +145,19 @@ impl AudioPlayerInternal {
                     // Check for changes in each track
                     for (track_id, track_state) in &state.tracks {
                         let current = track_frequencies.entry(*track_id).or_default();
+                        let current_waveform = track_waveforms
+                            .entry(*track_id)
+                            .or_insert(Waveform::default());
 
-                        // If notes changed for this track
-                        if current.len() != track_state.notes.len()
+                        // If notes changed OR waveform changed for this track
+                        let notes_changed = current.len() != track_state.notes.len()
                             || current
                                 .iter()
                                 .zip(track_state.notes.iter())
-                                .any(|(a, b)| (a - b).abs() > 0.01)
-                        {
+                                .any(|(a, b)| (a - b).abs() > 0.01);
+                        let waveform_changed = *current_waveform != track_state.waveform;
+
+                        if notes_changed || waveform_changed {
                             // Fade out old oscillators for this track
                             for osc in oscillators.iter_mut().filter(|o| o.track_id == *track_id) {
                                 osc.start_fade_out();
@@ -169,6 +176,7 @@ impl AudioPlayerInternal {
 
                             // Update cache
                             *current = track_state.notes.clone();
+                            *current_waveform = track_state.waveform;
                         }
                     }
 

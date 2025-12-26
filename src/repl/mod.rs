@@ -243,6 +243,23 @@ impl Repl {
                     println!("{} {} (Track {})", "Volume error:".red(), e, track_id);
                 }
             }
+            InterpreterAction::SetWaveform { waveform, track_id } => {
+                // Parse waveform name and set it on the audio handle
+                use crate::audio::oscillator::Waveform;
+                if let Some(wf) = Waveform::from_str(&waveform) {
+                    if let Err(e) = self.audio_handle.set_track_waveform(track_id, wf) {
+                        println!("{} {} (Track {})", "Waveform error:".red(), e, track_id);
+                    }
+                    // Already printed by interpreter
+                } else {
+                    println!(
+                        "{} Unknown waveform: {} (Track {})",
+                        "Waveform error:".red(),
+                        waveform,
+                        track_id
+                    );
+                }
+            }
             InterpreterAction::Stop { track_id } => {
                 match track_id {
                     Some(id) => {

@@ -115,6 +115,7 @@ impl StatementParser {
             }
             Token::Tempo => self.parse_tempo_statement(),
             Token::Volume => self.parse_volume_statement(),
+            Token::Waveform => self.parse_waveform_statement(),
             Token::Load => self.parse_load_statement(),
             Token::Fn => self.parse_function_def(),
             Token::Track => self.parse_track_statement(),
@@ -259,6 +260,24 @@ impl StatementParser {
         self.advance();
 
         Ok(Statement::Volume(vol))
+    }
+
+    /// Parse: waveform "sine" | "saw" | "square" | "triangle"
+    fn parse_waveform_statement(&mut self) -> Result<Statement> {
+        self.expect(&Token::Waveform)?;
+
+        let name = match self.current().clone() {
+            Token::StringLiteral(s) => s,
+            Token::Identifier(s) => s, // Also allow: waveform sine (without quotes)
+            _ => {
+                return Err(anyhow!(
+                    "Expected waveform name (sine, saw, square, triangle)"
+                ));
+            }
+        };
+        self.advance();
+
+        Ok(Statement::Waveform(name))
     }
 
     /// Parse: load "path/to/file.cadence"

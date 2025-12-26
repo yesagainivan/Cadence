@@ -8,3 +8,6 @@
 # Other
 *.bin
 *.DS_Store
+
+# all zip files
+*.zip
