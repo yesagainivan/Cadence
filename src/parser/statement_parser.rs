@@ -116,6 +116,7 @@ impl StatementParser {
             Token::Tempo => self.parse_tempo_statement(),
             Token::Volume => self.parse_volume_statement(),
             Token::Load => self.parse_load_statement(),
+            Token::Fn => self.parse_function_def(),
             Token::Track => self.parse_track_statement(),
             Token::On => self.parse_track_statement(), // 'on N' is alias for 'track N'
             Token::Loop => self.parse_loop_statement(),
@@ -271,6 +272,53 @@ impl StatementParser {
         self.advance();
 
         Ok(Statement::Load(path))
+    }
+
+    /// Parse: fn name(param1, param2, ...) { body }
+    fn parse_function_def(&mut self) -> Result<Statement> {
+        self.expect(&Token::Fn)?;
+
+        // Parse function name
+        let name = match self.current().clone() {
+            Token::Identifier(name) => name,
+            _ => return Err(anyhow!("Expected function name after 'fn'")),
+        };
+        self.advance();
+
+        // Parse parameter list
+        self.expect(&Token::LeftParen)?;
+        let mut params = Vec::new();
+
+        // Handle empty parameter list
+        if !matches!(self.current(), Token::RightParen) {
+            // Parse first parameter
+            match self.current().clone() {
+                Token::Identifier(param) => {
+                    params.push(param);
+                    self.advance();
+                }
+                _ => return Err(anyhow!("Expected parameter name")),
+            }
+
+            // Parse remaining parameters
+            while matches!(self.current(), Token::Comma) {
+                self.advance(); // consume ','
+                match self.current().clone() {
+                    Token::Identifier(param) => {
+                        params.push(param);
+                        self.advance();
+                    }
+                    _ => return Err(anyhow!("Expected parameter name after ','")),
+                }
+            }
+        }
+
+        self.expect(&Token::RightParen)?;
+
+        // Parse function body
+        let body = self.parse_block()?;
+
+        Ok(Statement::FunctionDef { name, params, body })
     }
 
     /// Parse: track <n> <statement> (or block)

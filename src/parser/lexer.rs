@@ -37,6 +37,7 @@ pub enum Token {
 
     // Keywords
     Let,      // let
+    Fn,       // fn (function definition)
     Loop,     // loop
     Repeat,   // repeat
     If,       // if
@@ -89,6 +90,7 @@ impl fmt::Display for Token {
             Token::DoubleEquals => write!(f, "=="),
             Token::NotEquals => write!(f, "!="),
             Token::Let => write!(f, "let"),
+            Token::Fn => write!(f, "fn"),
             Token::Loop => write!(f, "loop"),
             Token::Repeat => write!(f, "repeat"),
             Token::If => write!(f, "if"),
@@ -564,6 +566,7 @@ impl Lexer {
                     // Check for keywords
                     let token = match identifier.as_str() {
                         "let" => Token::Let,
+                        "fn" => Token::Fn,
                         "loop" => Token::Loop,
                         "repeat" => Token::Repeat,
                         "if" => Token::If,

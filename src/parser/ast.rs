@@ -96,6 +96,13 @@ pub enum Statement {
 
     /// Track selector: track 1 { ... } or track 1 play ...
     Track { id: usize, body: Box<Statement> },
+
+    /// Function definition: fn name(param1, param2) { body }
+    FunctionDef {
+        name: String,
+        params: Vec<String>,
+        body: Vec<Statement>,
+    },
 }
 
 impl fmt::Display for Statement {
@@ -136,6 +143,9 @@ impl fmt::Display for Statement {
             Statement::Comment(text) => write!(f, "// {}", text),
             Statement::Block(_) => write!(f, "{{ ... }}"),
             Statement::Track { id, body } => write!(f, "track {} {}", id, body),
+            Statement::FunctionDef { name, params, .. } => {
+                write!(f, "fn {}({}) {{ ... }}", name, params.join(", "))
+            }
         }
     }
 }
@@ -230,6 +240,12 @@ pub enum Value {
     Pattern(Pattern),
     Number(i32),
     String(String),
+    /// User-defined function
+    Function {
+        name: String,
+        params: Vec<String>,
+        body: Vec<Statement>,
+    },
 }
 
 impl fmt::Display for Expression {
@@ -293,6 +309,9 @@ impl fmt::Display for Value {
             Value::Pattern(pattern) => write!(f, "{}", pattern),
             Value::Number(n) => write!(f, "{}", n),
             Value::String(s) => write!(f, "\"{}\"", s),
+            Value::Function { name, params, .. } => {
+                write!(f, "<fn {}({})>", name, params.join(", "))
+            }
         }
     }
 }

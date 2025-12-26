@@ -197,6 +197,12 @@ fn get_frequencies_from_value(value: &Value) -> anyhow::Result<Vec<f32>> {
         Value::Boolean(_) => return Err(anyhow::anyhow!("Cannot play a boolean")),
         Value::Number(_) => return Err(anyhow::anyhow!("Cannot play a number")),
         Value::String(_) => return Err(anyhow::anyhow!("Cannot play a string")),
+        Value::Function { name, .. } => {
+            return Err(anyhow::anyhow!(
+                "Cannot play a function '{}' - call it first",
+                name
+            ));
+        }
     }
 
     Ok(frequencies)

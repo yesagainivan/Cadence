@@ -62,8 +62,8 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] `if condition { ... } else { ... }` (parsing done)
 - [ ] Pattern matching on chord qualities
 
-### 2.3 Functions
-- [ ] User-defined functions: `fn my_pattern(key) { ... }`
+### 2.3 Functions ✅
+- [x] User-defined functions: `fn my_pattern(key) { ... }`
 - [ ] Higher-order functions (map, filter)
 - [ ] Closures for pattern capture
 

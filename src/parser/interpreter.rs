@@ -327,6 +327,21 @@ impl Interpreter {
                 self.environment.write().unwrap().pop_scope();
                 Ok(ControlFlow::Normal)
             }
+
+            Statement::FunctionDef { name, params, body } => {
+                // Store the function as a Value::Function in the environment
+                let func_value = Value::Function {
+                    name: name.clone(),
+                    params: params.clone(),
+                    body: body.clone(),
+                };
+                self.environment
+                    .write()
+                    .unwrap()
+                    .define(name.clone(), func_value);
+                println!("Defined function: {}({})", name, params.join(", "));
+                Ok(ControlFlow::Normal)
+            }
         }
     }
 

@@ -1,5 +1,5 @@
 use crate::{
-    parser::ast::{Expression, Value},
+    parser::ast::{Expression, Statement, Value},
     types::{Chord, CommonProgressions, Note, RomanNumeral, VoiceLeading, analyze_progression},
 };
 // use crate::types::{chord::Chord, note::Note};
@@ -49,6 +49,7 @@ impl Evaluator {
                     Value::Boolean(_) => Err(anyhow!("Cannot transpose a boolean value")),
                     Value::Number(_) => Err(anyhow!("Cannot transpose a number")),
                     Value::String(_) => Err(anyhow!("Cannot transpose a string")),
+                    Value::Function { .. } => Err(anyhow!("Cannot transpose a function")),
                 }
             }
             Expression::Intersection { left, right } => {
@@ -124,6 +125,69 @@ impl Evaluator {
         args: Vec<Expression>,
         env: Option<&crate::parser::environment::Environment>,
     ) -> Result<Value> {
+        // First, check for user-defined functions in the environment
+        if let Some(environment) = env {
+            if let Some(func_value) = environment.get(name) {
+                if let Value::Function {
+                    params,
+                    body,
+                    name: func_name,
+                } = func_value.clone()
+                {
+                    // Check argument count
+                    if args.len() != params.len() {
+                        return Err(anyhow!(
+                            "{}() expects {} arguments, got {}",
+                            func_name,
+                            params.len(),
+                            args.len()
+                        ));
+                    }
+
+                    // Evaluate arguments
+                    let mut arg_values = Vec::new();
+                    for arg in args {
+                        arg_values.push(self.eval_with_env(arg, env)?);
+                    }
+
+                    // Create a new environment with parameters bound to argument values
+                    let mut local_env = crate::parser::environment::Environment::new();
+
+                    // Copy outer environment bindings
+                    for var_name in environment.all_names() {
+                        if let Some(val) = environment.get(var_name) {
+                            local_env.define(var_name.clone(), val.clone());
+                        }
+                    }
+
+                    // Push new scope for locals
+                    local_env.push_scope();
+
+                    // Bind parameters to arguments
+                    for (param, value) in params.iter().zip(arg_values.into_iter()) {
+                        local_env.define(param.clone(), value);
+                    }
+
+                    // Execute body and look for return value
+                    let mut result = None;
+                    for stmt in &body {
+                        // For now, we only support return statements with expressions
+                        if let Statement::Return(Some(expr)) = stmt {
+                            result = Some(self.eval_with_env(expr.clone(), Some(&local_env))?);
+                            break;
+                        }
+                        // For expression statements, capture the result
+                        if let Statement::Expression(expr) = stmt {
+                            result = Some(self.eval_with_env(expr.clone(), Some(&local_env))?);
+                        }
+                    }
+
+                    return result
+                        .ok_or_else(|| anyhow!("Function {} did not return a value", func_name));
+                }
+            }
+        }
+
         match name {
             // Enhanced progression handling with smart pattern detection
             name if CommonProgressions::is_valid_progression(name)

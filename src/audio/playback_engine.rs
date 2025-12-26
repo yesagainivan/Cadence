@@ -92,6 +92,10 @@ impl PlaybackSource {
             }
             Value::Boolean(_) => Err(anyhow::anyhow!("Cannot play a boolean value")),
             Value::Number(_) => Err(anyhow::anyhow!("Cannot play a raw number")),
+            Value::Function { name, .. } => Err(anyhow::anyhow!(
+                "Cannot play a function '{}' - call it first",
+                name
+            )),
         }
     }
 
