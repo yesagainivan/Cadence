@@ -202,16 +202,6 @@ impl Evaluator {
                 if let Value::Note(key) = key_value {
                     let pattern = CommonProgressions::get_progression(name, key)?;
 
-                    // Enhanced display message with smart formatting
-                    let display_name = if CommonProgressions::is_numeric_progression(name) {
-                        Self::format_numeric_progression_name(name)
-                    } else if CommonProgressions::is_roman_numeral_progression(name) {
-                        name.to_string() // Roman numerals display as-is
-                    } else {
-                        name.replace("_", "-")
-                    };
-
-                    println!("Generated {} progression in {}", display_name, key);
                     Ok(Value::Pattern(pattern))
                 } else {
                     Err(anyhow!("Progression {} expects a key (note)", name))
@@ -587,7 +577,6 @@ impl Evaluator {
                                 CommonProgressions::get_progression(&underscore_name, key)
                             })?;
 
-                        println!("Generated {} progression in {}", prog_name, key);
                         Ok(Value::Pattern(pattern))
                     } else {
                         Err(anyhow!("progression() expects (name, key)"))
