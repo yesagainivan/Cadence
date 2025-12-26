@@ -1,11 +1,4 @@
-/**
- * Cadence Audio Engine
- * 
- * Web Audio API-based audio engine for playing Cadence patterns.
- * Uses OscillatorNodes with GainNode envelopes for synthesis.
- */
-
-import type { PlayEvent, Action } from './cadence-wasm';
+import { type PlayEvent, type Action, WasmInterpreter } from './cadence-wasm';
 
 /** ADSR envelope parameters */
 export interface AdsrParams {
@@ -35,6 +28,7 @@ export class CadenceAudioEngine {
     private isPlaying: boolean = false;
     private activeOscillators: ActiveOscillator[] = [];
     private scheduledTimeouts: number[] = [];
+    private interpreter: WasmInterpreter | null = null;
 
     // Default ADSR (more pronounced for audibility)
     private adsr: AdsrParams = {
@@ -145,101 +139,120 @@ export class CadenceAudioEngine {
     }
 
     /**
-     * Play a list of events (from pattern)
+     * Play script reactively using WasmInterpreter
      */
-    playEvents(
-        events: PlayEvent[],
-        looping: boolean = false,
-        customEnvelope?: [number, number, number, number] | null,
-        customWaveform?: string | null,
-    ): void {
-        // Stop any previous playback first
+    playScript(code: string): void {
+        // Stop previous playback
         this.stop();
-
-        // Apply custom waveform if provided
-        if (customWaveform) {
-            this.setWaveform(customWaveform);
-        }
-
-        // Apply custom envelope if provided  
-        if (customEnvelope) {
-            this.adsr = {
-                attack: customEnvelope[0],
-                decay: customEnvelope[1],
-                sustain: customEnvelope[2],
-                release: customEnvelope[3],
-            };
-            console.log(`🎹 Envelope: A=${customEnvelope[0]} D=${customEnvelope[1]} S=${customEnvelope[2]} R=${customEnvelope[3]}`);
-        }
 
         const ctx = this.ensureContext();
         this.isPlaying = true;
 
-        // Calculate cycle duration in seconds
-        let cycleDuration = 0;
-        for (const event of events) {
-            cycleDuration += this.beatsToSeconds(event.duration);
+        // Initialize interpreter
+        if (!this.interpreter) {
+            this.interpreter = new WasmInterpreter();
         }
 
-        // Track the absolute time where the next cycle should start
-        let nextCycleStart = ctx.currentTime + 0.05; // Small initial buffer
+        // Load code and get initial actions - this also pre-populates env including _cycle=0
+        const result = this.interpreter.load(code);
 
-        /**
-         * Schedule one complete cycle of events starting at the given time
-         */
-        const scheduleCycle = (startTime: number): void => {
-            let time = startTime;
+        // Process initial actions (like Setup)
+        if (result.actions) {
+            for (const action of result.actions) {
+                // If it's a Play action from load(), it's the beat 0 event
+                // We should schedule it immediately
+                this.handleAction(action as Action, ctx.currentTime);
+            }
+        }
 
-            for (const event of events) {
-                const durationSec = this.beatsToSeconds(event.duration);
+        // Start scheduler loop starting from next beat
+        // Current cycle 0 actions were already handled above.
+        // We need to advance to next beat.
 
-                if (!event.is_rest && event.frequencies.length > 0) {
-                    for (const freq of event.frequencies) {
-                        this.scheduleNote(freq, time, durationSec);
+        const LOOKAHEAD = 0.1; // 100ms
+        const SCHEDULE_INTERVAL = 25; // 25ms
+        let nextBeatTime = ctx.currentTime + (60 / this.tempo); // Start next beat after 1 beat duration
+
+        const scheduler = () => {
+            if (!this.isPlaying || !this.interpreter) return;
+
+            const now = ctx.currentTime;
+
+            // Schedule beats that fall within lookahead window
+            while (nextBeatTime < now + LOOKAHEAD) {
+                // Tick interpreter for this beat (advances cycle)
+                const result = this.interpreter.tick();
+
+                if (result.actions) {
+                    for (const action of result.actions) {
+                        this.handleAction(action as Action, nextBeatTime);
                     }
                 }
 
-                time += durationSec;
+                // Advance by 1 beat
+                const beatDuration = 60 / this.tempo;
+                nextBeatTime += beatDuration;
             }
-        };
 
-        // Schedule the first cycle
-        scheduleCycle(nextCycleStart);
-
-        if (looping) {
-            // Lookahead scheduler: checks every 100ms and schedules notes ahead
-            const LOOKAHEAD = 0.2; // Schedule 200ms ahead
-            const SCHEDULE_INTERVAL = 100; // Check every 100ms
-
-            const scheduler = (): void => {
-                if (!this.isPlaying) return;
-
-                const ctx = this.ensureContext();
-                const now = ctx.currentTime;
-
-                // Schedule cycles that fall within our lookahead window
-                while (nextCycleStart < now + LOOKAHEAD) {
-                    nextCycleStart += cycleDuration;
-                    scheduleCycle(nextCycleStart);
-                }
-
-                const timeoutId = window.setTimeout(scheduler, SCHEDULE_INTERVAL);
-                this.scheduledTimeouts.push(timeoutId);
-            };
-
-            // Start the scheduler after a short delay
             const timeoutId = window.setTimeout(scheduler, SCHEDULE_INTERVAL);
             this.scheduledTimeouts.push(timeoutId);
+        };
+
+        const timeoutId = window.setTimeout(scheduler, SCHEDULE_INTERVAL);
+        this.scheduledTimeouts.push(timeoutId);
+    }
+
+    /**
+     * Update running script without resetting cycle (for live coding)
+     */
+    updateScript(code: string): void {
+        if (!this.isPlaying || !this.interpreter) return;
+
+        // Call update on interpreter (preserves cycle count)
+        const result = this.interpreter.update(code);
+
+        // Handle any immediate actions from update (e.g. tempo change)
+        if (result.actions) {
+            const ctx = this.ensureContext();
+            for (const action of result.actions) {
+                // Only handle basic state changes immediately, ignore Play actions 
+                // as they will be picked up by the next tick()
+                if (action.type !== 'Play') {
+                    this.handleAction(action as Action, ctx.currentTime);
+                }
+            }
         }
     }
 
     /**
      * Handle an action from the interpreter
      */
-    handleAction(action: Action): void {
+    handleAction(action: Action, startTime: number): void {
         switch (action.type) {
             case 'Play':
-                this.playEvents(action.events, action.looping, action.envelope, action.waveform);
+                // Apply custom waveform/envelope
+                if (action.waveform) this.setWaveform(action.waveform);
+                if (action.envelope) {
+                    this.adsr = {
+                        attack: action.envelope[0],
+                        decay: action.envelope[1],
+                        sustain: action.envelope[2],
+                        release: action.envelope[3],
+                    };
+                    // console.log(`🎹 Envelope: ${this.adsr.attack}/${this.adsr.decay}/${this.adsr.sustain}/${this.adsr.release}`);
+                }
+
+                // Schedule events relative to beat start time
+                let time = startTime;
+                for (const event of action.events) {
+                    const durationSec = this.beatsToSeconds(event.duration);
+                    if (!event.is_rest && event.frequencies.length > 0) {
+                        for (const freq of event.frequencies) {
+                            this.scheduleNote(freq, time, durationSec);
+                        }
+                    }
+                    time += durationSec;
+                }
                 break;
             case 'SetTempo':
                 this.setTempo(action.bpm);

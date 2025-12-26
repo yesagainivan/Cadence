@@ -13,7 +13,7 @@ import { bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { cadenceWasm } from './lang-cadence-wasm';
-import { initWasm, parseCode, isWasmReady, runScript, type Action } from './cadence-wasm';
+import { initWasm, parseCode, isWasmReady } from './cadence-wasm';
 import { audioEngine } from './audio-engine';
 
 // Sample Cadence code
@@ -149,19 +149,24 @@ function scheduleValidation(view: EditorView): void {
   }
 
   validationTimer = window.setTimeout(() => {
-    validateCode(view);
+    const result = validateCode(view);
+    // Live update if valid and playing
+    if (result && result.success && audioEngine.playing) {
+      const code = view.state.doc.toString();
+      audioEngine.updateScript(code);
+    }
   }, 200);
 }
 
 /**
  * Validate code using WASM parser
  */
-function validateCode(view: EditorView): void {
+function validateCode(view: EditorView): ReturnType<typeof parseCode> | null {
   const statusEl = document.getElementById('status');
 
   if (!isWasmReady()) {
     if (statusEl) statusEl.textContent = 'WASM loading...';
-    return;
+    return null;
   }
 
   const code = view.state.doc.toString();
@@ -176,6 +181,8 @@ function validateCode(view: EditorView): void {
       statusEl.style.color = '#e94560';
     }
   }
+
+  return result;
 }
 
 /**
@@ -193,25 +200,7 @@ function log(message: string): void {
 /**
  * Log an action to the output panel
  */
-function logAction(action: Action): void {
-  switch (action.type) {
-    case 'Play':
-      log(`  ▶ Play: ${action.events.length} event(s), loop=${action.looping}`);
-      break;
-    case 'SetTempo':
-      log(`  🎵 Tempo: ${action.bpm} BPM`);
-      break;
-    case 'SetVolume':
-      log(`  🔊 Volume: ${(action.volume * 100).toFixed(0)}%`);
-      break;
-    case 'SetWaveform':
-      log(`  📈 Waveform: ${action.waveform}`);
-      break;
-    case 'Stop':
-      log(`  ⏹ Stop`);
-      break;
-  }
-}
+
 
 /**
  * Initialize the editor and UI
@@ -243,21 +232,9 @@ async function init(): Promise<void> {
   playBtn?.addEventListener('click', () => {
     const code = editor.state.doc.toString();
 
-    // Run the script via WASM interpreter
-    const result = runScript(code);
-    if (!result.success) {
-      log(`✗ Cannot play: ${result.error}`);
-      return;
-    }
-
+    // Play script reactively
     log('▶ Playing...');
-    log(`📋 ${result.actions.length} action(s) from script`);
-
-    // Route each action to the audio engine
-    for (const action of result.actions) {
-      logAction(action);
-      audioEngine.handleAction(action);
-    }
+    audioEngine.playScript(code);
   });
 
   // Stop button

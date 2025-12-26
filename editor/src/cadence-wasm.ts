@@ -5,7 +5,7 @@
  * providing access to tokenization and parsing functions.
  */
 
-import init, { tokenize, parse_and_check, run_script } from './wasm/cadence_core.js';
+import init, { tokenize, parse_and_check, run_script, WasmInterpreter } from './wasm/cadence_core.js';
 
 export interface HighlightSpan {
     start_line: number;
@@ -166,4 +166,4 @@ export function runScript(input: string): ScriptResult {
 }
 
 // Re-export for convenience
-export { tokenize, parse_and_check, run_script };
+export { tokenize, parse_and_check, run_script, WasmInterpreter };
