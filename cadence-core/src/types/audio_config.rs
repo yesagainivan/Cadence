@@ -110,6 +110,8 @@ pub enum QueueMode {
     Bar,
     /// Start when current pattern completes its cycle
     Cycle,
+    /// Start after exactly N beats from now
+    Beats(u32),
 }
 
 #[cfg(test)]

@@ -544,6 +544,7 @@ impl PlaybackLoop {
                     QueueMode::Beat => tick.is_beat_boundary(),
                     QueueMode::Bar => tick.is_bar_boundary(),
                     QueueMode::Cycle => tick.is_beat_boundary(), // No cycle to wait for, use beat
+                    QueueMode::Beats(_) => tick.is_beat_boundary(), // Will be tracked separately
                 };
                 if should_start {
                     if let Some((next_config, _)) = self.pending_queue.pop_front() {
@@ -698,8 +699,8 @@ impl PlaybackLoop {
             // Check the sync mode of the next queued item
             if let Some((_, mode)) = self.pending_queue.front() {
                 let should_switch = match mode {
-                    // Beat and Bar modes: switch immediately (already at a beat/bar from handle_tick)
-                    QueueMode::Beat | QueueMode::Bar => true,
+                    // Beat, Bar, and Beats modes: switch immediately (already at a beat/bar from handle_tick)
+                    QueueMode::Beat | QueueMode::Bar | QueueMode::Beats(_) => true,
                     // Cycle mode: only switch at end of pattern cycle (chord_index about to wrap)
                     QueueMode::Cycle => false, // Will be handled in evaluate_with_cycle_check
                 };

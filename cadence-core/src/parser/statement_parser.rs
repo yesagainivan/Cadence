@@ -199,21 +199,29 @@ impl StatementParser {
                 }
                 Token::Queue => {
                     self.advance();
-                    // Check for optional mode: beat, bar, cycle
-                    if let Token::Identifier(mode) = self.current() {
-                        match mode.as_str() {
-                            "beat" | "bar" | "cycle" => {
-                                queue_mode = Some(mode.clone());
-                                self.advance();
-                            }
-                            _ => {
-                                // Not a mode, default to beat
-                                queue_mode = Some("beat".to_string());
+                    // Check for optional mode: beat, bar, cycle, or number (beats:N)
+                    match self.current() {
+                        Token::Identifier(mode) => {
+                            match mode.as_str() {
+                                "beat" | "bar" | "cycle" => {
+                                    queue_mode = Some(mode.clone());
+                                    self.advance();
+                                }
+                                _ => {
+                                    // Not a mode, default to beat
+                                    queue_mode = Some("beat".to_string());
+                                }
                             }
                         }
-                    } else {
-                        // No mode specified, default to beat
-                        queue_mode = Some("beat".to_string());
+                        Token::Number(n) => {
+                            // queue N means wait N beats
+                            queue_mode = Some(format!("beats:{}", n));
+                            self.advance();
+                        }
+                        _ => {
+                            // No mode specified, default to beat
+                            queue_mode = Some("beat".to_string());
+                        }
                     }
                 }
                 Token::Identifier(name) if name == "duration" => {

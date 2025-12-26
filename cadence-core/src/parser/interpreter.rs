@@ -200,10 +200,21 @@ impl Interpreter {
                 // Validate expression can be evaluated (catch errors early)
                 let val = self.eval_expression(target)?;
                 // Convert string queue mode to QueueMode enum
-                let queue_mode = ast_queue_mode.as_ref().map(|mode| match mode.as_str() {
-                    "bar" => QueueMode::Bar,
-                    "cycle" => QueueMode::Cycle,
-                    _ => QueueMode::Beat, // default
+                let queue_mode = ast_queue_mode.as_ref().map(|mode| {
+                    if let Some(n_str) = mode.strip_prefix("beats:") {
+                        // Parse beats:N format
+                        n_str
+                            .parse::<u32>()
+                            .ok()
+                            .map(QueueMode::Beats)
+                            .unwrap_or(QueueMode::Beat)
+                    } else {
+                        match mode.as_str() {
+                            "bar" => QueueMode::Bar,
+                            "cycle" => QueueMode::Cycle,
+                            _ => QueueMode::Beat, // default
+                        }
+                    }
                 });
                 self.actions.push(InterpreterAction::PlayExpression {
                     expression: target.clone(),

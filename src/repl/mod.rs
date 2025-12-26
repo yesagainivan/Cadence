@@ -4,18 +4,18 @@ use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::MasterClock;
 use crate::audio::midi::MidiOutputHandle;
 use crate::audio::playback_engine::PlaybackEngine;
-use crate::commands::{CommandContext, CommandResult, create_registry};
-use crate::parser::{Interpreter, InterpreterAction, parse_statements};
+use crate::commands::{create_registry, CommandContext, CommandResult};
+use crate::parser::{parse_statements, Interpreter, InterpreterAction};
 use crate::repl::watcher::FileWatcher;
 use anyhow::Result;
 use colored::*;
-use crossbeam_channel::{Receiver, Sender, unbounded};
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use notify::Event;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result as RustylineResult};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 use std::thread;
 
 pub mod watcher;
@@ -212,6 +212,17 @@ impl Repl {
                             crate::audio::playback_engine::QueueMode::Beat => "next beat",
                             crate::audio::playback_engine::QueueMode::Bar => "next bar",
                             crate::audio::playback_engine::QueueMode::Cycle => "next cycle",
+                            crate::audio::playback_engine::QueueMode::Beats(n) => {
+                                // Use a static str for common cases, format for others
+                                match n {
+                                    1 => "1 beat",
+                                    2 => "2 beats",
+                                    4 => "4 beats",
+                                    8 => "8 beats",
+                                    16 => "16 beats",
+                                    _ => "N beats",
+                                }
+                            }
                         };
                         println!(
                             "🔁 Queued {} for {}... (Track {})",
@@ -369,25 +380,23 @@ impl Repl {
         let mut editor = self.editor.take().expect("Repl editor missing");
         let tx_input = self.tx_input.clone();
 
-        thread::spawn(move || {
-            loop {
-                let prompt = format!("{} ", "cadence>".bright_magenta().bold());
-                let readline = editor.readline(&prompt);
+        thread::spawn(move || loop {
+            let prompt = format!("{} ", "cadence>".bright_magenta().bold());
+            let readline = editor.readline(&prompt);
 
-                match readline {
-                    Ok(line) => {
-                        let line = line.trim().to_string();
-                        if !line.is_empty() {
-                            let _ = editor.add_history_entry(&line);
-                        }
-                        if tx_input.send(ReplEvent::Input(Ok(line))).is_err() {
-                            break;
-                        }
+            match readline {
+                Ok(line) => {
+                    let line = line.trim().to_string();
+                    if !line.is_empty() {
+                        let _ = editor.add_history_entry(&line);
                     }
-                    Err(err) => {
-                        let _ = tx_input.send(ReplEvent::Input(Err(err)));
+                    if tx_input.send(ReplEvent::Input(Ok(line))).is_err() {
                         break;
                     }
+                }
+                Err(err) => {
+                    let _ = tx_input.send(ReplEvent::Input(Err(err)));
+                    break;
                 }
             }
         });

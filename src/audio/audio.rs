@@ -1,8 +1,8 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, SizedSample, Stream, StreamConfig};
 use std::collections::HashMap;
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -22,6 +22,8 @@ pub struct TrackState {
     pub envelope: Option<(f32, f32, f32, f32)>,
     /// Waveform type for this track
     pub waveform: Waveform,
+    /// Force envelope retrigger on next note (for same-note sequences like [C5 C5])
+    pub retrigger: bool,
 }
 
 impl Default for TrackState {
@@ -32,6 +34,7 @@ impl Default for TrackState {
             is_playing: true,
             envelope: None,                // Use default ADSR
             waveform: Waveform::default(), // Sine by default
+            retrigger: false,
         }
     }
 }
@@ -116,6 +119,8 @@ impl AudioPlayerInternal {
         let mut track_frequencies: HashMap<usize, Vec<f32>> = HashMap::new();
         // Track current waveforms per track to detect changes
         let mut track_waveforms: HashMap<usize, Waveform> = HashMap::new();
+        // Track which retrigger flags we've already processed (to prevent infinite retrigger)
+        let mut track_retrigger_seen: HashMap<usize, bool> = HashMap::new();
 
         let mut master_amplitude: f32 = 0.0;
         // Master fade rate should match or exceed ADSR release time (200ms default)
@@ -150,7 +155,7 @@ impl AudioPlayerInternal {
                             .entry(*track_id)
                             .or_insert(Waveform::default());
 
-                        // If notes changed OR waveform changed for this track
+                        // If notes changed OR waveform changed OR retrigger requested for this track
                         let notes_changed = current.len() != track_state.notes.len()
                             || current
                                 .iter()
@@ -158,7 +163,12 @@ impl AudioPlayerInternal {
                                 .any(|(a, b)| (a - b).abs() > 0.01);
                         let waveform_changed = *current_waveform != track_state.waveform;
 
-                        if notes_changed || waveform_changed {
+                        // Check if retrigger is requested and we haven't already processed it
+                        let last_seen_retrigger =
+                            *track_retrigger_seen.get(track_id).unwrap_or(&false);
+                        let needs_retrigger = track_state.retrigger && !last_seen_retrigger;
+
+                        if notes_changed || waveform_changed || needs_retrigger {
                             // Fade out old oscillators for this track
                             for osc in oscillators.iter_mut().filter(|o| o.track_id == *track_id) {
                                 osc.start_fade_out();
@@ -179,6 +189,9 @@ impl AudioPlayerInternal {
                             *current = track_state.notes.clone();
                             *current_waveform = track_state.waveform;
                         }
+
+                        // Track the retrigger state we've seen
+                        track_retrigger_seen.insert(*track_id, track_state.retrigger);
                     }
 
                     // 2. Generate audio
@@ -249,6 +262,24 @@ impl AudioPlayerInternal {
             .lock()
             .map_err(|e| anyhow!("Lock error: {}", e))?;
         let track = state.tracks.entry(track_id).or_default();
+
+        // Check if we need to retrigger (notes are the same but new event)
+        // This handles sequences like [C5 C5] where the same note is played twice
+        let same_notes = track.notes.len() == notes.len()
+            && track
+                .notes
+                .iter()
+                .zip(notes.iter())
+                .all(|(a, b)| (a - b).abs() < 0.01);
+
+        if same_notes && !notes.is_empty() {
+            // Same notes - request retrigger
+            track.retrigger = true;
+        } else {
+            // Notes changed - reset retrigger flag so it can be set again next time
+            track.retrigger = false;
+        }
+
         track.notes = notes;
         Ok(())
     }
