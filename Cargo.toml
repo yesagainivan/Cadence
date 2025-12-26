@@ -1,9 +1,14 @@
+[workspace]
+members = [".", "cadence-core"]
+resolver = "2"
+
 [package]
 name = "cadence"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+cadence-core = { path = "cadence-core" }
 cpal = "0.15.2"
 anyhow = "1.0.98"
 clap = "4.5.41"

@@ -1,0 +1,26 @@
+[package]
+name = "cadence-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core types and parser for the Cadence music programming language (WASM-compatible)"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+
+[features]
+default = ["colored"]
+serde = ["dep:serde"]
+colored = ["dep:colored"]
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+optional = true
+
+[dependencies.colored]
+version = "3.0"
+optional = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
