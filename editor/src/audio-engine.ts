@@ -30,6 +30,9 @@ export class CadenceAudioEngine {
     private scheduledTimeouts: number[] = [];
     private interpreter: WasmInterpreter | null = null;
 
+    // Per-track volume (0-1 scale)
+    private trackVolumes: Map<number, number> = new Map();
+
     // Default ADSR (more pronounced for audibility)
     private adsr: AdsrParams = {
         attack: 0.01,    // 10ms attack
@@ -67,6 +70,22 @@ export class CadenceAudioEngine {
     }
 
     /**
+     * Set volume for a specific track (0-100 scale from Cadence)
+     */
+    setTrackVolume(trackId: number, vol: number): void {
+        // Convert 0-100 to 0-1 scale
+        const normalized = Math.max(0, Math.min(1, vol / 100));
+        this.trackVolumes.set(trackId, normalized);
+    }
+
+    /**
+     * Get volume for a track (defaults to master volume)
+     */
+    getTrackVolume(trackId: number): number {
+        return this.trackVolumes.get(trackId) ?? this.volume;
+    }
+
+    /**
      * Set the waveform type
      */
     setWaveform(type: string): void {
@@ -89,11 +108,16 @@ export class CadenceAudioEngine {
 
     /**
      * Play a single note at a specific frequency
+     * @param freq Frequency in Hz
+     * @param startTime When to start (AudioContext time)
+     * @param durationSec Duration in seconds
+     * @param noteGain Gain for this note (0-1), used to normalize chords
      */
     private scheduleNote(
         freq: number,
         startTime: number,
         durationSec: number,
+        noteGain: number = this.volume,
     ): void {
         const ctx = this.ensureContext();
 
@@ -116,11 +140,11 @@ export class CadenceAudioEngine {
         const sustainTime = peakTime + decay;
         const releaseTime = startTime + effectiveDuration;
 
-        // ADSR envelope
+        // ADSR envelope with normalized gain
         gainNode.gain.setValueAtTime(0, startTime);
-        gainNode.gain.linearRampToValueAtTime(this.volume, peakTime);
-        gainNode.gain.linearRampToValueAtTime(this.volume * sustain, sustainTime);
-        gainNode.gain.setValueAtTime(this.volume * sustain, releaseTime);
+        gainNode.gain.linearRampToValueAtTime(noteGain, peakTime);
+        gainNode.gain.linearRampToValueAtTime(noteGain * sustain, sustainTime);
+        gainNode.gain.setValueAtTime(noteGain * sustain, releaseTime);
         gainNode.gain.linearRampToValueAtTime(0, releaseTime + release);
 
         oscillator.start(startTime);
@@ -229,7 +253,7 @@ export class CadenceAudioEngine {
      */
     handleAction(action: Action, startTime: number): void {
         switch (action.type) {
-            case 'Play':
+            case 'Play': {
                 // Apply custom waveform/envelope
                 if (action.waveform) this.setWaveform(action.waveform);
                 if (action.envelope) {
@@ -239,26 +263,34 @@ export class CadenceAudioEngine {
                         sustain: action.envelope[2],
                         release: action.envelope[3],
                     };
-                    // console.log(`🎹 Envelope: ${this.adsr.attack}/${this.adsr.decay}/${this.adsr.sustain}/${this.adsr.release}`);
                 }
+
+                // Get volume for this track
+                const trackVolume = this.getTrackVolume(action.track_id);
 
                 // Schedule events relative to beat start time
                 let time = startTime;
                 for (const event of action.events) {
                     const durationSec = this.beatsToSeconds(event.duration);
                     if (!event.is_rest && event.frequencies.length > 0) {
+                        // Normalize gain by number of notes to prevent saturation
+                        const noteCount = event.frequencies.length;
+                        const normalizedGain = trackVolume / Math.sqrt(noteCount);
+
                         for (const freq of event.frequencies) {
-                            this.scheduleNote(freq, time, durationSec);
+                            this.scheduleNote(freq, time, durationSec, normalizedGain);
                         }
                     }
                     time += durationSec;
                 }
                 break;
+            }
             case 'SetTempo':
                 this.setTempo(action.bpm);
                 break;
             case 'SetVolume':
-                this.setVolume(action.volume);
+                // Use per-track volume with 0-100 to 0-1 scaling
+                this.setTrackVolume(action.track_id, action.volume);
                 break;
             case 'SetWaveform':
                 this.setWaveform(action.waveform);
