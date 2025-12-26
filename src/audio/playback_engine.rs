@@ -11,6 +11,7 @@
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::{ClockTick, Duration};
 use crate::audio::midi::{MidiOutputHandle, frequency_to_midi};
+use crate::audio::oscillator::Waveform;
 use crate::parser::{Evaluator, Expression, SharedEnvironment, Value};
 use anyhow::Result;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender, select};
@@ -106,6 +107,24 @@ impl PlaybackSource {
                 let value = evaluator.eval_with_env(expression.clone(), Some(&env_guard))?;
                 match value {
                     Value::Pattern(pattern) => Ok(pattern.envelope),
+                    _ => Ok(None),
+                }
+            }
+        }
+    }
+
+    /// Get the waveform from the source (if it's a pattern with waveform)
+    pub fn get_waveform(&self) -> Result<Option<Waveform>> {
+        match self {
+            PlaybackSource::Static(_) => Ok(None),
+            PlaybackSource::Reactive { expression, env } => {
+                let evaluator = Evaluator::new();
+                let env_guard = env
+                    .read()
+                    .map_err(|e| anyhow::anyhow!("Environment lock poisoned: {}", e))?;
+                let value = evaluator.eval_with_env(expression.clone(), Some(&env_guard))?;
+                match value {
+                    Value::Pattern(pattern) => Ok(pattern.waveform),
                     _ => Ok(None),
                 }
             }
@@ -655,6 +674,16 @@ impl PlaybackLoop {
                 .set_track_envelope(self.track_id, envelope)
             {
                 eprintln!("Failed to set envelope: {}", e);
+            }
+        }
+
+        // Set the waveform for this track (from pattern if available)
+        if let Ok(Some(waveform)) = config.source.get_waveform() {
+            if let Err(e) = self
+                .audio_handle
+                .set_track_waveform(self.track_id, waveform)
+            {
+                eprintln!("Failed to set waveform: {}", e);
             }
         }
 

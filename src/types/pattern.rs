@@ -3,6 +3,7 @@
 //! Enables cycle-based patterns like `"C E G _"` where all steps fit into one cycle,
 //! with support for rests, repetition, and grouping.
 
+use crate::audio::oscillator::Waveform;
 use crate::types::{Chord, Note};
 use anyhow::{Result, anyhow};
 use std::fmt;
@@ -96,6 +97,8 @@ pub struct Pattern {
     pub beats_per_cycle: f32,
     /// Optional ADSR envelope parameters for this pattern
     pub envelope: Option<(f32, f32, f32, f32)>, // (attack, decay, sustain, release)
+    /// Optional waveform for this pattern
+    pub waveform: Option<Waveform>,
 }
 
 impl Pattern {
@@ -105,6 +108,7 @@ impl Pattern {
             steps: Vec::new(),
             beats_per_cycle: 4.0,
             envelope: None,
+            waveform: None,
         }
     }
 
@@ -114,6 +118,7 @@ impl Pattern {
             steps,
             beats_per_cycle: 4.0,
             envelope: None,
+            waveform: None,
         }
     }
 
@@ -192,6 +197,18 @@ impl Pattern {
         self
     }
 
+    /// Set waveform for this pattern
+    pub fn wave(mut self, waveform: Waveform) -> Self {
+        self.waveform = Some(waveform);
+        self
+    }
+
+    /// Set waveform from preset name (sine, saw, square, triangle)
+    pub fn wave_preset(mut self, preset: &str) -> Self {
+        self.waveform = Waveform::from_str(preset);
+        self
+    }
+
     /// Transpose all notes in the pattern by the given number of semitones
     pub fn transpose(mut self, semitones: i8) -> Self {
         self.steps = self
@@ -263,6 +280,7 @@ impl Pattern {
             steps,
             beats_per_cycle,
             envelope: Some((0.01, 0.1, 0.7, 0.3)),
+            waveform: None,
         }
     }
 
@@ -307,6 +325,7 @@ impl Pattern {
             let mut result = Pattern::from_chords(optimized);
             result.beats_per_cycle = self.beats_per_cycle;
             result.envelope = self.envelope;
+            result.waveform = self.waveform;
             result
         } else {
             println!("Cannot optimize voice leading: pattern contains rests or groups");

@@ -1,12 +1,12 @@
 use anyhow::{Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, SizedSample, Stream, StreamConfig};
+use std::collections::HashMap;
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use super::adsr::{AdsrEnvelope, AdsrParams};
-use std::collections::HashMap;
+use super::oscillator::{EnvelopedOscillator, Waveform};
 
 /// State for a single audio track
 #[derive(Clone, Debug)]
@@ -19,6 +19,8 @@ pub struct TrackState {
     pub is_playing: bool,
     /// Optional custom ADSR envelope (attack, decay, sustain, release)
     pub envelope: Option<(f32, f32, f32, f32)>,
+    /// Waveform type for this track
+    pub waveform: Waveform,
 }
 
 impl Default for TrackState {
@@ -27,7 +29,8 @@ impl Default for TrackState {
             notes: Vec::new(),
             volume: 1.0, // Individual tracks default to full volume (master mixer handles global)
             is_playing: true,
-            envelope: None, // Use default ADSR
+            envelope: None,                // Use default ADSR
+            waveform: Waveform::default(), // Sine by default
         }
     }
 }
@@ -53,64 +56,7 @@ impl Default for AudioState {
     }
 }
 
-/// Per-note oscillator state with ADSR amplitude envelope
-struct EnvelopedOscillator {
-    frequency: f32,
-    phase: f32,
-    sample_rate: f32,
-    envelope: AdsrEnvelope,
-    /// Which track this oscillator belongs to
-    track_id: usize,
-}
-
-impl EnvelopedOscillator {
-    fn new(frequency: f32, sample_rate: f32, track_id: usize) -> Self {
-        Self::with_envelope(frequency, sample_rate, track_id, None)
-    }
-
-    fn with_envelope(
-        frequency: f32,
-        sample_rate: f32,
-        track_id: usize,
-        envelope_params: Option<(f32, f32, f32, f32)>,
-    ) -> Self {
-        let params = match envelope_params {
-            Some((a, d, s, r)) => AdsrParams::new(a, d, s, r),
-            None => AdsrParams::default(),
-        };
-        let mut envelope = AdsrEnvelope::new(params, sample_rate);
-        envelope.trigger(); // Start the envelope immediately
-
-        Self {
-            frequency,
-            phase: 0.0,
-            sample_rate,
-            envelope,
-            track_id,
-        }
-    }
-
-    fn start_fade_out(&mut self) {
-        self.envelope.release();
-    }
-
-    fn is_finished(&self) -> bool {
-        self.envelope.is_finished()
-    }
-
-    fn next_sample(&mut self) -> f32 {
-        // Generate sine wave
-        let value = (2.0 * std::f32::consts::PI * self.phase).sin();
-        self.phase += self.frequency / self.sample_rate;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
-
-        // Apply ADSR envelope
-        let amplitude = self.envelope.next_sample();
-        value * amplitude
-    }
-}
+// EnvelopedOscillator is now in oscillator.rs
 
 /// Commands that can be sent to the audio player thread
 #[derive(Debug, Clone)]
@@ -118,6 +64,7 @@ pub enum AudioPlayerCommand {
     SetTrackNotes(usize, Vec<f32>),
     SetTrackVolume(usize, f32),
     SetTrackEnvelope(usize, Option<(f32, f32, f32, f32)>),
+    SetTrackWaveform(usize, Waveform),
     SetMasterVolume(f32),
     Play,
     Pause,
@@ -216,6 +163,7 @@ impl AudioPlayerInternal {
                                     sample_rate,
                                     *track_id,
                                     track_state.envelope,
+                                    track_state.waveform,
                                 ));
                             }
 
@@ -320,6 +268,16 @@ impl AudioPlayerInternal {
         Ok(())
     }
 
+    fn set_track_waveform(&mut self, track_id: usize, waveform: Waveform) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
+        let track = state.tracks.entry(track_id).or_default();
+        track.waveform = waveform;
+        Ok(())
+    }
+
     fn set_master_volume(&mut self, volume: f32) -> Result<()> {
         let mut state = self
             .state
@@ -392,6 +350,11 @@ impl AudioPlayerHandle {
                             eprintln!("Failed to set track envelope: {}", e);
                         }
                     }
+                    AudioPlayerCommand::SetTrackWaveform(track_id, waveform) => {
+                        if let Err(e) = player.set_track_waveform(track_id, waveform) {
+                            eprintln!("Failed to set track waveform: {}", e);
+                        }
+                    }
                     AudioPlayerCommand::SetMasterVolume(vol) => {
                         if let Err(e) = player.set_master_volume(vol) {
                             eprintln!("Failed to set master volume: {}", e);
@@ -445,6 +408,13 @@ impl AudioPlayerHandle {
     ) -> Result<()> {
         self.command_tx
             .send(AudioPlayerCommand::SetTrackEnvelope(track_id, envelope))
+            .map_err(|e| anyhow!("Failed to send command: {}", e))
+    }
+
+    /// Set the waveform for a specific track
+    pub fn set_track_waveform(&self, track_id: usize, waveform: Waveform) -> Result<()> {
+        self.command_tx
+            .send(AudioPlayerCommand::SetTrackWaveform(track_id, waveform))
             .map_err(|e| anyhow!("Failed to send command: {}", e))
     }
 
@@ -512,8 +482,7 @@ mod tests {
                 value
             );
         }
-
-        assert!(osc.phase >= 0.0 && osc.phase < 1.0);
+        // Phase check removed - field is now private in oscillator module
     }
 
     #[test]

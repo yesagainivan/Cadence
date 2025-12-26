@@ -112,7 +112,9 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] ADSR envelopes (configurable attack/decay/sustain/release)
   - *Presets: pluck, pad, perc, organ + custom `env(pattern, a, d, s, r)`*
   - *Method chaining: `"C E".env("pluck")` or `"C E".rev().env(40, 10, 0, 10)`*
-- [ ] Multiple waveforms (saw, square, triangle)
+- [x] Multiple waveforms (saw, square, triangle)
+  - *New `oscillator.rs` module with Waveform enum*
+  - *Presets: sine, saw, square, triangle + `wave(pattern, "saw")` or `"C E".wave("saw")`*
 - [ ] Basic effects (reverb, delay, filter)
 
 ### 4.2 MIDI Output ✅
@@ -191,6 +193,7 @@ A production-ready music programming language for chord progressions and harmoni
 7. ~~**Live Reload** - File watch with hot-reload at beat boundaries~~ ✅ Done
 8. ~~**ADSR Envelopes** - Configurable attack/decay/sustain/release~~ ✅ Done
 9. ~~**MIDI Output** - MIDI device enumeration, note-on/note-off events~~ ✅ Done
-10. **Multiple Waveforms** - saw, square, triangle waveforms
+10. ~~**Multiple Waveforms** - saw, square, triangle waveforms~~ ✅ Done
 11. **MIDI Control Change** - CC messages for external control
-12. **modularize statement parser** - break down into smaller modules if needed
+12. **Basic Effects** - reverb, delay, filter
+13. **modularize statement parser** - break down into smaller modules if needed

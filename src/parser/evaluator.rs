@@ -817,6 +817,31 @@ impl Evaluator {
                 }
             }
 
+            // Wave function - sets waveform on a pattern
+            "wave" => {
+                if args.len() != 2 {
+                    return Err(anyhow!(
+                        "wave() expects 2 arguments: pattern, waveform_name (sine, saw, square, triangle)"
+                    ));
+                }
+
+                let pattern_value = self.eval_with_env(args[0].clone(), env)?;
+                let pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    _ => return Err(anyhow!("wave() first argument must be a pattern")),
+                };
+
+                let waveform_val = self.eval_with_env(args[1].clone(), env)?;
+                match waveform_val {
+                    Value::String(waveform_name) => {
+                        Ok(Value::Pattern(pattern.wave_preset(&waveform_name)))
+                    }
+                    _ => Err(anyhow!(
+                        "wave() expects a waveform name string (sine, saw, square, triangle)"
+                    )),
+                }
+            }
+
             _ => Err(anyhow!("Unknown function: {}", name)),
         }
     }
