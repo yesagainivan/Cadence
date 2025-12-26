@@ -656,7 +656,11 @@ impl PlaybackLoop {
         let frequencies = match self.evaluate_with_cycle_check(&config) {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("Failed to evaluate playback source: {}", e);
+                // Filter out control-flow signals (not real errors)
+                let msg = e.to_string();
+                if !msg.contains("Switched to queued") && !msg.contains("Progression complete") {
+                    eprintln!("Failed to evaluate playback source: {}", e);
+                }
                 return;
             }
         };
