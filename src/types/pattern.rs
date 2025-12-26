@@ -5,7 +5,7 @@
 
 use super::audio_config::Waveform;
 use crate::types::{Chord, Note};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::fmt;
 use std::str::FromStr;
 
@@ -614,8 +614,15 @@ fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
                 chars.next(); // consume '['
                 let group_content = take_until_bracket(&mut chars)?;
 
-                // Check if it looks like a chord [C, E, G] or a group [C E G]
-                if group_content.contains(',') {
+                // Check if it's a nested group first (starts with '[' after whitespace)
+                // This handles [[Bb4,D5,F5] [F4,A4,C5]] as a group containing chords
+                let trimmed = group_content.trim_start();
+                if trimmed.starts_with('[') {
+                    // It's a nested group - parse recursively
+                    let inner_steps = parse_steps(&group_content)?;
+                    let step = maybe_parse_repeat(&mut chars, PatternStep::Group(inner_steps))?;
+                    steps.push(step);
+                } else if group_content.contains(',') {
                     // It's a chord - parse comma-separated notes
                     let note_strs: Vec<&str> = group_content.split(',').map(|s| s.trim()).collect();
                     let chord = Chord::from_note_strings(note_strs)?;

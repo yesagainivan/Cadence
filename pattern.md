@@ -192,3 +192,9 @@ cadence> on 1 play bass2 queue loop
 Playing "D3*2 _ _ _" (looping, Track 1)
 cadence> 🔁 Queued "D3*2 _ _ _" for next beat... (Track 1)
 cadence> on 1 play bass2 queue loop
+
+//
+
+cadence> play "[[C, E, G] [Bb3, D, F]] [C, F, G]" loop
+cadence> Playing "[C Major: [C, E, G] Bb Major: [Bb3, D, F]] C sus4: [C, F, G]" (looping, Track 1)
+🔊 Playing "[C Major: [C, E, G] Bb Major: [Bb3, D, F]] C sus4: [C, F, G]" (Track 1) - live reactive!

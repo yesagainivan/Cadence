@@ -1,9 +1,9 @@
 use crate::{
     parser::ast::{Expression, Statement, Value},
-    types::{Chord, CommonProgressions, Note, RomanNumeral, VoiceLeading, analyze_progression},
+    types::{analyze_progression, Chord, CommonProgressions, Note, RomanNumeral, VoiceLeading},
 };
 // use crate::types::{chord::Chord, note::Note};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
 /// Evaluates parsed expressions into values
 pub struct Evaluator;
@@ -653,14 +653,26 @@ impl Evaluator {
                 let pattern_value = self.eval_with_env(args[0].clone(), env)?;
                 let factor_value = self.eval_with_env(args[1].clone(), env)?;
 
-                match (pattern_value, factor_value) {
-                    (Value::Pattern(pattern), Value::Note(note)) => {
-                        // Use pitch class as factor (e.g., D = 2)
-                        let factor = (note.pitch_class() as usize).max(1);
-                        Ok(Value::Pattern(pattern.fast(factor)))
+                // Convert string to pattern if needed
+                let pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    Value::String(s) => crate::types::Pattern::parse(&s)
+                        .map_err(|e| anyhow!("fast(): invalid pattern string: {}", e))?,
+                    _ => {
+                        return Err(anyhow!(
+                            "fast() first argument must be a pattern or pattern string"
+                        ))
                     }
-                    _ => Err(anyhow!("fast() expects (pattern, factor_note)")),
-                }
+                };
+
+                // Accept both Note and Number as factor
+                let factor = match factor_value {
+                    Value::Note(note) => (note.pitch_class() as usize).max(1),
+                    Value::Number(n) => (n as usize).max(1),
+                    _ => return Err(anyhow!("fast() factor must be a note or number")),
+                };
+
+                Ok(Value::Pattern(pattern.fast(factor)))
             }
 
             "slow" => {
@@ -671,14 +683,26 @@ impl Evaluator {
                 let pattern_value = self.eval_with_env(args[0].clone(), env)?;
                 let factor_value = self.eval_with_env(args[1].clone(), env)?;
 
-                match (pattern_value, factor_value) {
-                    (Value::Pattern(pattern), Value::Note(note)) => {
-                        // Use pitch class as factor (e.g., D = 2)
-                        let factor = (note.pitch_class() as usize).max(1);
-                        Ok(Value::Pattern(pattern.slow(factor)))
+                // Convert string to pattern if needed
+                let pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    Value::String(s) => crate::types::Pattern::parse(&s)
+                        .map_err(|e| anyhow!("slow(): invalid pattern string: {}", e))?,
+                    _ => {
+                        return Err(anyhow!(
+                            "slow() first argument must be a pattern or pattern string"
+                        ))
                     }
-                    _ => Err(anyhow!("slow() expects (pattern, factor_note)")),
-                }
+                };
+
+                // Accept both Note and Number as factor
+                let factor = match factor_value {
+                    Value::Note(note) => (note.pitch_class() as usize).max(1),
+                    Value::Number(n) => (n as usize).max(1),
+                    _ => return Err(anyhow!("slow() factor must be a note or number")),
+                };
+
+                Ok(Value::Pattern(pattern.slow(factor)))
             }
 
             "rev" => {
@@ -1184,12 +1208,10 @@ mod tests {
         let result = Evaluator::new().eval(expr);
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("expects 1 argument")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("expects 1 argument"));
     }
 
     #[test]
@@ -1198,12 +1220,10 @@ mod tests {
         let result = Evaluator::new().eval(expr);
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("only works on chords")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("only works on chords"));
     }
 }
 
@@ -1367,12 +1387,10 @@ mod evaluator_numeric_tests {
         let result = Evaluator::new().eval(expr);
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Invalid scale degree")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid scale degree"));
     }
 
     #[test]
