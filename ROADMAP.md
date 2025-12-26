@@ -146,7 +146,7 @@ A production-ready music programming language for chord progressions and harmoni
 
 | Component | Status |
 |-----------|--------|
-| Core Types (Note, Chord, Progression) | ✅ Stable |
+| Core Types (Note, Chord, Pattern) | ✅ Stable, Pattern unified |
 | Audio Engine (crossfade, beat-sync) | ✅ Production-ready |
 | Master Clock (24 PPQN, multi-track sync) | ✅ Stable |
 | Scheduler | 🗑️ Removed (Replaced by MasterClock) |
@@ -162,7 +162,7 @@ A production-ready music programming language for chord progressions and harmoni
 | Playback Queue | ✅ FIFO queue with `try_start_next_queued()` |
 | Control Flow | ✅ `repeat`, `loop`, `break`, `continue` |
 | Multitrack | ✅ `track N { }` or `on N { }`, 16-track limit |
-| Voice Leading | ✅ `smooth_voice_leading()` with octave normalization |
+| Voice Leading | ✅ Separate module with `smooth_voice_leading()` |
 | Reactive Variables | ✅ Per-beat re-evaluation, live variable updates |
 | Pattern System | ✅ Operators (`every`, `fast`, `rev`), Cycle-based timing |
 | Sub-Beat Timing | ✅ 24 PPQN processing, proper every() cycle ordering |
@@ -194,9 +194,3 @@ A production-ready music programming language for chord progressions and harmoni
 10. **Multiple Waveforms** - saw, square, triangle waveforms
 11. **MIDI Control Change** - CC messages for external control
 12. **modularize statement parser** - break down into smaller modules if needed
-
-
-
-# Address:
-
-The set operation uses BTreeSet::intersection which compares notes including octave. The fix should be to update the set operations to compare by pitch class only. However, that's a more significant change. For now, let me update the test to use explicit octaves so it tests the correct behavior:
