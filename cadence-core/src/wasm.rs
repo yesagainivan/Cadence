@@ -216,6 +216,192 @@ struct ParseResult {
     error: Option<String>,
 }
 
+// ============================================================================
+// Script Execution Types (for JS interop)
+// ============================================================================
+
+/// A single playback event with frequencies, duration, and rest flag
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PlayEventJS {
+    /// Frequencies to play (empty for rest)
+    pub frequencies: Vec<f32>,
+    /// Duration in beats
+    pub duration: f32,
+    /// Whether this is a rest (silence)
+    pub is_rest: bool,
+}
+
+/// Serializable action for JavaScript consumption
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type"))]
+pub enum ActionJS {
+    /// Play a pattern/chord with events
+    Play {
+        events: Vec<PlayEventJS>,
+        looping: bool,
+        track_id: usize,
+        /// Custom ADSR envelope: (attack, decay, sustain, release) in seconds/level
+        envelope: Option<(f32, f32, f32, f32)>,
+        /// Custom waveform name
+        waveform: Option<String>,
+    },
+    /// Set the global tempo
+    SetTempo { bpm: f32 },
+    /// Set volume for a track
+    SetVolume { volume: f32, track_id: usize },
+    /// Set waveform for a track
+    SetWaveform { waveform: String, track_id: usize },
+    /// Stop playback
+    Stop { track_id: Option<usize> },
+}
+
+/// Result of running a script
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ScriptResult {
+    pub success: bool,
+    pub actions: Vec<ActionJS>,
+    pub error: Option<String>,
+    /// Console output from the interpreter (e.g., "Tempo set to 120 BPM")
+    pub output: Vec<String>,
+}
+
+/// Convert interpreter actions to JS-serializable actions
+#[cfg(feature = "wasm")]
+fn convert_action(
+    action: &crate::parser::interpreter::InterpreterAction,
+    env: &crate::parser::environment::Environment,
+    evaluator: &crate::parser::evaluator::Evaluator,
+) -> Option<ActionJS> {
+    use crate::parser::ast::Value;
+    use crate::parser::interpreter::InterpreterAction;
+
+    match action {
+        InterpreterAction::PlayExpression {
+            expression,
+            looping,
+            track_id,
+            ..
+        } => {
+            // Evaluate the expression to get a Value
+            let value = evaluator
+                .eval_with_env(expression.clone(), Some(env))
+                .ok()?;
+
+            // Extract events, envelope, and waveform based on value type
+            let (events, envelope, waveform) = match value {
+                Value::Pattern(ref pattern) => {
+                    let events = pattern
+                        .to_events()
+                        .into_iter()
+                        .map(|(freqs, duration, is_rest)| PlayEventJS {
+                            frequencies: freqs,
+                            duration,
+                            is_rest,
+                        })
+                        .collect();
+                    let envelope = pattern.envelope;
+                    let waveform = pattern.waveform.as_ref().map(|w| w.name().to_string());
+                    (events, envelope, waveform)
+                }
+                Value::Chord(chord) => {
+                    let freqs: Vec<f32> = chord.notes_vec().iter().map(|n| n.frequency()).collect();
+                    let events = vec![PlayEventJS {
+                        frequencies: freqs,
+                        duration: 1.0, // Default 1 beat for single chord
+                        is_rest: false,
+                    }];
+                    (events, None, None)
+                }
+                Value::Note(note) => {
+                    let events = vec![PlayEventJS {
+                        frequencies: vec![note.frequency()],
+                        duration: 1.0,
+                        is_rest: false,
+                    }];
+                    (events, None, None)
+                }
+                _ => return None,
+            };
+
+            Some(ActionJS::Play {
+                events,
+                looping: *looping,
+                track_id: *track_id,
+                envelope,
+                waveform,
+            })
+        }
+        InterpreterAction::SetTempo(bpm) => Some(ActionJS::SetTempo { bpm: *bpm }),
+        InterpreterAction::SetVolume { volume, track_id } => Some(ActionJS::SetVolume {
+            volume: *volume,
+            track_id: *track_id,
+        }),
+        InterpreterAction::SetWaveform { waveform, track_id } => Some(ActionJS::SetWaveform {
+            waveform: waveform.clone(),
+            track_id: *track_id,
+        }),
+        InterpreterAction::Stop { track_id } => Some(ActionJS::Stop {
+            track_id: *track_id,
+        }),
+    }
+}
+
+/// Run a Cadence script and return actions for playback
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn run_script(input: &str) -> JsValue {
+    use crate::parser::evaluator::Evaluator;
+    use crate::parser::interpreter::Interpreter;
+    use crate::parser::parse_statements;
+
+    // Parse the input
+    let program = match parse_statements(input) {
+        Ok(p) => p,
+        Err(e) => {
+            return serde_wasm_bindgen::to_value(&ScriptResult {
+                success: false,
+                actions: vec![],
+                error: Some(e.to_string()),
+                output: vec![],
+            })
+            .unwrap_or(JsValue::NULL);
+        }
+    };
+
+    // Run the interpreter
+    let mut interpreter = Interpreter::new();
+    if let Err(e) = interpreter.run_program(&program) {
+        return serde_wasm_bindgen::to_value(&ScriptResult {
+            success: false,
+            actions: vec![],
+            error: Some(e.to_string()),
+            output: vec![],
+        })
+        .unwrap_or(JsValue::NULL);
+    }
+
+    // Get actions and convert to JS format
+    let raw_actions = interpreter.take_actions();
+    let env = interpreter.environment.read().unwrap();
+    let evaluator = Evaluator::new();
+
+    let actions: Vec<ActionJS> = raw_actions
+        .iter()
+        .filter_map(|a| convert_action(a, &env, &evaluator))
+        .collect();
+
+    serde_wasm_bindgen::to_value(&ScriptResult {
+        success: true,
+        actions,
+        error: None,
+        output: vec![], // TODO: capture stdout
+    })
+    .unwrap_or(JsValue::NULL)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

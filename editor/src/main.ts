@@ -13,7 +13,8 @@ import { bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { cadenceWasm } from './lang-cadence-wasm';
-import { initWasm, parseCode, tokenizeCode, isWasmReady, type HighlightSpan } from './cadence-wasm';
+import { initWasm, parseCode, isWasmReady, runScript, type Action } from './cadence-wasm';
+import { audioEngine } from './audio-engine';
 
 // Sample Cadence code
 const SAMPLE_CODE = `// Welcome to Cadence! 🎵
@@ -178,33 +179,6 @@ function validateCode(view: EditorView): void {
 }
 
 /**
- * Get WASM token info for debugging
- */
-function debugTokens(code: string): void {
-  if (!isWasmReady()) {
-    log('⚠ WASM not ready');
-    return;
-  }
-
-  const spans = tokenizeCode(code);
-  log(`📝 Tokens (${spans.length}):`);
-
-  // Group tokens by line for cleaner output
-  const byLine: Map<number, HighlightSpan[]> = new Map();
-  for (const span of spans) {
-    if (!byLine.has(span.start_line)) {
-      byLine.set(span.start_line, []);
-    }
-    byLine.get(span.start_line)!.push(span);
-  }
-
-  for (const [line, lineSpans] of byLine) {
-    const tokenSummary = lineSpans.map(s => `${s.token_type}:${s.text}`).join(' ');
-    log(`  L${line}: ${tokenSummary}`);
-  }
-}
-
-/**
  * Log to output panel
  */
 function log(message: string): void {
@@ -217,12 +191,25 @@ function log(message: string): void {
 }
 
 /**
- * Clear output panel
+ * Log an action to the output panel
  */
-function clearOutput(): void {
-  const outputEl = document.getElementById('output');
-  if (outputEl) {
-    outputEl.textContent = '';
+function logAction(action: Action): void {
+  switch (action.type) {
+    case 'Play':
+      log(`  ▶ Play: ${action.events.length} event(s), loop=${action.looping}`);
+      break;
+    case 'SetTempo':
+      log(`  🎵 Tempo: ${action.bpm} BPM`);
+      break;
+    case 'SetVolume':
+      log(`  🔊 Volume: ${(action.volume * 100).toFixed(0)}%`);
+      break;
+    case 'SetWaveform':
+      log(`  📈 Waveform: ${action.waveform}`);
+      break;
+    case 'Stop':
+      log(`  ⏹ Stop`);
+      break;
   }
 }
 
@@ -256,36 +243,39 @@ async function init(): Promise<void> {
   playBtn?.addEventListener('click', () => {
     const code = editor.state.doc.toString();
 
-    // First validate
-    const result = parseCode(code);
+    // Run the script via WASM interpreter
+    const result = runScript(code);
     if (!result.success) {
       log(`✗ Cannot play: ${result.error}`);
       return;
     }
 
     log('▶ Playing...');
+    log(`📋 ${result.actions.length} action(s) from script`);
 
-    // Debug: show tokens from WASM
-    debugTokens(code);
-
-    // TODO: Send to Web Audio / MIDI
-    log('🎵 (Audio playback not yet implemented)');
+    // Route each action to the audio engine
+    for (const action of result.actions) {
+      logAction(action);
+      audioEngine.handleAction(action);
+    }
   });
 
   // Stop button
   const stopBtn = document.getElementById('stop-btn');
   stopBtn?.addEventListener('click', () => {
+    audioEngine.stop();
     log('■ Stopped');
-    // TODO: Stop playback
   });
 
   // Tempo slider
   const tempoSlider = document.getElementById('tempo') as HTMLInputElement;
   const tempoValue = document.getElementById('tempo-value');
   tempoSlider?.addEventListener('input', () => {
+    const bpm = parseInt(tempoSlider.value, 10);
     if (tempoValue) {
       tempoValue.textContent = tempoSlider.value;
     }
+    audioEngine.setTempo(bpm);
   });
 
   // Initial log
