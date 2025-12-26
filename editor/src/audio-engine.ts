@@ -1,4 +1,4 @@
-import { type PlayEvent, type Action, WasmInterpreter } from './cadence-wasm';
+import { type Action, WasmInterpreter } from './cadence-wasm';
 
 /** ADSR envelope parameters */
 export interface AdsrParams {

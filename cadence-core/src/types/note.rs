@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::fmt;
 use std::ops::{Add, Sub};
 use std::str::FromStr;
@@ -46,6 +46,23 @@ impl Note {
         let octave_diff = self.octave - 4;
         let multiplier = 2.0_f32.powi(octave_diff as i32);
         base_freq * multiplier
+    }
+
+    /// Get the MIDI note number for this note (0-127)
+    ///
+    /// MIDI note 60 = Middle C (C4 in scientific pitch notation)
+    /// Formula: midi_note = (octave + 1) * 12 + pitch_class
+    ///
+    /// # Returns
+    /// The MIDI note number, clamped to valid range 0-127
+    pub fn midi_note(&self) -> u8 {
+        let midi = (self.octave as i16 + 1) * 12 + self.pitch_class as i16;
+        midi.clamp(0, 127) as u8
+    }
+
+    /// Get the full display name including octave (e.g., "C#4", "Bb3")
+    pub fn full_name(&self) -> String {
+        format!("{}{}", self.name(), self.octave)
     }
 
     /// Create a new note from chromatic pitch class (0-11), defaulting to octave 4
@@ -362,7 +379,11 @@ impl Sub<Note> for Note {
 
     fn sub(self, other: Note) -> Self::Output {
         let diff = (self.pitch_class as i8) - (other.pitch_class as i8);
-        if diff < 0 { diff + 12 } else { diff }
+        if diff < 0 {
+            diff + 12
+        } else {
+            diff
+        }
     }
 }
 

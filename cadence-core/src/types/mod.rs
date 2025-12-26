@@ -10,6 +10,6 @@ pub mod voice_leading;
 pub use audio_config::{AdsrParams, QueueMode, Waveform};
 pub use chord::Chord;
 pub use note::Note;
-pub use pattern::{Pattern, PatternStep};
+pub use pattern::{NoteInfo, Pattern, PatternStep, PlaybackEvent};
 pub use roman_numeral::*;
 pub use voice_leading::VoiceLeading;

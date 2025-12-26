@@ -25,10 +25,31 @@ export interface ParseResult {
 // Script Execution Types
 // ============================================================================
 
-/** A single playback event */
+/** Rich information about a single note */
+export interface NoteInfo {
+    /** MIDI note number (0-127) */
+    midi: number;
+    /** Frequency in Hz */
+    frequency: number;
+    /** Display name with octave (e.g., "C#4", "Bb3") */
+    name: string;
+    /** Pitch class (0-11): C=0, C#=1, D=2, etc. */
+    pitch_class: number;
+    /** Octave in scientific pitch notation */
+    octave: number;
+}
+
+/** A single playback event with rich note data */
 export interface PlayEvent {
+    /** Rich note information (MIDI, frequency, name, etc.) */
+    notes: NoteInfo[];
+    /** Frequencies to play (for backward compatibility) */
     frequencies: number[];
+    /** Start time in beats relative to pattern start */
+    start_beat: number;
+    /** Duration in beats */
     duration: number;
+    /** Whether this is a rest (silence) */
     is_rest: boolean;
 }
 

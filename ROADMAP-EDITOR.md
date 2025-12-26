@@ -52,11 +52,12 @@ A web-based editor for the Cadence music programming language with live syntax h
 - [ ] Canvas-based piano roll component
 - [ ] Parse patterns to extract notes with timing
 - [ ] Color-code notes by pitch/velocity
+- [ ] Playhead indicator for current beat
 
-### 2.2 Pattern Parser Integration
-- [ ] Expose pattern parsing to WASM
+### 2.2 Pattern Data API
+- [x] `to_events()` returns frequencies, durations, rest flags
+- [ ] Expose `get_pattern_events(code)` WASM function for visualization
 - [ ] Include cycle timing from pattern mini-notation
-- [ ] Handle rests and subdivisions
 
 ### 2.3 Staff Notation (Stretch)
 - [ ] VexFlow or similar for traditional notation
@@ -82,17 +83,20 @@ A web-based editor for the Cadence music programming language with live syntax h
 
 ---
 
-## Phase 4: Web Audio Playback
+## Phase 4: Web Audio Playback ✅ Mostly Complete
 
-### 4.1 WASM Audio Engine
-- [ ] Pure Rust oscillator/envelope generation to WASM
-- [ ] AudioWorklet integration for low-latency playback
-- [ ] Pattern scheduling with Web Audio clock
+### 4.1 Web Audio Engine ✅
+- [x] JavaScript-based oscillator/envelope generation
+- [x] ADSR envelope with customizable parameters
+- [x] Pattern scheduling with Web Audio clock
+- [x] Reactive playback via `WasmInterpreter` tick system
+- [ ] AudioWorklet for lower latency (stretch goal)
 
-### 4.2 Transport Controls
-- [ ] Play/Pause/Stop functionality
-- [ ] Tempo control (BPM slider) connected to engine
-- [ ] Loop/cycle visualization
+### 4.2 Transport Controls ✅
+- [x] Play/Stop functionality
+- [x] Tempo control (BPM slider) connected to engine
+- [x] Live coding support (update without cycle reset)
+- [ ] Loop/cycle visualization (playhead indicator)
 
 ---
 
@@ -133,9 +137,9 @@ A web-based editor for the Cadence music programming language with live syntax h
 | Build tool | Vite + TypeScript | ✅ Setup |
 | Tokenization | WASM (Rust lexer) | ✅ Working |
 | Validation | WASM (Rust parser) | ✅ Working |
+| Audio playback | Web Audio API | ✅ Working |
 | MIDI visualization | Canvas 2D | 🔜 Next |
-| Audio playback | Web Audio API + AudioWorklet | ⬜ Planned |
-| Property editing | Solid.js (recommended) | ⬜ Planned |
+| Property editing | TBD | ⬜ Planned |
 
 ---
 
@@ -151,13 +155,15 @@ A web-based editor for the Cadence music programming language with live syntax h
 8. **Reactive playback architecture** — Step-sequencer pattern with per-cycle caching
 9. **Phase-preserving updates** — Variable reassignment doesn't stutter playback
 10. **WasmInterpreter** — Stateful interpreter for browser script execution
+11. **Web Audio playback** — Full oscillator/ADSR synthesis in `audio-engine.ts`
+12. **Transport controls** — Play/Stop buttons and tempo slider
+13. **Live coding** — `updateScript()` preserves cycle position during edits
 
 ---
 
 ## Next Steps
 
-1. **Script Execution in Editor** — Use Interpreter from WASM to run .cadence files
-2. **InterpreterAction Handling** — Route Play/Stop/Tempo actions to Web Audio
-3. **Piano Roll** — Parse patterns and visualize as simple grid
-4. **Web Audio** — Basic oscillator playback from WASM
-
+1. **Piano Roll Component** — Canvas-based note grid visualization
+2. **Pattern Events API** — Expose `get_pattern_events(code)` for visualization data
+3. **Playhead Indicator** — Show current beat position during playback
+4. **Beat Sync** — Connect audio scheduler to visual playhead

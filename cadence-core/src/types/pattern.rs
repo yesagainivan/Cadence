@@ -9,6 +9,56 @@ use anyhow::{anyhow, Result};
 use std::fmt;
 use std::str::FromStr;
 
+// ============================================================================
+// Rich Event Types for Visualization & Playback
+// ============================================================================
+
+/// Information about a single note, preserving full identity for accurate
+/// MIDI output and visualization without floating-point conversion.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct NoteInfo {
+    /// MIDI note number (0-127), computed directly from pitch_class + octave
+    pub midi: u8,
+    /// Frequency in Hz (for audio synthesis)
+    pub frequency: f32,
+    /// Display name with octave (e.g., "C#4", "Bb3")
+    pub name: String,
+    /// Pitch class (0-11): C=0, C#=1, D=2, etc.
+    pub pitch_class: u8,
+    /// Octave in scientific pitch notation (4 = middle C octave)
+    pub octave: i8,
+}
+
+impl NoteInfo {
+    /// Create NoteInfo from a Note
+    pub fn from_note(note: &Note) -> Self {
+        NoteInfo {
+            midi: note.midi_note(),
+            frequency: note.frequency(),
+            name: note.full_name(),
+            pitch_class: note.pitch_class(),
+            octave: note.octave(),
+        }
+    }
+}
+
+/// A single playback event with full note data for visualization and playback.
+/// Unlike the raw (frequencies, duration, is_rest) tuple, this preserves
+/// note identity through the entire pipeline.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PlaybackEvent {
+    /// Notes in this event (empty for rests)
+    pub notes: Vec<NoteInfo>,
+    /// Start time in beats relative to pattern start
+    pub start_beat: f32,
+    /// Duration in beats
+    pub duration: f32,
+    /// Whether this is a rest (silence)
+    pub is_rest: bool,
+}
+
 /// A single step in a pattern
 #[derive(Clone, Debug, PartialEq)]
 pub enum PatternStep {
@@ -43,6 +93,24 @@ impl PatternStep {
             PatternStep::Group(steps) => steps.iter().flat_map(|s| s.to_frequencies()).collect(),
             PatternStep::Repeat(step, count) => {
                 let inner = step.to_frequencies();
+                (0..*count).flat_map(|_| inner.clone()).collect()
+            }
+        }
+    }
+
+    /// Flatten this step into rich note info for visualization and accurate MIDI
+    /// Returns (Vec<NoteInfo>, is_rest) pairs preserving full note identity
+    pub fn to_note_infos(&self) -> Vec<(Vec<NoteInfo>, bool)> {
+        match self {
+            PatternStep::Note(n) => vec![(vec![NoteInfo::from_note(n)], false)],
+            PatternStep::Chord(c) => {
+                let notes: Vec<NoteInfo> = c.notes_vec().iter().map(NoteInfo::from_note).collect();
+                vec![(notes, false)]
+            }
+            PatternStep::Rest => vec![(vec![], true)],
+            PatternStep::Group(steps) => steps.iter().flat_map(|s| s.to_note_infos()).collect(),
+            PatternStep::Repeat(step, count) => {
+                let inner = step.to_note_infos();
                 (0..*count).flat_map(|_| inner.clone()).collect()
             }
         }
@@ -154,6 +222,39 @@ impl Pattern {
 
             for (freqs, is_rest) in freqs_list {
                 events.push((freqs, event_duration, is_rest));
+            }
+        }
+
+        events
+    }
+
+    /// Get rich playback events with full note identity for visualization and accurate MIDI.
+    /// Unlike `to_events()`, this preserves note names, MIDI numbers, and computes start times.
+    ///
+    /// # Returns
+    /// Vec of `PlaybackEvent` with:
+    /// - `notes`: Full `NoteInfo` for each note (MIDI, frequency, name, pitch_class, octave)
+    /// - `start_beat`: When this event starts relative to pattern beginning
+    /// - `duration`: How long this event lasts in beats
+    /// - `is_rest`: Whether this is silence
+    pub fn to_rich_events(&self) -> Vec<PlaybackEvent> {
+        let mut events = Vec::new();
+        let step_beats = self.step_beats();
+        let mut current_beat: f32 = 0.0;
+
+        for step in &self.steps {
+            let note_infos_list = step.to_note_infos();
+            let count = note_infos_list.len();
+            let event_duration = step_beats / count as f32;
+
+            for (notes, is_rest) in note_infos_list {
+                events.push(PlaybackEvent {
+                    notes,
+                    start_beat: current_beat,
+                    duration: event_duration,
+                    is_rest,
+                });
+                current_beat += event_duration;
             }
         }
 

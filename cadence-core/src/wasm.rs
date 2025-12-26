@@ -223,12 +223,44 @@ struct ParseResult {
 // Script Execution Types (for JS interop)
 // ============================================================================
 
-/// A single playback event with frequencies, duration, and rest flag
+/// Note information for a single note (JS-serializable version)
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct NoteInfoJS {
+    /// MIDI note number (0-127)
+    pub midi: u8,
+    /// Frequency in Hz
+    pub frequency: f32,
+    /// Display name with octave (e.g., "C#4", "Bb3")
+    pub name: String,
+    /// Pitch class (0-11): C=0, C#=1, D=2, etc.
+    pub pitch_class: u8,
+    /// Octave in scientific pitch notation
+    pub octave: i8,
+}
+
+impl From<&crate::types::NoteInfo> for NoteInfoJS {
+    fn from(info: &crate::types::NoteInfo) -> Self {
+        NoteInfoJS {
+            midi: info.midi,
+            frequency: info.frequency,
+            name: info.name.clone(),
+            pitch_class: info.pitch_class,
+            octave: info.octave,
+        }
+    }
+}
+
+/// A single playback event with rich note data for visualization and playback
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PlayEventJS {
-    /// Frequencies to play (empty for rest)
+    /// Rich note information (MIDI, frequency, name, etc.)
+    pub notes: Vec<NoteInfoJS>,
+    /// Frequencies to play (for backward compatibility with audio engine)
     pub frequencies: Vec<f32>,
+    /// Start time in beats relative to pattern start
+    pub start_beat: f32,
     /// Duration in beats
     pub duration: f32,
     /// Whether this is a rest (silence)
@@ -280,6 +312,7 @@ fn convert_action(
 ) -> Option<ActionJS> {
     use crate::parser::ast::Value;
     use crate::parser::interpreter::InterpreterAction;
+    use crate::types::NoteInfo;
 
     match action {
         InterpreterAction::PlayExpression {
@@ -296,13 +329,16 @@ fn convert_action(
             // Extract events, envelope, and waveform based on value type
             let (events, envelope, waveform) = match value {
                 Value::Pattern(ref pattern) => {
+                    // Use to_rich_events() for full note identity
                     let events = pattern
-                        .to_events()
+                        .to_rich_events()
                         .into_iter()
-                        .map(|(freqs, duration, is_rest)| PlayEventJS {
-                            frequencies: freqs,
-                            duration,
-                            is_rest,
+                        .map(|event| PlayEventJS {
+                            notes: event.notes.iter().map(NoteInfoJS::from).collect(),
+                            frequencies: event.notes.iter().map(|n| n.frequency).collect(),
+                            start_beat: event.start_beat,
+                            duration: event.duration,
+                            is_rest: event.is_rest,
                         })
                         .collect();
                     let envelope = pattern.envelope;
@@ -310,17 +346,25 @@ fn convert_action(
                     (events, envelope, waveform)
                 }
                 Value::Chord(chord) => {
-                    let freqs: Vec<f32> = chord.notes_vec().iter().map(|n| n.frequency()).collect();
+                    // Create a rich event for a single chord
+                    let note_infos: Vec<NoteInfo> =
+                        chord.notes_vec().iter().map(NoteInfo::from_note).collect();
                     let events = vec![PlayEventJS {
-                        frequencies: freqs,
+                        notes: note_infos.iter().map(NoteInfoJS::from).collect(),
+                        frequencies: note_infos.iter().map(|n| n.frequency).collect(),
+                        start_beat: 0.0,
                         duration: 1.0, // Default 1 beat for single chord
                         is_rest: false,
                     }];
                     (events, None, None)
                 }
                 Value::Note(note) => {
+                    // Create a rich event for a single note
+                    let note_info = NoteInfo::from_note(&note);
                     let events = vec![PlayEventJS {
-                        frequencies: vec![note.frequency()],
+                        notes: vec![NoteInfoJS::from(&note_info)],
+                        frequencies: vec![note_info.frequency],
+                        start_beat: 0.0,
                         duration: 1.0,
                         is_rest: false,
                     }];
@@ -613,6 +657,8 @@ impl WasmInterpreter {
 
     // Helper to generate events for a specific beat index
     fn generate_beat_events(&mut self, beat: i32) -> Vec<ActionJS> {
+        use crate::types::NoteInfo;
+
         let env = self.interpreter.environment.read().unwrap();
         let evaluator = Evaluator::new();
         let mut js_actions = Vec::new();
@@ -625,16 +671,18 @@ impl WasmInterpreter {
                 Err(_) => continue, // Skip error
             };
 
-            // Convert to events (flat list with durations)
+            // Convert to rich events (with full note identity)
             let (events, envelope, waveform) = match value {
                 Value::Pattern(ref pattern) => {
                     let evs = pattern
-                        .to_events()
+                        .to_rich_events()
                         .into_iter()
-                        .map(|(freqs, duration, is_rest)| PlayEventJS {
-                            frequencies: freqs,
-                            duration,
-                            is_rest,
+                        .map(|event| PlayEventJS {
+                            notes: event.notes.iter().map(NoteInfoJS::from).collect(),
+                            frequencies: event.notes.iter().map(|n| n.frequency).collect(),
+                            start_beat: event.start_beat,
+                            duration: event.duration,
+                            is_rest: event.is_rest,
                         })
                         .collect();
                     let env = pattern.envelope;
@@ -642,10 +690,13 @@ impl WasmInterpreter {
                     (evs, env, wav)
                 }
                 Value::Chord(chord) => {
-                    let freqs: Vec<f32> = chord.notes_vec().iter().map(|n| n.frequency()).collect();
+                    let note_infos: Vec<NoteInfo> =
+                        chord.notes_vec().iter().map(NoteInfo::from_note).collect();
                     (
                         vec![PlayEventJS {
-                            frequencies: freqs,
+                            notes: note_infos.iter().map(NoteInfoJS::from).collect(),
+                            frequencies: note_infos.iter().map(|n| n.frequency).collect(),
+                            start_beat: 0.0,
                             duration: 1.0,
                             is_rest: false,
                         }],
@@ -653,15 +704,20 @@ impl WasmInterpreter {
                         None,
                     )
                 }
-                Value::Note(note) => (
-                    vec![PlayEventJS {
-                        frequencies: vec![note.frequency()],
-                        duration: 1.0,
-                        is_rest: false,
-                    }],
-                    None,
-                    None,
-                ),
+                Value::Note(note) => {
+                    let note_info = NoteInfo::from_note(&note);
+                    (
+                        vec![PlayEventJS {
+                            notes: vec![NoteInfoJS::from(&note_info)],
+                            frequencies: vec![note_info.frequency],
+                            start_beat: 0.0,
+                            duration: 1.0,
+                            is_rest: false,
+                        }],
+                        None,
+                        None,
+                    )
+                }
                 _ => continue,
             };
 
