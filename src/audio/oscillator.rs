@@ -3,41 +3,9 @@
 //! Provides `EnvelopedOscillator` for sample generation with ADSR envelopes
 //! and support for sine, saw, square, and triangle waveforms.
 
-use super::adsr::{AdsrEnvelope, AdsrParams};
+use super::adsr::AdsrEnvelope;
+use crate::types::audio_config::{AdsrParams, Waveform};
 use std::f32::consts::PI;
-
-/// Available waveform types
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Waveform {
-    #[default]
-    Sine,
-    Saw,
-    Square,
-    Triangle,
-}
-
-impl Waveform {
-    /// Parse waveform from string (case-insensitive)
-    pub fn from_str(s: &str) -> Option<Waveform> {
-        match s.to_lowercase().as_str() {
-            "sine" | "sin" => Some(Waveform::Sine),
-            "saw" | "sawtooth" => Some(Waveform::Saw),
-            "square" | "sq" => Some(Waveform::Square),
-            "triangle" | "tri" => Some(Waveform::Triangle),
-            _ => None,
-        }
-    }
-
-    /// Get display name
-    pub fn name(&self) -> &'static str {
-        match self {
-            Waveform::Sine => "sine",
-            Waveform::Saw => "saw",
-            Waveform::Square => "square",
-            Waveform::Triangle => "triangle",
-        }
-    }
-}
 
 /// Per-note oscillator state with ADSR amplitude envelope
 pub struct EnvelopedOscillator {

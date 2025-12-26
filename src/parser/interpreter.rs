@@ -2,10 +2,10 @@
 //!
 //! Executes statements with side effects (audio, variable binding, control flow).
 
-use crate::audio::playback_engine::QueueMode;
 use crate::parser::ast::{Expression, Program, Statement, Value};
 use crate::parser::environment::{Environment, SharedEnvironment};
 use crate::parser::evaluator::Evaluator;
+use crate::types::QueueMode;
 use anyhow::{Result, anyhow};
 use std::sync::{Arc, RwLock};
 

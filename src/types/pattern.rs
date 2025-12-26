@@ -3,7 +3,7 @@
 //! Enables cycle-based patterns like `"C E G _"` where all steps fit into one cycle,
 //! with support for rests, repetition, and grouping.
 
-use crate::audio::oscillator::Waveform;
+use super::audio_config::Waveform;
 use crate::types::{Chord, Note};
 use anyhow::{Result, anyhow};
 use std::fmt;

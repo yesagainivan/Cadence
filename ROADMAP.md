@@ -181,6 +181,7 @@ A production-ready music programming language for chord progressions and harmoni
 | `src/parser/environment.rs` | Thread-safe scoped variable storage |
 | `src/parser/interpreter.rs` | Statement execution |
 | `src/commands/` | Command registry pattern for REPL |
+| `src/types/audio_config.rs` | WASM-compatible config types (Waveform, AdsrParams, QueueMode) |
 
 ## Next Session Priorities
 
@@ -197,3 +198,5 @@ A production-ready music programming language for chord progressions and harmoni
 11. **MIDI Control Change** - CC messages for external control
 12. **Basic Effects** - reverb, delay, filter
 13. **modularize statement parser** - break down into smaller modules if needed
+14. **Web Editor** - See [ROADMAP-EDITOR.md](ROADMAP-EDITOR.md) for detailed phases
+

@@ -6,7 +6,8 @@ use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use super::oscillator::{EnvelopedOscillator, Waveform};
+use super::oscillator::EnvelopedOscillator;
+use crate::types::Waveform;
 
 /// State for a single audio track
 #[derive(Clone, Debug)]

@@ -11,8 +11,8 @@
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::{ClockTick, Duration};
 use crate::audio::midi::{MidiOutputHandle, frequency_to_midi};
-use crate::audio::oscillator::Waveform;
 use crate::parser::{Evaluator, Expression, SharedEnvironment, Value};
+use crate::types::Waveform;
 use anyhow::Result;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender, select};
 use std::collections::VecDeque;
@@ -221,17 +221,8 @@ impl ProgressionConfig {
     }
 }
 
-/// When to start a queued progression
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub enum QueueMode {
-    /// Start at the next beat boundary (default)
-    #[default]
-    Beat,
-    /// Start at the next bar boundary (beat 0, 4, 8, 12... in 4/4 time)
-    Bar,
-    /// Start when current pattern completes its cycle
-    Cycle,
-}
+// QueueMode is now defined in types::audio_config for WASM compatibility
+pub use crate::types::QueueMode;
 
 /// Commands that can be sent to the playback engine
 #[derive(Debug)]

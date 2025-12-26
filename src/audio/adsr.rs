@@ -31,67 +31,8 @@ pub enum EnvelopeStage {
     Release,
 }
 
-/// ADSR envelope parameters
-///
-/// - `attack`: Time in seconds to rise from 0 to peak (1.0)
-/// - `decay`: Time in seconds to fall from peak to sustain level
-/// - `sustain`: Level to hold while note is held (0.0-1.0, NOT time!)
-/// - `release`: Time in seconds to fall from sustain to 0 after note-off
-#[derive(Debug, Clone, Copy)]
-pub struct AdsrParams {
-    pub attack: f32,
-    pub decay: f32,
-    pub sustain: f32,
-    pub release: f32,
-}
-
-impl AdsrParams {
-    /// Create custom ADSR parameters
-    pub fn new(attack: f32, decay: f32, sustain: f32, release: f32) -> Self {
-        Self {
-            attack: attack.max(0.001), // Minimum 1ms to avoid clicks
-            decay: decay.max(0.0),
-            sustain: sustain.clamp(0.0, 1.0),
-            release: release.max(0.001), // Minimum 1ms to avoid clicks
-        }
-    }
-
-    /// Default envelope - smooth and musical
-    /// Good for general use, slight attack to prevent clicks
-    pub fn default_envelope() -> Self {
-        Self::new(0.01, 0.1, 0.7, 0.2)
-    }
-
-    /// Pluck - fast attack, quick decay, no sustain
-    /// Good for: plucked strings, pizzicato, synth plucks
-    pub fn pluck() -> Self {
-        Self::new(0.001, 0.15, 0.0, 0.1)
-    }
-
-    /// Pad - slow attack and release, high sustain
-    /// Good for: pads, strings, ambient textures
-    pub fn pad() -> Self {
-        Self::new(0.3, 0.2, 0.8, 0.5)
-    }
-
-    /// Percussion - instant attack, fast decay, no sustain
-    /// Good for: drums, percussion, staccato sounds
-    pub fn perc() -> Self {
-        Self::new(0.001, 0.2, 0.0, 0.05)
-    }
-
-    /// Organ - instant attack and release, full sustain
-    /// Good for: organ sounds, sustained tones
-    pub fn organ() -> Self {
-        Self::new(0.005, 0.0, 1.0, 0.01)
-    }
-}
-
-impl Default for AdsrParams {
-    fn default() -> Self {
-        Self::default_envelope()
-    }
-}
+// Re-export AdsrParams from the canonical location in types
+pub use crate::types::audio_config::AdsrParams;
 
 /// Per-sample ADSR envelope generator
 ///
