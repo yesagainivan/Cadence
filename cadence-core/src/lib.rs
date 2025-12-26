@@ -6,6 +6,8 @@
 //! ## Features
 //!
 //! - **serde**: Enable JSON serialization for web interop
+//! - **wasm**: Enable WASM bindings via wasm-bindgen
+//! - **colored**: Enable colored terminal output (disabled in WASM)
 //!
 //! ## Example
 //!
@@ -19,6 +21,10 @@
 
 pub mod parser;
 pub mod types;
+pub mod wasm;
 
 // Re-export commonly used types
 pub use types::{AdsrParams, Chord, Note, Pattern, QueueMode, Waveform};
+
+// Re-export WASM functions when wasm feature is enabled
+pub use wasm::{tokenize_for_highlighting, HighlightSpan};

@@ -12,6 +12,7 @@ anyhow = "1.0"
 default = ["colored"]
 serde = ["dep:serde"]
 colored = ["dep:colored"]
+wasm = ["dep:wasm-bindgen", "serde", "dep:serde-wasm-bindgen"]
 
 [dependencies.serde]
 version = "1.0"
@@ -20,6 +21,14 @@ optional = true
 
 [dependencies.colored]
 version = "3.0"
+optional = true
+
+[dependencies.wasm-bindgen]
+version = "0.2"
+optional = true
+
+[dependencies.serde-wasm-bindgen]
+version = "0.6"
 optional = true
 
 [lib]
