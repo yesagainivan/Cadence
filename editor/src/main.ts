@@ -6,13 +6,13 @@
  */
 
 import './style.css';
-import { EditorState, StateEffect, StateField } from '@codemirror/state';
-import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightActiveLine, Decoration, DecorationSet } from '@codemirror/view';
+import { EditorState } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightActiveLine } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
-import { cadence } from './lang-cadence';
+import { cadenceWasm } from './lang-cadence-wasm';
 import { initWasm, parseCode, tokenizeCode, isWasmReady, type HighlightSpan } from './cadence-wasm';
 
 // Sample Cadence code
@@ -97,8 +97,8 @@ function createEditor(container: HTMLElement): EditorView {
         ...searchKeymap,
       ]),
 
-      // Cadence language support (uses stream tokenizer as fallback)
-      cadence(),
+      // Cadence language support (WASM-powered highlighting)
+      cadenceWasm(),
 
       // Theme
       darkTheme,
@@ -149,7 +149,7 @@ function scheduleValidation(view: EditorView): void {
 
   validationTimer = window.setTimeout(() => {
     validateCode(view);
-  }, 300);
+  }, 200);
 }
 
 /**
