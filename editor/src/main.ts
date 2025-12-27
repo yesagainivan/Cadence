@@ -329,8 +329,43 @@ async function init(): Promise<void> {
         }
 
         editor.dispatch(transaction);
+      } else if (change.type === 'envelope') {
+        const [a, d, s, r] = change.value as number[];
+
+        // Check if .env(...) already exists in the statement
+        const envRegex = /\.env\s*\([^)]*\)/g;
+        const match = envRegex.exec(fullStatementText);
+
+        let transaction;
+
+        if (match && match.index !== undefined) {
+          // Replace existing .env(...) at exact position
+          const matchStart = spanStart + match.index;
+          const matchEnd = matchStart + match[0].length;
+          transaction = editor.state.update({
+            changes: {
+              from: matchStart,
+              to: matchEnd,
+              insert: `.env(${a}, ${d}, ${s}, ${r})`,
+            },
+          });
+          console.log(`✏️ Replaced envelope: ${match[0]} → .env(${a}, ${d}, ${s}, ${r})`);
+        } else {
+          // Insert .env(...) at end of base statement (spanEnd, not fullEnd)
+          transaction = editor.state.update({
+            changes: {
+              from: spanEnd,
+              to: spanEnd,
+              insert: `.env(${a}, ${d}, ${s}, ${r})`,
+            },
+          });
+          console.log(`✏️ Added envelope at pos ${spanEnd}: .env(${a}, ${d}, ${s}, ${r})`);
+        }
+
+        editor.dispatch(transaction);
       }
     });
+
 
 
     log('✓ Properties panel initialized');

@@ -6,6 +6,7 @@
  */
 
 import type { CursorContext, EditableProperties } from './cadence-wasm';
+import { ADSREditor, DEFAULT_ADSR } from './adsr-editor';
 
 /** Waveform options for the picker */
 const WAVEFORMS = ['sine', 'saw', 'square', 'triangle'] as const;
@@ -34,6 +35,7 @@ export class PropertiesPanel {
     private container: HTMLElement;
     private currentContext: CursorContext | null = null;
     private onPropertyChange: PropertyChangeHandler | null = null;
+    private adsrEditor: ADSREditor | null = null;
 
     constructor(containerId: string) {
         const el = document.getElementById(containerId);
@@ -126,10 +128,9 @@ export class PropertiesPanel {
             propsContainer.appendChild(this.createValueRow('Cycle', `${props.beats_per_cycle} beats`));
         }
 
-        // Envelope (for patterns with custom envelope)
-        if (props.envelope) {
-            const [a, d, s, r] = props.envelope;
-            propsContainer.appendChild(this.createValueRow('Envelope', `A:${a} D:${d} S:${s} R:${r}`));
+        // Envelope editor (for patterns)
+        if (valueType === 'pattern') {
+            propsContainer.appendChild(this.createEnvelopeEditor(props.envelope));
         }
 
         this.container.appendChild(propsContainer);
@@ -184,6 +185,42 @@ export class PropertiesPanel {
     }
 
     /**
+     * Create envelope editor element with interactive ADSR visualization
+     */
+    private createEnvelopeEditor(currentEnvelope: [number, number, number, number] | null | undefined): HTMLElement {
+        const row = document.createElement('div');
+        row.className = 'property-row';
+
+        const label = document.createElement('label');
+        label.textContent = 'Envelope';
+        row.appendChild(label);
+
+        const editorContainer = document.createElement('div');
+        editorContainer.className = 'adsr-editor-container';
+        row.appendChild(editorContainer);
+
+        // Use current envelope or defaults
+        const initialValues: [number, number, number, number] = currentEnvelope || DEFAULT_ADSR;
+
+        // Create the ADSR editor
+        this.adsrEditor = new ADSREditor(editorContainer, initialValues);
+
+        // Fire callback when envelope changes
+        this.adsrEditor.onValueChange((values) => {
+            if (this.onPropertyChange && this.currentContext) {
+                this.onPropertyChange({
+                    type: 'envelope',
+                    value: values,
+                    spanStart: this.currentContext.span.utf16_start,
+                    spanEnd: this.currentContext.span.utf16_end,
+                });
+            }
+        });
+
+        return row;
+    }
+
+    /**
      * Create a read-only value row
      */
     private createValueRow(label: string, value: string): HTMLElement {
@@ -195,6 +232,7 @@ export class PropertiesPanel {
         `;
         return row;
     }
+
 
     /**
      * Render info for values without editable properties
