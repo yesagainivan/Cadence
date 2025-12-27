@@ -142,7 +142,7 @@ export class ADSREditor {
 
     private onMouseMove(e: MouseEvent): void {
         if (this.dragging) {
-            this.updateValueFromMouse(e.offsetX, e.offsetY);
+            this.updateValueFromDelta(e.movementX, e.movementY);
             this.render();
             this.updateValuesDisplay();
             if (this.onChange) {
@@ -189,45 +189,42 @@ export class ADSREditor {
     }
 
     /**
-     * Update value based on mouse position during drag
+     * Update value based on mouse movement (delta)
      */
-    private updateValueFromMouse(x: number, y: number): void {
-        const plotWidth = this.width - this.padding.left - this.padding.right;
+    private updateValueFromDelta(dx: number, dy: number): void {
         const plotHeight = this.height - this.padding.top - this.padding.bottom;
 
-        const [a, d, _s, r] = this.values;
-        const totalTime = a + d + r;
-        const timeScale = plotWidth / (totalTime || 1);
+        // Scale factor: how many ms per pixel of movement?
+        // Let's say 100px = 500ms -> 5ms/px
+        const TIME_SCALE = 5;
 
         switch (this.dragging) {
             case 'attack': {
-                // Attack: horizontal drag changes attack time
-                const attackX = Math.max(0, Math.min(plotWidth * 0.3, x - this.padding.left));
-                const newAttack = Math.round((attackX / timeScale) * (totalTime / plotWidth) * 500);
-                this.values[0] = Math.max(RANGES.attack.min, Math.min(RANGES.attack.max, newAttack));
+                const current = this.values[0];
+                const newValue = current + (dx * TIME_SCALE);
+                this.values[0] = Math.max(RANGES.attack.min, Math.min(RANGES.attack.max, newValue));
                 break;
             }
             case 'decay': {
-                // Decay: horizontal drag from attack point
-                const attackX = this.padding.left + (a / totalTime) * plotWidth;
-                const decayX = Math.max(attackX, Math.min(this.padding.left + plotWidth * 0.6, x));
-                const newDecay = Math.round(((decayX - attackX) / plotWidth) * totalTime);
-                this.values[1] = Math.max(RANGES.decay.min, Math.min(RANGES.decay.max, newDecay));
+                const current = this.values[1];
+                const newValue = current + (dx * TIME_SCALE);
+                this.values[1] = Math.max(RANGES.decay.min, Math.min(RANGES.decay.max, newValue));
                 break;
             }
             case 'sustain': {
-                // Sustain: vertical drag changes sustain level
-                const sustainY = Math.max(this.padding.top, Math.min(this.padding.top + plotHeight, y));
-                const newSustain = Math.round((1 - (sustainY - this.padding.top) / plotHeight) * 100);
-                this.values[2] = Math.max(RANGES.sustain.min, Math.min(RANGES.sustain.max, newSustain));
+                const current = this.values[2];
+                // dy is positive down, so negative dy means increase sustain (up)
+                // 100% is top, 0% is bottom. 
+                // plotHeight pixels = 100%.
+                const percentChange = -(dy / plotHeight) * 100;
+                const newValue = current + percentChange;
+                this.values[2] = Math.max(RANGES.sustain.min, Math.min(RANGES.sustain.max, newValue));
                 break;
             }
             case 'release': {
-                // Release: horizontal drag from sustain end
-                const sustainEndX = this.padding.left + ((a + d) / totalTime) * plotWidth;
-                const releaseX = Math.max(sustainEndX, Math.min(this.padding.left + plotWidth, x));
-                const newRelease = Math.round(((releaseX - sustainEndX) / plotWidth) * totalTime);
-                this.values[3] = Math.max(RANGES.release.min, Math.min(RANGES.release.max, newRelease));
+                const current = this.values[3];
+                const newValue = current + (dx * TIME_SCALE);
+                this.values[3] = Math.max(RANGES.release.min, Math.min(RANGES.release.max, newValue));
                 break;
             }
         }
@@ -339,10 +336,11 @@ export class ADSREditor {
     private updateValuesDisplay(): void {
         const [a, d, s, r] = this.values;
         this.valuesDisplay.innerHTML = `
-            <span class="adsr-value"><span class="adsr-label">A</span>${a}ms</span>
-            <span class="adsr-value"><span class="adsr-label">D</span>${d}ms</span>
-            <span class="adsr-value"><span class="adsr-label">S</span>${s}%</span>
-            <span class="adsr-value"><span class="adsr-label">R</span>${r}ms</span>
+            <span class="adsr-value"><span class="adsr-label">A</span>${Math.round(a)}ms</span>
+            <span class="adsr-value"><span class="adsr-label">D</span>${Math.round(d)}ms</span>
+            <span class="adsr-value"><span class="adsr-label">S</span>${Math.round(s)}%</span>
+            <span class="adsr-value"><span class="adsr-label">R</span>${Math.round(r)}ms</span>
         `;
     }
 }
+

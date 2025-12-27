@@ -200,7 +200,17 @@ export class PropertiesPanel {
         row.appendChild(editorContainer);
 
         // Use current envelope or defaults
-        const initialValues: [number, number, number, number] = currentEnvelope || DEFAULT_ADSR;
+        // WASM returns raw float values (0.0-5.0), but Editor expects ms/percentage (0-500/0-100).
+        // The evaluator divides input arguments by 100, so we need to multiply by 100 here
+        // to match the values we want to display and write back to the code.
+        const initialValues: [number, number, number, number] = currentEnvelope
+            ? [
+                currentEnvelope[0] * 100,
+                currentEnvelope[1] * 100,
+                currentEnvelope[2] * 100,
+                currentEnvelope[3] * 100
+            ]
+            : DEFAULT_ADSR;
 
         // Create the ADSR editor
         this.adsrEditor = new ADSREditor(editorContainer, initialValues);
@@ -208,9 +218,12 @@ export class PropertiesPanel {
         // Fire callback when envelope changes
         this.adsrEditor.onValueChange((values) => {
             if (this.onPropertyChange && this.currentContext) {
+                // Round values to integers to avoid ugly floats in code
+                const roundedValues = values.map(v => Math.round(v));
+
                 this.onPropertyChange({
                     type: 'envelope',
-                    value: values,
+                    value: roundedValues as number[],
                     spanStart: this.currentContext.span.utf16_start,
                     spanEnd: this.currentContext.span.utf16_end,
                 });
