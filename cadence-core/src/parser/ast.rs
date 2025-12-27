@@ -369,6 +369,10 @@ pub enum Expression {
 
     /// Numeric literal: 20, 100, etc.
     Number(i32),
+
+    /// Pre-evaluated value (for dynamic function dispatch)
+    /// Used when we need to pass an already-evaluated Value back through as an Expression
+    Value(Box<Value>),
 }
 
 /// Comparison operators
@@ -444,6 +448,7 @@ impl fmt::Display for Expression {
             Expression::Pattern(pattern) => write!(f, "{}", pattern),
             Expression::String(s) => write!(f, "\"{}\"", s),
             Expression::Number(n) => write!(f, "{}", n),
+            Expression::Value(v) => write!(f, "{}", v),
         }
     }
 }

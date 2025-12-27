@@ -137,6 +137,8 @@ impl Evaluator {
                 };
                 Ok(Value::Boolean(result))
             }
+            // Pre-evaluated value - just unwrap it
+            Expression::Value(v) => Ok(*v),
         }
     }
 
@@ -234,6 +236,29 @@ impl Evaluator {
         }
 
         Err(anyhow!("Unknown function: {}", name))
+    }
+
+    /// Call a function by name with already-evaluated Value arguments.
+    /// This enables dynamic dispatch - passing functions as arguments to higher-order functions like map().
+    ///
+    /// # Arguments
+    /// * `name` - The function name (can be builtin or user-defined)
+    /// * `arg_values` - Already-evaluated argument values
+    /// * `env` - Optional environment for user-defined function lookup
+    pub fn call_function_by_name(
+        &self,
+        name: &str,
+        arg_values: Vec<Value>,
+        env: Option<&crate::parser::environment::Environment>,
+    ) -> Result<Value> {
+        // Convert Values to Expressions by wrapping them
+        let args: Vec<Expression> = arg_values
+            .into_iter()
+            .map(|v| Expression::Value(Box::new(v)))
+            .collect();
+
+        // Delegate to the existing function evaluation logic
+        self.eval_function_with_env(name, args, env)
     }
 
     /// Format numeric progression names for display with proper chord types

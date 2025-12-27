@@ -658,7 +658,7 @@ impl FunctionRegistry {
         self.register(
             "map",
             "Pattern",
-            "Applies a function to every chord in a pattern.",
+            "Applies a function to every chord in a pattern. Works with any function that takes a chord/note.",
             "map(function: Function, progression: Pattern) -> Pattern",
             Arc::new(|evaluator, args, env| {
                 if args.len() != 2 {
@@ -675,6 +675,7 @@ impl FunctionRegistry {
                         name,
                         args: func_args,
                     } if func_args.is_empty() => name.clone(),
+                    Expression::String(s) => s.clone(),
                     _ => {
                         return Err(anyhow!("map() first argument must be a function name"));
                     }
@@ -682,25 +683,67 @@ impl FunctionRegistry {
 
                 let progression_value = evaluator.eval_with_env(progression_expr, env)?;
                 if let Value::Pattern(pattern) = progression_value {
-                    // Apply known chord transformations
-                    let mapped = match func_name.as_str() {
-                        "invert" => pattern.map_chords(|chord| chord.invert()),
-                        "rev" | "reverse" => pattern.rev(),
-                        _ => {
-                            // Try to evaluate as a function call on each chord
-                            // For now, return an error with helpful message
-                            return Err(anyhow!(
-                                "map() only supports: invert, rev. Got: {}",
-                                func_name
-                            ));
+                    // Extract chords from pattern
+                    if let Some(chords) = pattern.as_chords() {
+                        // Apply the function to each chord using dynamic dispatch
+                        let mut mapped_chords = Vec::new();
+                        for chord in chords {
+                            let result = evaluator.call_function_by_name(
+                                &func_name,
+                                vec![Value::Chord(chord.clone())],
+                                env,
+                            )?;
+                            
+                            // Extract the chord from the result
+                            match result {
+                                Value::Chord(c) => mapped_chords.push(c),
+                                Value::Note(n) => {
+                                    // Single note returned - wrap in chord
+                                    mapped_chords.push(crate::types::Chord::from_notes(vec![n]));
+                                }
+                                Value::Pattern(p) => {
+                                    // If function returned a pattern, extract its chords
+                                    if let Some(inner_chords) = p.as_chords() {
+                                        mapped_chords.extend(inner_chords);
+                                    } else {
+                                        return Err(anyhow!(
+                                            "map(): function '{}' returned non-chord pattern",
+                                            func_name
+                                        ));
+                                    }
+                                }
+                                _ => {
+                                    return Err(anyhow!(
+                                        "map(): function '{}' must return a chord, got {:?}",
+                                        func_name,
+                                        result
+                                    ));
+                                }
+                            }
                         }
-                    };
-                    Ok(Value::Pattern(mapped))
+                        
+                        // Rebuild pattern from mapped chords
+                        let mut result = crate::types::Pattern::from_chords(mapped_chords);
+                        result.beats_per_cycle = pattern.beats_per_cycle;
+                        result.envelope = pattern.envelope;
+                        result.waveform = pattern.waveform;
+                        Ok(Value::Pattern(result))
+                    } else {
+                        // Pattern has non-chord steps - fall back to whole-pattern operations
+                        // Try calling the function on the whole pattern
+                        let result = evaluator.call_function_by_name(
+                            &func_name,
+                            vec![Value::Pattern(pattern)],
+                            env,
+                        )?;
+                        Ok(result)
+                    }
                 } else {
-                    Err(anyhow!("map() second argument must be a progression"))
+                    Err(anyhow!("map() second argument must be a pattern"))
                 }
             }),
         );
+
 
         // Voice Leading
 
