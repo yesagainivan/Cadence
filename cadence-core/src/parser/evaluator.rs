@@ -73,6 +73,7 @@ impl Evaluator {
                     Value::String(_) => Err(anyhow!("Cannot transpose a string")),
                     Value::Function { .. } => Err(anyhow!("Cannot transpose a function")),
                     Value::Unit => Err(anyhow!("Cannot transpose unit")),
+                    Value::Array(_) => Err(anyhow!("Cannot transpose an array")),
                 }
             }
             Expression::Intersection { left, right } => {
@@ -140,6 +141,30 @@ impl Evaluator {
             }
             // Pre-evaluated value - just unwrap it
             Expression::Value(v) => Ok(*v),
+
+            // Array of expressions - evaluate all elements
+            // If all elements are notes, construct a Chord; otherwise, return Array
+            Expression::Array(elements) => {
+                let values: Vec<Value> = elements
+                    .into_iter()
+                    .map(|e| self.eval_with_env(e, env))
+                    .collect::<Result<Vec<_>>>()?;
+
+                // Check if ALL values are notes → construct a Chord
+                if values.iter().all(|v| matches!(v, Value::Note(_))) {
+                    let notes: Vec<Note> = values
+                        .into_iter()
+                        .map(|v| match v {
+                            Value::Note(n) => n,
+                            _ => unreachable!(),
+                        })
+                        .collect();
+                    Ok(Value::Chord(Chord::from_notes(notes)))
+                } else {
+                    // Otherwise, return as Array
+                    Ok(Value::Array(values))
+                }
+            }
         }
     }
 

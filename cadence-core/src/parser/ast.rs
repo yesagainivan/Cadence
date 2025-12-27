@@ -373,6 +373,10 @@ pub enum Expression {
     /// Pre-evaluated value (for dynamic function dispatch)
     /// Used when we need to pass an already-evaluated Value back through as an Expression
     Value(Box<Value>),
+
+    /// Array of expressions: [root, third, fifth] or [C4, E4, G4]
+    /// Resolved to Chord at evaluation time if all elements are notes
+    Array(Vec<Expression>),
 }
 
 /// Comparison operators
@@ -400,6 +404,8 @@ pub enum Value {
     },
     /// Unit value (void) - for functions that don't return anything
     Unit,
+    /// Array of values (when elements are not all notes)
+    Array(Vec<Value>),
 }
 
 impl fmt::Display for Expression {
@@ -451,6 +457,16 @@ impl fmt::Display for Expression {
             Expression::String(s) => write!(f, "\"{}\"", s),
             Expression::Number(n) => write!(f, "{}", n),
             Expression::Value(v) => write!(f, "{}", v),
+            Expression::Array(elements) => {
+                write!(f, "[")?;
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", elem)?;
+                }
+                write!(f, "]")
+            }
         }
     }
 }
@@ -468,6 +484,16 @@ impl fmt::Display for Value {
                 write!(f, "<fn {}({})>", name, params.join(", "))
             }
             Value::Unit => write!(f, "()"),
+            Value::Array(values) => {
+                write!(f, "[")?;
+                for (i, val) in values.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", val)?;
+                }
+                write!(f, "]")
+            }
         }
     }
 }

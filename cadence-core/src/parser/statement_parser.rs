@@ -711,7 +711,7 @@ impl StatementParser {
                 }
             }
 
-            Token::LeftBracket => self.parse_expr_chord(),
+            Token::LeftBracket => self.parse_bracket_expression(),
 
             Token::LeftDoubleBracket => self.parse_expr_progression(),
 
@@ -761,46 +761,30 @@ impl StatementParser {
         }
     }
 
-    /// Parse a chord literal: [C, E, G]
-    fn parse_expr_chord(&mut self) -> Result<Expression> {
+    /// Parse bracket expression: [expr, expr, ...]
+    /// Returns Expression::Array - evaluator decides if it becomes a Chord or Array
+    fn parse_bracket_expression(&mut self) -> Result<Expression> {
         self.expect(&Token::LeftBracket)?;
 
-        let mut notes = Vec::new();
+        let mut elements = Vec::new();
 
-        // Parse first note
-        if let Token::Note(note_str) = self.current().clone() {
-            let note: crate::types::Note = note_str
-                .parse()
-                .map_err(|e| anyhow!("Invalid note '{}': {}", note_str, e))?;
-            notes.push(note);
+        // Handle empty array
+        if matches!(self.current(), Token::RightBracket) {
             self.advance();
-        } else {
-            return Err(anyhow!(
-                "Expected note in chord, found {:?}",
-                self.current()
-            ));
+            return Ok(Expression::Array(elements));
         }
 
-        // Parse remaining notes
+        // Parse first element (any expression)
+        elements.push(self.parse_expression()?);
+
+        // Parse remaining elements
         while matches!(self.current(), Token::Comma) {
             self.advance(); // consume ','
-
-            if let Token::Note(note_str) = self.current().clone() {
-                let note: crate::types::Note = note_str
-                    .parse()
-                    .map_err(|e| anyhow!("Invalid note '{}': {}", note_str, e))?;
-                notes.push(note);
-                self.advance();
-            } else {
-                return Err(anyhow!(
-                    "Expected note after comma, found {:?}",
-                    self.current()
-                ));
-            }
+            elements.push(self.parse_expression()?);
         }
 
         self.expect(&Token::RightBracket)?;
-        Ok(Expression::Chord(crate::types::Chord::from_notes(notes)))
+        Ok(Expression::Array(elements))
     }
 
     /// Parse a progression literal: [[C, E, G], [F, A, C]]
@@ -1003,14 +987,14 @@ mod expression_tests {
 
     #[test]
     fn test_parse_chord() {
+        // Post-refactor: parser returns Expression::Array, evaluator coerces to Chord
         let expr = parse("[C, E, G]").unwrap();
-        assert!(matches!(expr, Expression::Chord(_)));
+        assert!(matches!(expr, Expression::Array(_)));
 
-        if let Expression::Chord(chord) = expr {
-            assert_eq!(chord.len(), 3);
-            assert!(chord.contains(&"C".parse().unwrap()));
-            assert!(chord.contains(&"E".parse().unwrap()));
-            assert!(chord.contains(&"G".parse().unwrap()));
+        if let Expression::Array(elements) = expr {
+            assert_eq!(elements.len(), 3);
+            // Each element should be a Note expression
+            assert!(elements.iter().all(|e| matches!(e, Expression::Note(_))));
         }
     }
 
@@ -1061,7 +1045,7 @@ mod expression_tests {
 
         if let Expression::Transpose { target, semitones } = expr {
             assert_eq!(semitones, 2);
-            assert!(matches!(*target, Expression::Chord(_)));
+            assert!(matches!(*target, Expression::Array(_)));
         }
     }
 
@@ -1072,7 +1056,7 @@ mod expression_tests {
 
         if let Expression::Transpose { target, semitones } = expr {
             assert_eq!(semitones, -5);
-            assert!(matches!(*target, Expression::Chord(_)));
+            assert!(matches!(*target, Expression::Array(_)));
         }
     }
 
@@ -1082,8 +1066,8 @@ mod expression_tests {
         assert!(matches!(expr, Expression::Intersection { .. }));
 
         if let Expression::Intersection { left, right } = expr {
-            assert!(matches!(*left, Expression::Chord(_)));
-            assert!(matches!(*right, Expression::Chord(_)));
+            assert!(matches!(*left, Expression::Array(_)));
+            assert!(matches!(*right, Expression::Array(_)));
         }
     }
 
@@ -1107,7 +1091,7 @@ mod expression_tests {
         if let Expression::FunctionCall { name, args } = expr {
             assert_eq!(name, "invert");
             assert_eq!(args.len(), 1);
-            assert!(matches!(args[0], Expression::Chord(_)));
+            assert!(matches!(args[0], Expression::Array(_)));
         }
     }
 
@@ -1120,7 +1104,7 @@ mod expression_tests {
             assert_eq!(name, "test");
             assert_eq!(args.len(), 2);
             assert!(matches!(args[0], Expression::Note(_)));
-            assert!(matches!(args[1], Expression::Chord(_)));
+            assert!(matches!(args[1], Expression::Array(_)));
         }
     }
 
@@ -1139,7 +1123,7 @@ mod expression_tests {
         if let Expression::Intersection { left, right } = expr {
             // Left side should be a transpose operation
             assert!(matches!(*left, Expression::Transpose { .. }));
-            assert!(matches!(*right, Expression::Chord(_)));
+            assert!(matches!(*right, Expression::Array(_)));
         }
     }
 
@@ -1150,15 +1134,17 @@ mod expression_tests {
     }
 
     #[test]
-    fn test_parse_error_invalid_note() {
+    fn test_parse_array_with_variable() {
         // X is not a valid note name, so lexer treats it as identifier
-        // Parser expects a note in chord, gets identifier -> specific error message
+        // With new Expression::Array, this parses successfully as [Variable, Note, Note]
         let result = parse("[X, E, G]");
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Expected note in chord"));
+        assert!(result.is_ok());
+        if let Expression::Array(elements) = result.unwrap() {
+            assert_eq!(elements.len(), 3);
+            assert!(matches!(&elements[0], Expression::Variable(n) if n == "X"));
+            assert!(matches!(&elements[1], Expression::Note(_)));
+            assert!(matches!(&elements[2], Expression::Note(_)));
+        }
     }
 
     #[test]

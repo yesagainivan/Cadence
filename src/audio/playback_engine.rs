@@ -97,6 +97,7 @@ impl PlaybackSource {
                 name
             )),
             Value::Unit => Err(anyhow::anyhow!("Cannot play unit (void)")),
+            Value::Array(_) => Err(anyhow::anyhow!("Cannot play an array directly")),
         }
     }
 
