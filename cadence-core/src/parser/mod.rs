@@ -1,6 +1,7 @@
 // cadence-core/src/parser/mod.rs
 
 pub mod ast;
+pub mod builtins;
 pub mod environment;
 pub mod evaluator;
 pub mod interpreter;

@@ -218,6 +218,35 @@ pub fn parse_and_check(input: &str) -> JsValue {
     }
 }
 
+/// Documentation item for a built-in function (JS-serializable)
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DocItemJS {
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub signature: String,
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn get_documentation() -> JsValue {
+    let registry = crate::parser::builtins::get_registry();
+    let docs = registry.get_documentation();
+
+    let js_docs: Vec<DocItemJS> = docs
+        .into_iter()
+        .map(|d| DocItemJS {
+            name: d.name,
+            category: d.category,
+            description: d.description,
+            signature: d.signature,
+        })
+        .collect();
+
+    serde_wasm_bindgen::to_value(&js_docs).unwrap_or(JsValue::NULL)
+}
+
 #[cfg(feature = "wasm")]
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ParseResult {

@@ -27,11 +27,15 @@ let pads = "[C4, E4, G4] [C4, D4, G4] [Bb3, D4, F4] [F3, A3, C4]".env(1,50,40,1)
 
 pads = smooth_voice_leading(pads);
 
+every(2, "rev", "");
+
+analyze_progression(chords, C);
+
 // Bass: Strong root notes following the harmony
 // Using slow() to make each note last 2 beats
 // let bass = slow("C2 C2 Bb1 Bb1 F1", 2)
 // let bass = slow("C2 C2 Bb1 Bb1 F1", 2).env(1,10,1,1);
-let bass = slow("C2 [Bb1 F1]", 2).env(1,50,40,1);
+let bass = slow("C2 [Bb1 F1]", 2).env(3,50,40,1);
 
 // Arpeggios: Fast broken chords - the shimmer layer
 // fast() doubles the speed, giving us flowing 8th notes  
@@ -80,7 +84,7 @@ on 5 play shine + 0 queue loop; track 5 volume 30;
 track 1 volume 10
 
 // Track 2: Bass - subtle but present
-track 2 volume 50
+track 2 volume 40
 
 // Track 3: Shimmer - gentle texture
 track 3 volume 25
@@ -136,5 +140,5 @@ fn oral (key, value) {
    
 }
 
-play oral(C,10) loop;
+on 8 {play oral(C,10) loop volume 5};
 

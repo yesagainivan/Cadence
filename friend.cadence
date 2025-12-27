@@ -1,0 +1,41 @@
+// Welcome to Cadence!
+// A music programming language for live coding
+
+// Set the tempo
+tempo 90
+
+
+// Create a pattern
+let pattern = "C E G _ E G C _".env(1, 21, 0, 16).wave("sine") + 0
+
+// let bass = "[C3 _ _ _ _ _ _ D3 _] F3 G2 E3".env(6, 21, 21, 1).wave("sine")  - 12;
+let bass = "[C3 _ _ C3] [_ C3]".fast(2).env(6, 21, 21, 1).wave("sine")  - 12;
+
+volume 10
+
+repeat 1 {
+   on 3 play bass loop volume 10
+
+   on 9 {play "_ E".fast(4) loop volume 10}
+}
+
+let synth = "C*2 D G*2 E".rev()
+let synth = "C*2 D G*2 A".rev() 
+synth = map(invert, synth);
+
+
+
+on 4 {play synth loop volume 4}
+
+
+let constant = "C D E G".fast(2).fast(2);
+on 5 {play constant loop volume 5}
+
+
+
+let chords = "[C,G,E3] [[Bb3, G,F3] [[Bb3, F,G] [G,F3,C4]]]".env(36, 36, 23, 6).wave("sine").slow(2).slow(2);
+
+chords = smooth_voice_leading(chords);
+
+
+on 6 {play chords loop volume 20}

@@ -5,7 +5,7 @@
  * providing access to tokenization and parsing functions.
  */
 
-import init, { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, WasmInterpreter } from './wasm/cadence_core.js';
+import init, { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, WasmInterpreter } from './wasm/cadence_core.js';
 
 export interface HighlightSpan {
     start_line: number;
@@ -23,6 +23,14 @@ export interface HighlightSpan {
 export interface ParseResult {
     success: boolean;
     error: string | null;
+}
+
+/** Documentation for built-in functions */
+export interface DocItem {
+    name: string;
+    category: string;
+    description: string;
+    signature: string;
 }
 
 // ============================================================================
@@ -277,4 +285,22 @@ export function getContextAtCursor(code: string, position: number): CursorContex
 }
 
 // Re-export for convenience
-export { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, WasmInterpreter };
+/**
+ * Get documentation for all built-in functions
+ */
+export function getDocumentation(): DocItem[] {
+    if (!wasmInitialized) {
+        return [];
+    }
+
+    try {
+        const result = get_documentation();
+        return result as DocItem[];
+    } catch (e) {
+        console.error('Get documentation error:', e);
+        return [];
+    }
+}
+
+// Re-export for convenience
+export { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, WasmInterpreter };

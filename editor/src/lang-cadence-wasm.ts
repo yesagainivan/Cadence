@@ -8,6 +8,7 @@
 import { EditorView, Decoration, ViewPlugin, type ViewUpdate, type DecorationSet } from '@codemirror/view';
 import { RangeSetBuilder, type Extension } from '@codemirror/state';
 import { tokenizeCode, isWasmReady, type HighlightSpan } from './cadence-wasm';
+import { cadenceHover } from './hover';
 
 // Token type to CSS class mapping
 const TOKEN_CLASSES: Record<string, string> = {
@@ -115,6 +116,7 @@ const wasmHighlightPlugin = ViewPlugin.fromClass(
 export function cadenceWasm(): Extension {
     return [
         wasmHighlightPlugin,
+        cadenceHover,
         // Base theme for token colors (dark theme)
         EditorView.baseTheme({
             '.cm-cadence-keyword': { color: '#e94560', fontWeight: '600' },
