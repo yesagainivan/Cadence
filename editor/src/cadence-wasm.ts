@@ -53,6 +53,14 @@ export interface PlayEvent {
     is_rest: boolean;
 }
 
+/** Pattern events with cycle timing info (returned by get_events_at_position) */
+export interface PatternEvents {
+    /** Individual playback events */
+    events: PlayEvent[];
+    /** Total beats in one pattern cycle (affected by fast/slow) */
+    beats_per_cycle: number;
+}
+
 /** Play action with pattern events */
 export interface PlayAction {
     type: 'Play';
@@ -188,16 +196,16 @@ export function runScript(input: string): ScriptResult {
 
 /**
  * Get play events for the statement at the given cursor position
- * Returns the events for rendering in the piano roll
+ * Returns PatternEvents with events and cycle timing for piano roll rendering
  */
-export function getEventsAtPosition(code: string, position: number): PlayEvent[] | null {
+export function getEventsAtPosition(code: string, position: number): PatternEvents | null {
     if (!wasmInitialized) {
         return null;
     }
 
     try {
         const result = get_events_at_position(code, position);
-        return result as PlayEvent[] | null;
+        return result as PatternEvents | null;
     } catch (e) {
         console.error('Get events at position error:', e);
         return null;

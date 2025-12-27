@@ -5,7 +5,7 @@
  * Uses rich event data (NoteInfo with MIDI notes, names, etc.) for accurate rendering.
  */
 
-import type { PlayEvent } from './cadence-wasm';
+import type { PlayEvent, PatternEvents } from './cadence-wasm';
 
 // Note colors by pitch class (chromatic circle)
 const PITCH_COLORS: Record<number, string> = {
@@ -39,6 +39,7 @@ export class PianoRoll {
     private minNote: number = 48;  // C3
     private maxNote: number = 84;  // C6
     private totalBeats: number = 4;
+    private beatsPerCycle: number = 4;  // Explicit cycle length from pattern
 
     // Playhead state
     private playheadBeat: number = 0;
@@ -83,41 +84,41 @@ export class PianoRoll {
 
     /**
      * Update and render new events
+     * @param patternEvents - Pattern events with cycle timing info
      */
-    update(events: PlayEvent[]): void {
-        this.events = events;
+    update(patternEvents: PatternEvents): void {
+        this.events = patternEvents.events;
+        this.beatsPerCycle = patternEvents.beats_per_cycle;
         this.calculateRange();
-        this.render(events);
+        this.render(this.events);
     }
 
     /**
-     * Calculate visible note range and beat count from events
+     * Calculate visible note range from events
      */
     private calculateRange(): void {
+        // Use explicit cycle length from pattern
+        this.totalBeats = Math.max(1, Math.ceil(this.beatsPerCycle));
+
         if (this.events.length === 0) {
             this.minNote = 48;
             this.maxNote = 84;
-            this.totalBeats = 4;
             return;
         }
 
         let minMidi = 127;
         let maxMidi = 0;
-        let maxBeat = 0;
 
         for (const event of this.events) {
             for (const note of event.notes) {
                 minMidi = Math.min(minMidi, note.midi);
                 maxMidi = Math.max(maxMidi, note.midi);
             }
-            const eventEnd = event.start_beat + event.duration;
-            maxBeat = Math.max(maxBeat, eventEnd);
         }
 
         // Add padding
         this.minNote = Math.max(0, minMidi - 4);
         this.maxNote = Math.min(127, maxMidi + 4);
-        this.totalBeats = Math.max(4, Math.ceil(maxBeat));
     }
 
     /**

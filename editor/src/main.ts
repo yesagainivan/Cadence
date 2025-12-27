@@ -152,17 +152,17 @@ function updatePianoRollAtCursor(view: EditorView): void {
   const code = view.state.doc.toString();
   const cursorPos = view.state.selection.main.head;
 
-  // Get events for the statement at cursor position
-  const events = getEventsAtPosition(code, cursorPos);
+  // Get pattern events with cycle timing for the statement at cursor position
+  const patternEvents = getEventsAtPosition(code, cursorPos);
 
   // Debug: uncomment to trace cursor positions
-  // console.log(`🎹 Piano roll: cursor=${cursorPos}, len=${code.length}, events=${events?.length ?? 'null'}`);
+  // console.log(`🎹 Piano roll: cursor=${cursorPos}, events=${patternEvents?.events?.length ?? 'null'}, cycle=${patternEvents?.beats_per_cycle}`);
 
-  if (events && events.length > 0) {
-    pianoRoll.update(events);
+  if (patternEvents && patternEvents.events && patternEvents.events.length > 0) {
+    pianoRoll.update(patternEvents);
   } else {
     // Clear piano roll if no events
-    pianoRoll.update([]);
+    pianoRoll.update({ events: [], beats_per_cycle: 4 });
   }
 }
 

@@ -267,6 +267,16 @@ pub struct PlayEventJS {
     pub is_rest: bool,
 }
 
+/// Pattern events with cycle timing information for visualization
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PatternEventsJS {
+    /// Individual playback events
+    pub events: Vec<PlayEventJS>,
+    /// Total beats in one pattern cycle (affected by fast/slow)
+    pub beats_per_cycle: f32,
+}
+
 /// Serializable action for JavaScript consumption
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -451,6 +461,7 @@ pub fn run_script(input: &str) -> JsValue {
 
 /// Get play events for the statement at the given cursor position
 /// This is used by the piano roll to visualize the pattern at the cursor
+/// Returns PatternEventsJS with events and cycle timing info
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
@@ -494,29 +505,35 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
         Err(_) => return JsValue::NULL,
     };
 
-    // Convert to events
-    let events: Vec<PlayEventJS> = match value {
-        Value::Pattern(p) => p
-            .to_rich_events()
-            .iter()
-            .map(|e| PlayEventJS {
-                notes: e
-                    .notes
-                    .iter()
-                    .map(|n| NoteInfoJS {
-                        midi: n.midi,
-                        frequency: n.frequency,
-                        name: n.name.clone(),
-                        pitch_class: n.pitch_class,
-                        octave: n.octave,
-                    })
-                    .collect(),
-                frequencies: e.notes.iter().map(|n| n.frequency).collect(),
-                start_beat: e.start_beat,
-                duration: e.duration,
-                is_rest: e.is_rest,
-            })
-            .collect(),
+    // Convert to events with cycle timing
+    let result: PatternEventsJS = match value {
+        Value::Pattern(ref p) => {
+            let events = p
+                .to_rich_events()
+                .iter()
+                .map(|e| PlayEventJS {
+                    notes: e
+                        .notes
+                        .iter()
+                        .map(|n| NoteInfoJS {
+                            midi: n.midi,
+                            frequency: n.frequency,
+                            name: n.name.clone(),
+                            pitch_class: n.pitch_class,
+                            octave: n.octave,
+                        })
+                        .collect(),
+                    frequencies: e.notes.iter().map(|n| n.frequency).collect(),
+                    start_beat: e.start_beat,
+                    duration: e.duration,
+                    is_rest: e.is_rest,
+                })
+                .collect();
+            PatternEventsJS {
+                events,
+                beats_per_cycle: p.beats_per_cycle,
+            }
+        }
         Value::Chord(c) => {
             let notes: Vec<NoteInfoJS> = c
                 .notes_vec()
@@ -530,16 +547,19 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
                 })
                 .collect();
             let frequencies: Vec<f32> = c.notes_vec().iter().map(|n| n.frequency()).collect();
-            vec![PlayEventJS {
-                notes,
-                frequencies,
-                start_beat: 0.0,
-                duration: 1.0,
-                is_rest: false,
-            }]
+            PatternEventsJS {
+                events: vec![PlayEventJS {
+                    notes,
+                    frequencies,
+                    start_beat: 0.0,
+                    duration: 1.0,
+                    is_rest: false,
+                }],
+                beats_per_cycle: 1.0, // Single chord = 1 beat cycle
+            }
         }
-        Value::Note(n) => {
-            vec![PlayEventJS {
+        Value::Note(n) => PatternEventsJS {
+            events: vec![PlayEventJS {
                 notes: vec![NoteInfoJS {
                     midi: n.midi_note(),
                     frequency: n.frequency(),
@@ -551,12 +571,13 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
                 start_beat: 0.0,
                 duration: 1.0,
                 is_rest: false,
-            }]
-        }
+            }],
+            beats_per_cycle: 1.0, // Single note = 1 beat cycle
+        },
         _ => return JsValue::NULL,
     };
 
-    serde_wasm_bindgen::to_value(&events).unwrap_or(JsValue::NULL)
+    serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
 }
 
 #[cfg(feature = "wasm")]

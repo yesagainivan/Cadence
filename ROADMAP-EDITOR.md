@@ -57,7 +57,7 @@ A web-based editor for the Cadence music programming language with live syntax h
 ### 2.2 Pattern Data API ✅
 - [x] `to_events()` returns frequencies, durations, rest flags
 - [x] Expose `get_events_at_position(code, pos)` WASM function for visualization
-- [ ] Include cycle timing from pattern mini-notation
+- [x] Include cycle timing from pattern mini-notation (`beats_per_cycle`)
 
 ### 2.3 Staff Notation (Stretch)
 - [ ] VexFlow or similar for traditional notation
