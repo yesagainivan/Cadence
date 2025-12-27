@@ -46,17 +46,17 @@ A web-based editor for the Cadence music programming language with live syntax h
 
 ---
 
-## Phase 2: Live MIDI Display 🔜 Next
+## Phase 2: Live MIDI Display ✅ Mostly Complete
 
-### 2.1 Piano Roll Visualization
-- [ ] Canvas-based piano roll component
-- [ ] Parse patterns to extract notes with timing
-- [ ] Color-code notes by pitch/velocity
+### 2.1 Piano Roll Visualization ✅
+- [x] Canvas-based piano roll component (`piano-roll.ts`)
+- [x] Parse patterns to extract notes with timing (`get_events_at_position`)
+- [x] Color-code notes by pitch class (12 colors in `NOTE_COLORS`)
 - [ ] Playhead indicator for current beat
 
-### 2.2 Pattern Data API
+### 2.2 Pattern Data API ✅
 - [x] `to_events()` returns frequencies, durations, rest flags
-- [ ] Expose `get_pattern_events(code)` WASM function for visualization
+- [x] Expose `get_events_at_position(code, pos)` WASM function for visualization
 - [ ] Include cycle timing from pattern mini-notation
 
 ### 2.3 Staff Notation (Stretch)
@@ -166,7 +166,7 @@ A web-based editor for the Cadence music programming language with live syntax h
 
 ## Next Steps
 
-1. **Piano Roll Component** — Canvas-based note grid visualization
-2. **Pattern Events API** — Expose `get_pattern_events(code)` for visualization data
-3. **Playhead Indicator** — Show current beat position during playback
-4. **Beat Sync** — Connect audio scheduler to visual playhead
+1. **Playhead Indicator** — Show current beat position during playback
+2. **Beat Sync** — Connect audio scheduler to visual playhead
+3. **Properties Panel** — Cursor context API and visual editors (Phase 3)
+4. **Staff Notation** — VexFlow integration for traditional notation (stretch)

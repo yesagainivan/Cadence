@@ -40,6 +40,10 @@ export class PianoRoll {
     private maxNote: number = 84;  // C6
     private totalBeats: number = 4;
 
+    // Playhead state
+    private playheadBeat: number = 0;
+    private animationFrameId: number | null = null;
+
     constructor(canvasId: string) {
         const canvas = document.getElementById(canvasId) as HTMLCanvasElement;
         if (!canvas) {
@@ -133,6 +137,7 @@ export class PianoRoll {
         this.drawPianoKeys(height);
         this.drawNotes(events);
         this.drawBeatHeader(width);
+        this.drawPlayhead(width, height);
     }
 
     /**
@@ -296,5 +301,72 @@ export class PianoRoll {
     clear(): void {
         this.events = [];
         this.render([]);
+    }
+
+    /**
+     * Set the playhead position (in beats)
+     */
+    setPlayhead(beat: number): void {
+        this.playheadBeat = beat;
+        this.render(this.events);
+    }
+
+    /**
+     * Start animating the playhead
+     */
+    startAnimation(getPosition: () => number | null): void {
+        const animate = () => {
+            const beat = getPosition();
+            if (beat !== null) {
+                this.playheadBeat = beat;
+                this.render(this.events);
+                this.animationFrameId = requestAnimationFrame(animate);
+            }
+        };
+        this.animationFrameId = requestAnimationFrame(animate);
+    }
+
+    /**
+     * Stop animating the playhead
+     */
+    stopAnimation(): void {
+        if (this.animationFrameId !== null) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+        this.playheadBeat = 0;
+        this.render(this.events);
+    }
+
+    /**
+     * Draw the playhead line
+     */
+    private drawPlayhead(width: number, height: number): void {
+        if (this.playheadBeat <= 0) return;
+
+        const { ctx } = this;
+        const gridWidth = width - KEY_LABEL_WIDTH;
+        const beatWidth = gridWidth / this.totalBeats;
+
+        // Wrap playhead within visible beats
+        const wrappedBeat = this.playheadBeat % this.totalBeats;
+        const x = KEY_LABEL_WIDTH + wrappedBeat * beatWidth;
+
+        // Draw playhead line
+        ctx.strokeStyle = '#e94560';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, HEADER_HEIGHT);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+
+        // Draw playhead triangle at top
+        ctx.fillStyle = '#e94560';
+        ctx.beginPath();
+        ctx.moveTo(x, HEADER_HEIGHT);
+        ctx.lineTo(x - 6, HEADER_HEIGHT - 8);
+        ctx.lineTo(x + 6, HEADER_HEIGHT - 8);
+        ctx.closePath();
+        ctx.fill();
     }
 }

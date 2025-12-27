@@ -277,6 +277,14 @@ async function init(): Promise<void> {
     // Play script reactively
     log('▶ Playing...');
     audioEngine.playScript(code);
+
+    // Start playhead animation
+    if (pianoRoll) {
+      pianoRoll.startAnimation(() => {
+        const pos = audioEngine.getPlaybackPosition();
+        return pos.isPlaying ? pos.beat : null;
+      });
+    }
   });
 
   // Stop button
@@ -284,6 +292,11 @@ async function init(): Promise<void> {
   stopBtn?.addEventListener('click', () => {
     audioEngine.stop();
     log('■ Stopped');
+
+    // Stop playhead animation
+    if (pianoRoll) {
+      pianoRoll.stopAnimation();
+    }
   });
 
   // Tempo slider

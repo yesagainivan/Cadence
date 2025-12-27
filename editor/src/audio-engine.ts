@@ -29,6 +29,7 @@ export class CadenceAudioEngine {
     private activeOscillators: ActiveOscillator[] = [];
     private scheduledTimeouts: number[] = [];
     private interpreter: WasmInterpreter | null = null;
+    private currentBeat: number = 0;  // Current beat counter (source of truth for playhead)
 
     // Per-track volume (0-1 scale)
     private trackVolumes: Map<number, number> = new Map();
@@ -171,6 +172,7 @@ export class CadenceAudioEngine {
 
         const ctx = this.ensureContext();
         this.isPlaying = true;
+        this.currentBeat = 0;
 
         // Initialize interpreter
         if (!this.interpreter) {
@@ -214,6 +216,7 @@ export class CadenceAudioEngine {
                 }
 
                 // Advance by 1 beat
+                this.currentBeat++;
                 const beatDuration = 60 / this.tempo;
                 nextBeatTime += beatDuration;
             }
@@ -344,6 +347,16 @@ export class CadenceAudioEngine {
      */
     get currentTempo(): number {
         return this.tempo;
+    }
+
+    /**
+     * Get current playback position in beats
+     */
+    getPlaybackPosition(): { beat: number; isPlaying: boolean } {
+        if (!this.isPlaying) {
+            return { beat: 0, isPlaying: false };
+        }
+        return { beat: this.currentBeat, isPlaying: true };
     }
 }
 
