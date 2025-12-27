@@ -239,3 +239,10 @@ cadence> let kick = "C4 _ C4 _";
 cadence> let kick = "C4 [_ _ C4 _] C4 _";
 cadence> let kick = "C4 _ C4 _";
 cadence> let kick = "C4 [_ _ C4 _] [_ C4 _ _] _";
+
+///
+
+let cmaj = [C, E, G]
+let fmaj = [F, A, C]
+let progression = "cmaj fmaj C cmaj"
+play every(2,"rev",progression) loop

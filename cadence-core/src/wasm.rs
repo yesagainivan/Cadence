@@ -1080,17 +1080,51 @@ impl WasmInterpreter {
     fn generate_beat_events(&mut self, beat: i32) -> Vec<ActionJS> {
         use crate::types::NoteInfo;
 
-        let env = self.interpreter.environment.read().unwrap();
         let evaluator = Evaluator::new();
         let mut js_actions = Vec::new();
         let mut to_remove = Vec::new();
 
         for (i, (expr, looping, track_id, start_beat)) in self.active_tracks.iter().enumerate() {
-            // Evaluate expression
-            let value = match evaluator.eval_with_env(expr.clone(), Some(&env)) {
+            // Calculate local beat for this track
+            let local_beat = beat - start_beat;
+
+            // We need to first evaluate to get pattern duration, then calculate cycle
+            // For now, do an initial evaluation to get the pattern duration
+            let env_read = self.interpreter.environment.read().unwrap();
+            let initial_value = match evaluator.eval_with_env(expr.clone(), Some(&env_read)) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            drop(env_read);
+
+            // Get pattern duration from initial evaluation
+            let total_duration: f32 = match &initial_value {
+                Value::Pattern(ref pattern) => {
+                    pattern.to_rich_events().iter().map(|e| e.duration).sum()
+                }
+                _ => 1.0,
+            };
+
+            // Calculate the pattern cycle number for this track
+            let pattern_cycle = if total_duration > 0.0 {
+                (local_beat as f32 / total_duration).floor() as i32
+            } else {
+                0
+            };
+
+            // Set _cycle to the pattern cycle for this track before re-evaluation
+            {
+                let mut env_write = self.interpreter.environment.write().unwrap();
+                let _ = env_write.define("_cycle".to_string(), Value::Number(pattern_cycle));
+            }
+
+            // Re-evaluate with the correct _cycle set
+            let env_read = self.interpreter.environment.read().unwrap();
+            let value = match evaluator.eval_with_env(expr.clone(), Some(&env_read)) {
                 Ok(v) => v,
                 Err(_) => continue, // Skip error
             };
+            drop(env_read);
 
             // Convert to rich events (with full note identity)
             let (events, envelope, waveform) = match value {
