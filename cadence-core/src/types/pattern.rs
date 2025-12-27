@@ -72,6 +72,8 @@ pub enum PatternStep {
     Group(Vec<PatternStep>),
     /// Repeat a step N times: C*3
     Repeat(Box<PatternStep>, usize),
+    /// Unresolved variable reference (resolved at evaluation time)
+    Variable(String),
 }
 
 impl PatternStep {
@@ -95,6 +97,12 @@ impl PatternStep {
                 let inner = step.to_frequencies();
                 (0..*count).flat_map(|_| inner.clone()).collect()
             }
+            PatternStep::Variable(name) => {
+                panic!(
+                    "Unresolved variable '{}' in pattern - call resolve_variables() first",
+                    name
+                )
+            }
         }
     }
 
@@ -113,6 +121,12 @@ impl PatternStep {
                 let inner = step.to_note_infos();
                 (0..*count).flat_map(|_| inner.clone()).collect()
             }
+            PatternStep::Variable(name) => {
+                panic!(
+                    "Unresolved variable '{}' in pattern - call resolve_variables() first",
+                    name
+                )
+            }
         }
     }
 
@@ -128,6 +142,7 @@ impl PatternStep {
             PatternStep::Repeat(step, count) => {
                 PatternStep::Repeat(Box::new(step.transpose(semitones)), *count)
             }
+            PatternStep::Variable(name) => PatternStep::Variable(name.clone()),
         }
     }
 }
@@ -149,6 +164,7 @@ impl fmt::Display for PatternStep {
                 write!(f, "]")
             }
             PatternStep::Repeat(step, count) => write!(f, "{}*{}", step, count),
+            PatternStep::Variable(name) => write!(f, "{}", name),
         }
     }
 }
@@ -318,6 +334,99 @@ impl Pattern {
             .map(|s| s.transpose(semitones))
             .collect();
         self
+    }
+
+    // ========================================================================
+    // Variable Resolution
+    // ========================================================================
+
+    /// Check if this pattern contains any unresolved variable references
+    pub fn has_variables(&self) -> bool {
+        fn step_has_variables(step: &PatternStep) -> bool {
+            match step {
+                PatternStep::Variable(_) => true,
+                PatternStep::Group(steps) => steps.iter().any(step_has_variables),
+                PatternStep::Repeat(inner, _) => step_has_variables(inner),
+                _ => false,
+            }
+        }
+        self.steps.iter().any(step_has_variables)
+    }
+
+    /// Get all unresolved variable names in this pattern
+    pub fn get_variable_names(&self) -> Vec<String> {
+        fn collect_vars(step: &PatternStep, vars: &mut Vec<String>) {
+            match step {
+                PatternStep::Variable(name) => vars.push(name.clone()),
+                PatternStep::Group(steps) => {
+                    for s in steps {
+                        collect_vars(s, vars);
+                    }
+                }
+                PatternStep::Repeat(inner, _) => collect_vars(inner, vars),
+                _ => {}
+            }
+        }
+        let mut vars = Vec::new();
+        for step in &self.steps {
+            collect_vars(step, &mut vars);
+        }
+        vars
+    }
+
+    /// Resolve variables in this pattern using a lookup function.
+    /// The lookup function takes a variable name and returns the resolved PatternStep(s).
+    /// Returns Err if any variable cannot be resolved.
+    pub fn resolve_variables_with<F>(&self, lookup: F) -> Result<Pattern>
+    where
+        F: Fn(&str) -> Option<Vec<PatternStep>> + Clone,
+    {
+        fn resolve_step<F>(step: &PatternStep, lookup: &F) -> Result<Vec<PatternStep>>
+        where
+            F: Fn(&str) -> Option<Vec<PatternStep>>,
+        {
+            match step {
+                PatternStep::Variable(name) => {
+                    lookup(name).ok_or_else(|| anyhow!("Undefined variable '{}' in pattern", name))
+                }
+                PatternStep::Group(steps) => {
+                    let mut resolved = Vec::new();
+                    for s in steps {
+                        resolved.extend(resolve_step(s, lookup)?);
+                    }
+                    Ok(vec![PatternStep::Group(resolved)])
+                }
+                PatternStep::Repeat(inner, count) => {
+                    let resolved_inner = resolve_step(inner, lookup)?;
+                    if resolved_inner.len() == 1 {
+                        Ok(vec![PatternStep::Repeat(
+                            Box::new(resolved_inner.into_iter().next().unwrap()),
+                            *count,
+                        )])
+                    } else {
+                        // If variable resolved to multiple steps, repeat the group
+                        Ok(vec![PatternStep::Repeat(
+                            Box::new(PatternStep::Group(resolved_inner)),
+                            *count,
+                        )])
+                    }
+                }
+                // Non-variable steps pass through unchanged
+                other => Ok(vec![other.clone()]),
+            }
+        }
+
+        let mut resolved_steps = Vec::new();
+        for step in &self.steps {
+            resolved_steps.extend(resolve_step(step, &lookup)?);
+        }
+
+        Ok(Pattern {
+            steps: resolved_steps,
+            beats_per_cycle: self.beats_per_cycle,
+            envelope: self.envelope,
+            waveform: self.waveform.clone(),
+        })
     }
 
     // ========================================================================
@@ -593,6 +702,7 @@ impl Pattern {
                     collect_notes(inner, notes);
                 }
                 PatternStep::Rest => {}
+                PatternStep::Variable(_) => {} // Variables don't contribute notes until resolved
             }
         }
 
@@ -633,6 +743,23 @@ impl Pattern {
         }
 
         let steps = parse_steps(notation)?;
+
+        // Check if pattern has actual content or only variables
+        let has_pattern_content = steps.iter().any(|step| has_non_variable_content(step));
+
+        if !has_pattern_content && !steps.is_empty() {
+            // Pattern has ONLY variable references
+            // Single-word patterns like "pluck" or "rev" should be treated as strings
+            // Multi-word patterns like "cmaj fmaj" should be valid (pattern of variables)
+            if steps.len() == 1 {
+                return Err(anyhow!(
+                    "Single word '{}' is not a valid pattern - no notes, rests, or chords found",
+                    notation
+                ));
+            }
+            // Multi-word variable-only patterns are allowed - they'll be resolved at runtime
+        }
+
         Ok(Pattern::with_steps(steps))
     }
 }
@@ -694,6 +821,16 @@ impl fmt::Display for Pattern {
 // Mini-notation parser
 // ============================================================================
 
+/// Check if a pattern step contains actual pattern content (not just variable references)
+fn has_non_variable_content(step: &PatternStep) -> bool {
+    match step {
+        PatternStep::Note(_) | PatternStep::Chord(_) | PatternStep::Rest => true,
+        PatternStep::Group(steps) => steps.iter().any(has_non_variable_content),
+        PatternStep::Repeat(inner, _) => has_non_variable_content(inner),
+        PatternStep::Variable(_) => false,
+    }
+}
+
 fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
     let mut steps = Vec::new();
     let mut chars = notation.chars().peekable();
@@ -736,11 +873,39 @@ fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
                     steps.push(step);
                 }
             }
-            // Note (starts with letter)
-            'A'..='G' | 'a'..='g' => {
-                let note_str = take_note(&mut chars);
-                let note: Note = note_str.parse()?;
-                let step = maybe_parse_repeat(&mut chars, PatternStep::Note(note))?;
+            // Note (uppercase A-G) or identifier/variable (starts with letter)
+            'A'..='G' => {
+                let token = take_note_or_identifier(&mut chars);
+                // Uppercase start means it's likely a note - try to parse
+                let step = match token.parse::<Note>() {
+                    Ok(note) => PatternStep::Note(note),
+                    Err(_) => {
+                        // Not a valid note, treat as variable
+                        PatternStep::Variable(token)
+                    }
+                };
+                let step = maybe_parse_repeat(&mut chars, step)?;
+                steps.push(step);
+            }
+            // Lowercase letter - could be a flat note (a-g) or a variable (longer identifier)
+            'a'..='g' => {
+                let token = take_note_or_identifier(&mut chars);
+                // Check if it looks like a note (single letter + optional accidental + optional octave)
+                // or an identifier (multiple letters like "cmaj", "bass", etc.)
+                let step = match token.parse::<Note>() {
+                    Ok(note) => PatternStep::Note(note),
+                    Err(_) => {
+                        // Not a valid note, treat as variable
+                        PatternStep::Variable(token)
+                    }
+                };
+                let step = maybe_parse_repeat(&mut chars, step)?;
+                steps.push(step);
+            }
+            // Identifier starting with h-z (definitely a variable, not a note)
+            'h'..='z' | 'H'..='Z' => {
+                let ident = take_identifier(&mut chars);
+                let step = maybe_parse_repeat(&mut chars, PatternStep::Variable(ident))?;
                 steps.push(step);
             }
             // Unknown
@@ -809,6 +974,72 @@ fn take_note(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
     }
 
     note
+}
+
+/// Take a note token OR a longer identifier (for variable names)
+/// Keeps case as-is for variable names, but uppercases for notes
+fn take_note_or_identifier(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
+    let mut token = String::new();
+
+    // First char is the letter
+    if let Some(c) = chars.next() {
+        token.push(c);
+    }
+
+    // Check for accidental (only if the first char is A-G)
+    if token.len() == 1 {
+        let first_upper = token.chars().next().unwrap().to_ascii_uppercase();
+        if ('A'..='G').contains(&first_upper) {
+            if let Some(&c) = chars.peek() {
+                if c == '#' {
+                    // Sharp - consume and treat as note
+                    token.push(chars.next().unwrap());
+                    // Rest must be octave digits
+                    while let Some(&c) = chars.peek() {
+                        if c.is_ascii_digit() || c == '-' {
+                            token.push(chars.next().unwrap());
+                        } else {
+                            break;
+                        }
+                    }
+                    // Uppercase for note parsing
+                    return token
+                        .chars()
+                        .next()
+                        .unwrap()
+                        .to_ascii_uppercase()
+                        .to_string()
+                        + &token[1..];
+                }
+            }
+        }
+    }
+
+    // Continue taking alphanumeric chars (for identifiers like "cmaj", "bass")
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            token.push(chars.next().unwrap());
+        } else {
+            break;
+        }
+    }
+
+    token
+}
+
+/// Take an identifier (for variable names starting with h-z)
+fn take_identifier(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
+    let mut ident = String::new();
+
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            ident.push(chars.next().unwrap());
+        } else {
+            break;
+        }
+    }
+
+    ident
 }
 
 /// Parse optional *N repetition suffix
@@ -1025,5 +1256,77 @@ mod tests {
                 actual
             );
         }
+    }
+
+    #[test]
+    fn test_parse_pattern_with_variables() {
+        // "C cmaj E" should parse with a Variable step in the middle
+        let p = Pattern::parse("C cmaj E").unwrap();
+        assert_eq!(p.steps.len(), 3);
+        assert!(matches!(&p.steps[0], PatternStep::Note(_)));
+        assert!(matches!(&p.steps[1], PatternStep::Variable(name) if name == "cmaj"));
+        assert!(matches!(&p.steps[2], PatternStep::Note(_)));
+        assert!(p.has_variables());
+    }
+
+    #[test]
+    fn test_parse_single_variable_fails() {
+        // Single-word variable patterns should fail (treated as plain string)
+        // This prevents "pluck" or "rev" from being parsed as patterns
+        assert!(Pattern::parse("pluck").is_err());
+        assert!(Pattern::parse("rev").is_err());
+        assert!(Pattern::parse("cmaj").is_err());
+    }
+
+    #[test]
+    fn test_parse_multi_variable_pattern() {
+        // Multi-word variable-only patterns should succeed
+        let p = Pattern::parse("cmaj fmaj").unwrap();
+        assert_eq!(p.steps.len(), 2);
+        assert!(matches!(&p.steps[0], PatternStep::Variable(name) if name == "cmaj"));
+        assert!(matches!(&p.steps[1], PatternStep::Variable(name) if name == "fmaj"));
+        assert!(p.has_variables());
+    }
+
+    #[test]
+    fn test_resolve_variables() {
+        // "C myvar E" with myvar=[D, F]
+        let p = Pattern::parse("C myvar E").unwrap();
+        assert!(p.has_variables());
+
+        let resolved = p
+            .resolve_variables_with(|name| {
+                if name == "myvar" {
+                    // Resolve to [D, F] chord
+                    let chord = Chord::from_note_strings(vec!["D", "F"]).unwrap();
+                    Some(vec![PatternStep::Chord(chord)])
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        assert!(!resolved.has_variables());
+        assert_eq!(resolved.steps.len(), 3);
+        // First should be C
+        assert!(matches!(&resolved.steps[0], PatternStep::Note(_)));
+        // Second should now be the chord
+        assert!(matches!(&resolved.steps[1], PatternStep::Chord(_)));
+        // Third should be E
+        assert!(matches!(&resolved.steps[2], PatternStep::Note(_)));
+    }
+
+    #[test]
+    fn test_resolve_undefined_variable_fails() {
+        let p = Pattern::parse("C undefined E").unwrap();
+        let result = p.resolve_variables_with(|_| None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_variable_names() {
+        let p = Pattern::parse("C foo E bar G").unwrap();
+        let vars = p.get_variable_names();
+        assert_eq!(vars, vec!["foo", "bar"]);
     }
 }

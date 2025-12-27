@@ -28,7 +28,29 @@ impl Evaluator {
         match expr {
             Expression::Note(note) => Ok(Value::Note(note)),
             Expression::Chord(chord) => Ok(Value::Chord(chord)),
-            Expression::Pattern(pattern) => Ok(Value::Pattern(pattern)),
+            Expression::Pattern(pattern) => {
+                // Resolve any variable references in the pattern
+                if pattern.has_variables() {
+                    if let Some(environment) = env {
+                        let resolved = pattern.resolve_variables_with(|name| {
+                            // Look up the variable in the environment
+                            if let Some(value) = environment.get(name) {
+                                // Convert Value to PatternStep(s)
+                                value_to_pattern_steps(value)
+                            } else {
+                                None
+                            }
+                        })?;
+                        Ok(Value::Pattern(resolved))
+                    } else {
+                        // No environment, can't resolve variables
+                        let vars = pattern.get_variable_names();
+                        Err(anyhow!("Pattern contains unresolved variables: {:?}", vars))
+                    }
+                } else {
+                    Ok(Value::Pattern(pattern))
+                }
+            }
             Expression::String(s) => Ok(Value::String(s)),
             Expression::Number(n) => Ok(Value::Number(n)),
             Expression::Transpose { target, semitones } => {
@@ -252,6 +274,21 @@ pub fn eval(input: &str) -> Result<Value> {
     let expr = crate::parser::parse(input)?;
     let evaluator = Evaluator::new();
     evaluator.eval(expr)
+}
+
+/// Convert a Value to PatternStep(s) for variable resolution in patterns
+fn value_to_pattern_steps(value: &Value) -> Option<Vec<crate::types::PatternStep>> {
+    use crate::types::PatternStep;
+    match value {
+        Value::Note(note) => Some(vec![PatternStep::Note(*note)]),
+        Value::Chord(chord) => Some(vec![PatternStep::Chord(chord.clone())]),
+        Value::Pattern(pattern) => {
+            // Return the pattern's steps directly
+            Some(pattern.steps.clone())
+        }
+        // Other values can't be converted to pattern steps
+        _ => None,
+    }
 }
 
 #[cfg(test)]
