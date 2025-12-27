@@ -383,6 +383,240 @@ impl Interpreter {
         let env_guard = self.environment.read().unwrap();
         self.evaluator.eval_with_env(expr.clone(), Some(&env_guard))
     }
+
+    /// Execute a statement using a local (non-shared) environment.
+    /// Used for user-defined function body execution where we need scoped variables.
+    ///
+    /// Note: Side effects like play/tempo/volume still get collected in self.actions
+    pub fn run_statement_with_local_env(
+        &mut self,
+        stmt: &Statement,
+        local_env: &mut crate::parser::environment::Environment,
+    ) -> Result<ControlFlow> {
+        match stmt {
+            Statement::Let { name, value } => {
+                let val = self
+                    .evaluator
+                    .eval_with_env(value.clone(), Some(local_env))?;
+                local_env.define(name.clone(), val);
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::Assign { name, value } => {
+                let val = self
+                    .evaluator
+                    .eval_with_env(value.clone(), Some(local_env))?;
+                if local_env.is_defined(name) {
+                    local_env
+                        .set(name, val)
+                        .map_err(|e| anyhow::anyhow!("{}", e))?;
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Cannot assign to undefined variable '{}'",
+                        name
+                    ));
+                }
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::Expression(expr) => {
+                let _val = self
+                    .evaluator
+                    .eval_with_env(expr.clone(), Some(local_env))?;
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::Return(expr_opt) => {
+                let value = match expr_opt {
+                    Some(expr) => Some(
+                        self.evaluator
+                            .eval_with_env(expr.clone(), Some(local_env))?,
+                    ),
+                    None => None,
+                };
+                Ok(ControlFlow::Return(value))
+            }
+
+            Statement::Block(stmts) => {
+                local_env.push_scope();
+                for inner_stmt in stmts {
+                    match self.run_statement_with_local_env(inner_stmt, local_env)? {
+                        ControlFlow::Normal => {}
+                        cf => {
+                            local_env.pop_scope();
+                            return Ok(cf);
+                        }
+                    }
+                }
+                local_env.pop_scope();
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                let cond_val = self
+                    .evaluator
+                    .eval_with_env(condition.clone(), Some(local_env))?;
+                let is_true = match cond_val {
+                    Value::Boolean(b) => b,
+                    _ => return Err(anyhow::anyhow!("Condition must be a boolean")),
+                };
+
+                let body = if is_true {
+                    then_body
+                } else {
+                    match else_body {
+                        Some(b) => b,
+                        None => return Ok(ControlFlow::Normal),
+                    }
+                };
+
+                local_env.push_scope();
+                for stmt in body {
+                    match self.run_statement_with_local_env(stmt, local_env)? {
+                        ControlFlow::Normal => {}
+                        cf => {
+                            local_env.pop_scope();
+                            return Ok(cf);
+                        }
+                    }
+                }
+                local_env.pop_scope();
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::Repeat { count, body } => {
+                for _ in 0..*count {
+                    local_env.push_scope();
+                    for stmt in body {
+                        match self.run_statement_with_local_env(stmt, local_env)? {
+                            ControlFlow::Normal => {}
+                            ControlFlow::Break => {
+                                local_env.pop_scope();
+                                return Ok(ControlFlow::Normal);
+                            }
+                            ControlFlow::Continue => break,
+                            cf @ ControlFlow::Return(_) => {
+                                local_env.pop_scope();
+                                return Ok(cf);
+                            }
+                        }
+                    }
+                    local_env.pop_scope();
+                }
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::Loop { body } => {
+                loop {
+                    local_env.push_scope();
+                    let mut should_break = false;
+                    for stmt in body {
+                        match self.run_statement_with_local_env(stmt, local_env)? {
+                            ControlFlow::Normal => {}
+                            ControlFlow::Break => {
+                                should_break = true;
+                                break;
+                            }
+                            ControlFlow::Continue => break,
+                            cf @ ControlFlow::Return(_) => {
+                                local_env.pop_scope();
+                                return Ok(cf);
+                            }
+                        }
+                    }
+                    local_env.pop_scope();
+                    if should_break {
+                        break;
+                    }
+                }
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::Break => Ok(ControlFlow::Break),
+            Statement::Continue => Ok(ControlFlow::Continue),
+
+            // Side-effect statements - still work, collect actions
+            Statement::Tempo(bpm) => {
+                self.tempo = *bpm;
+                self.actions.push(InterpreterAction::SetTempo(*bpm));
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::Volume(vol) => {
+                let clamped = vol.clamp(0.0, 1.0);
+                self.volume = clamped;
+                self.actions.push(InterpreterAction::SetVolume {
+                    volume: clamped,
+                    track_id: self.current_track,
+                });
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::Waveform(name) => {
+                self.actions.push(InterpreterAction::SetWaveform {
+                    waveform: name.clone(),
+                    track_id: self.current_track,
+                });
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::Play {
+                target,
+                looping,
+                queue_mode: _,
+                duration: _,
+            } => {
+                // Evaluate target in local env
+                let _val = self
+                    .evaluator
+                    .eval_with_env(target.clone(), Some(local_env))?;
+                self.actions.push(InterpreterAction::PlayExpression {
+                    expression: target.clone(),
+                    looping: *looping,
+                    queue_mode: None,
+                    track_id: self.current_track,
+                });
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::Stop => {
+                self.actions.push(InterpreterAction::Stop {
+                    track_id: Some(self.current_track),
+                });
+                Ok(ControlFlow::Normal)
+            }
+
+            // Function definitions inside functions - define in local scope
+            Statement::FunctionDef { name, params, body } => {
+                let func_value = Value::Function {
+                    name: name.clone(),
+                    params: params.clone(),
+                    body: body.clone(),
+                };
+                local_env.define(name.clone(), func_value);
+                Ok(ControlFlow::Normal)
+            }
+
+            // Track blocks - execute with track context
+            Statement::Track { id, body } => {
+                let old_track = self.current_track;
+                self.current_track = *id;
+                let result = self.run_statement_with_local_env(body.as_ref(), local_env);
+                self.current_track = old_track;
+                result
+            }
+
+            // Load not supported in function context
+            Statement::Load(_) => Err(anyhow::anyhow!("load is not allowed inside functions")),
+
+            // Comments are no-ops
+            Statement::Comment(_) => Ok(ControlFlow::Normal),
+        }
+    }
 }
 
 impl Default for Interpreter {

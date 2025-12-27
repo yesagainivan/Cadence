@@ -96,6 +96,7 @@ impl PlaybackSource {
                 "Cannot play a function '{}' - call it first",
                 name
             )),
+            Value::Unit => Err(anyhow::anyhow!("Cannot play unit (void)")),
         }
     }
 

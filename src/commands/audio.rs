@@ -203,6 +203,7 @@ fn get_frequencies_from_value(value: &Value) -> anyhow::Result<Vec<f32>> {
                 name
             ));
         }
+        Value::Unit => return Err(anyhow::anyhow!("Cannot play unit (void)")),
     }
 
     Ok(frequencies)

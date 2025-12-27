@@ -398,6 +398,8 @@ pub enum Value {
         params: Vec<String>,
         body: Vec<Statement>,
     },
+    /// Unit value (void) - for functions that don't return anything
+    Unit,
 }
 
 impl fmt::Display for Expression {
@@ -465,6 +467,7 @@ impl fmt::Display for Value {
             Value::Function { name, params, .. } => {
                 write!(f, "<fn {}({})>", name, params.join(", "))
             }
+            Value::Unit => write!(f, "()"),
         }
     }
 }

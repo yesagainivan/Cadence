@@ -72,6 +72,7 @@ impl Evaluator {
                     Value::Number(_) => Err(anyhow!("Cannot transpose a number")),
                     Value::String(_) => Err(anyhow!("Cannot transpose a string")),
                     Value::Function { .. } => Err(anyhow!("Cannot transpose a function")),
+                    Value::Unit => Err(anyhow!("Cannot transpose unit")),
                 }
             }
             Expression::Intersection { left, right } => {
@@ -192,22 +193,8 @@ impl Evaluator {
                         local_env.define(param.clone(), value);
                     }
 
-                    // Execute body and look for return value
-                    let mut result = None;
-                    for stmt in &body {
-                        // For now, we only support return statements with expressions
-                        if let Statement::Return(Some(expr)) = stmt {
-                            result = Some(self.eval_with_env(expr.clone(), Some(&local_env))?);
-                            break;
-                        }
-                        // For expression statements, capture the result
-                        if let Statement::Expression(expr) = stmt {
-                            result = Some(self.eval_with_env(expr.clone(), Some(&local_env))?);
-                        }
-                    }
-
-                    return result
-                        .ok_or_else(|| anyhow!("Function {} did not return a value", func_name));
+                    // Execute body statements
+                    return self.run_statements_in_local_env(&body, &mut local_env);
                 }
             }
         }
@@ -259,6 +246,170 @@ impl Evaluator {
 
         // Delegate to the existing function evaluation logic
         self.eval_function_with_env(name, args, env)
+    }
+
+    /// Execute a list of statements in a local environment and return the result.
+    /// Used for user-defined function body execution.
+    ///
+    /// Supports: let, if/else, repeat, loop, return, expressions
+    /// Returns: Value::Unit for void functions, or the returned/last expression value
+    fn run_statements_in_local_env(
+        &self,
+        statements: &[Statement],
+        local_env: &mut crate::parser::environment::Environment,
+    ) -> Result<Value> {
+        use crate::parser::ast::Statement;
+
+        let mut last_value = Value::Unit;
+
+        for stmt in statements {
+            match stmt {
+                Statement::Let { name, value } => {
+                    let val = self.eval_with_env(value.clone(), Some(local_env))?;
+                    local_env.define(name.clone(), val);
+                }
+
+                Statement::Assign { name, value } => {
+                    let val = self.eval_with_env(value.clone(), Some(local_env))?;
+                    if local_env.is_defined(name) {
+                        local_env.set(name, val).map_err(|e| anyhow!("{}", e))?;
+                    } else {
+                        return Err(anyhow!("Cannot assign to undefined variable '{}'", name));
+                    }
+                }
+
+                Statement::Expression(expr) => {
+                    last_value = self.eval_with_env(expr.clone(), Some(local_env))?;
+                }
+
+                Statement::Return(expr_opt) => {
+                    return match expr_opt {
+                        Some(expr) => self.eval_with_env(expr.clone(), Some(local_env)),
+                        None => Ok(Value::Unit),
+                    };
+                }
+
+                Statement::Block(block_stmts) => {
+                    local_env.push_scope();
+                    let result = self.run_statements_in_local_env(block_stmts, local_env);
+                    local_env.pop_scope();
+                    // If block returned, propagate
+                    if let Ok(Value::Unit) = &result {
+                        // Continue, don't update last_value
+                    } else {
+                        return result;
+                    }
+                }
+
+                Statement::If {
+                    condition,
+                    then_body,
+                    else_body,
+                } => {
+                    let cond_val = self.eval_with_env(condition.clone(), Some(local_env))?;
+                    let is_true = match cond_val {
+                        Value::Boolean(b) => b,
+                        _ => return Err(anyhow!("Condition must be a boolean")),
+                    };
+
+                    let branch = if is_true {
+                        then_body
+                    } else {
+                        match else_body {
+                            Some(b) => b,
+                            None => continue,
+                        }
+                    };
+
+                    local_env.push_scope();
+                    let result = self.run_statements_in_local_env(branch, local_env);
+                    local_env.pop_scope();
+                    if let Ok(Value::Unit) = &result {
+                        // Continue
+                    } else {
+                        return result;
+                    }
+                }
+
+                Statement::Repeat { count, body } => {
+                    for _ in 0..*count {
+                        local_env.push_scope();
+                        let result = self.run_statements_in_local_env(body, local_env);
+                        local_env.pop_scope();
+                        // Note: we don't support break/continue in pure evaluation
+                        if let Ok(Value::Unit) = &result {
+                            // Continue loop
+                        } else if let Ok(_) = &result {
+                            return result; // Return from function
+                        } else {
+                            return result; // Error
+                        }
+                    }
+                }
+
+                Statement::Loop { body } => {
+                    // Infinite loop - can only exit via return
+                    loop {
+                        local_env.push_scope();
+                        let result = self.run_statements_in_local_env(body, local_env);
+                        local_env.pop_scope();
+                        match result {
+                            Ok(Value::Unit) => continue,
+                            Ok(v) => return Ok(v), // Return from function
+                            Err(e) => return Err(e),
+                        }
+                    }
+                }
+
+                Statement::FunctionDef { name, params, body } => {
+                    // Define nested function in local scope
+                    let func = Value::Function {
+                        name: name.clone(),
+                        params: params.clone(),
+                        body: body.clone(),
+                    };
+                    local_env.define(name.clone(), func);
+                }
+
+                // Side-effect statements are not supported in pure function evaluation
+                // They would need an Interpreter to execute properly
+                Statement::Play { .. } => {
+                    return Err(anyhow!("play is not supported inside pure functions. Use the Interpreter for side effects."));
+                }
+                Statement::Tempo(_) => {
+                    return Err(anyhow!("tempo is not supported inside pure functions"));
+                }
+                Statement::Volume(_) => {
+                    return Err(anyhow!("volume is not supported inside pure functions"));
+                }
+                Statement::Waveform(_) => {
+                    return Err(anyhow!("waveform is not supported inside pure functions"));
+                }
+                Statement::Stop => {
+                    return Err(anyhow!("stop is not supported inside pure functions"));
+                }
+                Statement::Load(_) => {
+                    return Err(anyhow!("load is not supported inside functions"));
+                }
+                Statement::Track { .. } => {
+                    return Err(anyhow!("track is not supported inside pure functions"));
+                }
+
+                // No-ops
+                Statement::Break => {
+                    // In pure evaluation, break just exits current iteration
+                    // But since we don't have proper control flow, treat as warning
+                }
+                Statement::Continue => {
+                    // Same as break
+                }
+                Statement::Comment(_) => {
+                    // No-op
+                }
+            }
+        }
+
+        Ok(last_value)
     }
 
     /// Format numeric progression names for display with proper chord types
