@@ -292,6 +292,107 @@ body {
   min-height: 200px;
 }
 
+/* Properties Panel Components */
+.context-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.context-type {
+  background: var(--accent-primary);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.context-var {
+  color: var(--syn-variable);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9rem;
+}
+
+.properties-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.property-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.property-row label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.property-value {
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9rem;
+}
+
+/* Waveform Picker */
+.waveform-picker {
+  display: flex;
+  gap: 4px;
+}
+
+.waveform-btn {
+  flex: 1;
+  padding: 8px 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.waveform-btn:hover {
+  background: var(--accent-secondary);
+  color: var(--text-primary);
+}
+
+.waveform-btn.active {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+
+/* Value type badge */
+.value-info {
+  margin-top: 8px;
+}
+
+.value-type-badge {
+  display: inline-block;
+  background: var(--bg-tertiary);
+  color: var(--syn-variable);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.no-properties {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
 /* Footer */
 .editor-footer {
   height: var(--footer-height);

@@ -16,9 +16,11 @@ import { cadenceWasm } from './lang-cadence-wasm';
 import { initWasm, parseCode, isWasmReady, getEventsAtPosition, getContextAtCursor } from './cadence-wasm';
 import { audioEngine } from './audio-engine';
 import { PianoRoll } from './piano-roll';
+import { PropertiesPanel } from './properties-panel';
 
-// Global piano roll instance
+// Global instances
 let pianoRoll: PianoRoll | null = null;
+let propertiesPanel: PropertiesPanel | null = null;
 
 // Sample Cadence code
 const SAMPLE_CODE = `// Welcome to Cadence! 🎵
@@ -142,19 +144,11 @@ function updateCursorPosition(view: EditorView): void {
     cursorPosEl.textContent = `Ln ${line.number}, Col ${col}`;
   }
 
-  // Debug: Test get_context_at_cursor API
-  if (isWasmReady()) {
+  // Update properties panel with cursor context
+  if (propertiesPanel && isWasmReady()) {
     const code = view.state.doc.toString();
     const context = getContextAtCursor(code, pos);
-    if (context) {
-      console.log('📍 Cursor Context:', {
-        type: context.statement_type,
-        valueType: context.value_type,
-        variable: context.variable_name,
-        props: context.properties,
-        span: `${context.span.start}-${context.span.end}`,
-      });
-    }
+    propertiesPanel.update(context);
   }
 }
 
@@ -278,6 +272,14 @@ async function init(): Promise<void> {
     log('✓ Piano roll initialized');
   } catch (e) {
     log(`⚠ Piano roll failed: ${e}`);
+  }
+
+  // Initialize properties panel
+  try {
+    propertiesPanel = new PropertiesPanel('properties-panel');
+    log('✓ Properties panel initialized');
+  } catch (e) {
+    log(`⚠ Properties panel failed: ${e}`);
   }
 
   // Validate initial code and update piano roll
