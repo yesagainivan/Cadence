@@ -149,14 +149,16 @@ impl Interpreter {
             }
 
             Statement::Volume(vol) => {
-                self.volume = *vol;
+                // Clamp volume to valid range (0.0 to 1.0)
+                let clamped = vol.clamp(0.0, 1.0);
+                self.volume = clamped;
                 self.actions.push(InterpreterAction::SetVolume {
-                    volume: *vol,
+                    volume: clamped,
                     track_id: self.current_track,
                 });
                 println!(
                     "Volume set to {:.0}% (Track {})",
-                    vol * 100.0,
+                    clamped * 100.0,
                     self.current_track
                 );
                 Ok(ControlFlow::Normal)

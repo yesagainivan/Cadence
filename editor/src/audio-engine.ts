@@ -23,13 +23,14 @@ interface ActiveOscillator {
 export class CadenceAudioEngine {
     private audioContext: AudioContext | null = null;
     private tempo: number = 120;
-    private volume: number = 0.5;
+    private volume: number = 0.3;  // Default to safer listening level
     private waveform: WaveformType = 'sine';
     private isPlaying: boolean = false;
     private activeOscillators: ActiveOscillator[] = [];
     private scheduledTimeouts: number[] = [];
     private interpreter: WasmInterpreter | null = null;
-    private currentBeat: number = 0;  // Current beat counter (source of truth for playhead)
+    private currentBeat: number = 0;       // Current beat counter
+    private lastBeatTime: number = 0;      // AudioContext time of last beat (for smooth interpolation)
 
     // Per-track volume (0-1 scale)
     private trackVolumes: Map<number, number> = new Map();
@@ -71,12 +72,12 @@ export class CadenceAudioEngine {
     }
 
     /**
-     * Set volume for a specific track (0-100 scale from Cadence)
+     * Set volume for a specific track (0.0-1.0 scale, already normalized by Rust)
      */
     setTrackVolume(trackId: number, vol: number): void {
-        // Convert 0-100 to 0-1 scale
-        const normalized = Math.max(0, Math.min(1, vol / 100));
-        this.trackVolumes.set(trackId, normalized);
+        // Rust already normalizes to 0.0-1.0, just clamp for safety
+        const clamped = Math.max(0, Math.min(1, vol));
+        this.trackVolumes.set(trackId, clamped);
     }
 
     /**
@@ -173,6 +174,7 @@ export class CadenceAudioEngine {
         const ctx = this.ensureContext();
         this.isPlaying = true;
         this.currentBeat = 0;
+        this.lastBeatTime = ctx.currentTime;
 
         // Initialize interpreter
         if (!this.interpreter) {
@@ -217,6 +219,7 @@ export class CadenceAudioEngine {
 
                 // Advance by 1 beat
                 this.currentBeat++;
+                this.lastBeatTime = nextBeatTime;
                 const beatDuration = 60 / this.tempo;
                 nextBeatTime += beatDuration;
             }
@@ -350,13 +353,17 @@ export class CadenceAudioEngine {
     }
 
     /**
-     * Get current playback position in beats
+     * Get current playback position in beats (with smooth interpolation)
      */
     getPlaybackPosition(): { beat: number; isPlaying: boolean } {
-        if (!this.isPlaying) {
+        if (!this.isPlaying || !this.audioContext) {
             return { beat: 0, isPlaying: false };
         }
-        return { beat: this.currentBeat, isPlaying: true };
+        // Interpolate between last beat and next beat for smooth animation
+        const beatDuration = 60 / this.tempo;
+        const elapsed = this.audioContext.currentTime - this.lastBeatTime;
+        const fraction = Math.min(elapsed / beatDuration, 1);  // Clamp to 1
+        return { beat: this.currentBeat + fraction, isPlaying: true };
     }
 }
 
