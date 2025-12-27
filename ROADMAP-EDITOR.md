@@ -46,18 +46,20 @@ A web-based editor for the Cadence music programming language with live syntax h
 
 ---
 
-## Phase 2: Live MIDI Display ✅ Mostly Complete
+## Phase 2: Live MIDI Display ✅ Complete
 
 ### 2.1 Piano Roll Visualization ✅
 - [x] Canvas-based piano roll component (`piano-roll.ts`)
 - [x] Parse patterns to extract notes with timing (`get_events_at_position`)
 - [x] Color-code notes by pitch class (12 colors in `NOTE_COLORS`)
 - [x] Playhead indicator for current beat
+- [x] Animated playhead synced to audio scheduler (`startAnimation()`)
 
 ### 2.2 Pattern Data API ✅
 - [x] `to_events()` returns frequencies, durations, rest flags
 - [x] Expose `get_events_at_position(code, pos)` WASM function for visualization
 - [x] Include cycle timing from pattern mini-notation (`beats_per_cycle`)
+- [x] Beat sync via `audioEngine.getPlaybackPosition()`
 
 ### 2.3 Staff Notation (Stretch)
 - [ ] VexFlow or similar for traditional notation
@@ -83,19 +85,19 @@ A web-based editor for the Cadence music programming language with live syntax h
 
 ---
 
-## Phase 4: Web Audio Playback ✅ Mostly Complete
+## Phase 4: Web Audio Playback ✅ Complete
 
 ### 4.1 Web Audio Engine ✅
 - [x] JavaScript-based oscillator/envelope generation
 - [x] ADSR envelope with customizable parameters
 - [x] Pattern scheduling with Web Audio clock
 - [x] Reactive playback via `WasmInterpreter` tick system
+- [x] Live coding support (update without cycle reset)
 - [ ] AudioWorklet for lower latency (stretch goal)
 
 ### 4.2 Transport Controls ✅
 - [x] Play/Stop functionality
 - [x] Tempo control (BPM slider) connected to engine
-- [x] Live coding support (update without cycle reset)
 - [x] Loop/cycle visualization (playhead indicator)
 
 ---
@@ -138,8 +140,8 @@ A web-based editor for the Cadence music programming language with live syntax h
 | Tokenization | WASM (Rust lexer) | ✅ Working |
 | Validation | WASM (Rust parser) | ✅ Working |
 | Audio playback | Web Audio API | ✅ Working |
-| MIDI visualization | Canvas 2D | 🔜 Next |
-| Property editing | TBD | ⬜ Planned |
+| MIDI visualization | Canvas 2D | ✅ Working |
+| Property editing | TBD | 🔜 Next |
 
 ---
 
@@ -166,7 +168,8 @@ A web-based editor for the Cadence music programming language with live syntax h
 
 ## Next Steps
 
-1. **Playhead Indicator** — Show current beat position during playback
-2. **Beat Sync** — Connect audio scheduler to visual playhead
-3. **Properties Panel** — Cursor context API and visual editors (Phase 3)
-4. **Staff Notation** — VexFlow integration for traditional notation (stretch)
+1. **Properties Panel** — Cursor context API and visual editors (Phase 3)
+   - Start with `get_context_at_cursor()` WASM function
+   - Build first property editor (e.g., ADSR envelope visualizer)
+2. **AudioWorklet** — Lower latency audio scheduling (stretch)
+3. **Staff Notation** — VexFlow integration for traditional notation (stretch)

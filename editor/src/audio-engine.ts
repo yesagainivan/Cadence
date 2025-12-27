@@ -109,30 +109,48 @@ export class CadenceAudioEngine {
     }
 
     /**
+     * Normalize waveform string to valid OscillatorType
+     */
+    private normalizeWaveform(type: string): WaveformType {
+        const validTypes: WaveformType[] = ['sine', 'square', 'sawtooth', 'triangle'];
+        const normalized = type.toLowerCase() as WaveformType;
+        if (validTypes.includes(normalized)) {
+            return normalized;
+        } else if (type.toLowerCase() === 'saw') {
+            return 'sawtooth';
+        }
+        return this.waveform; // Fall back to current default
+    }
+
+    /**
      * Play a single note at a specific frequency
      * @param freq Frequency in Hz
      * @param startTime When to start (AudioContext time)
      * @param durationSec Duration in seconds
      * @param noteGain Gain for this note (0-1), used to normalize chords
+     * @param waveform Waveform type for this note
+     * @param adsr ADSR envelope for this note
      */
     private scheduleNote(
         freq: number,
         startTime: number,
         durationSec: number,
-        noteGain: number = this.volume,
+        noteGain: number,
+        waveform: WaveformType,
+        adsr: AdsrParams,
     ): void {
         const ctx = this.ensureContext();
 
         const oscillator = ctx.createOscillator();
         const gainNode = ctx.createGain();
 
-        oscillator.type = this.waveform;
+        oscillator.type = waveform;
         oscillator.frequency.setValueAtTime(freq, startTime);
 
         oscillator.connect(gainNode);
         gainNode.connect(ctx.destination);
 
-        const { attack, decay, sustain, release } = this.adsr;
+        const { attack, decay, sustain, release } = adsr;
 
         // Ensure minimum duration for envelope to complete attack+decay
         const minEnvelopeDuration = attack + decay + 0.05;
@@ -260,16 +278,20 @@ export class CadenceAudioEngine {
     handleAction(action: Action, startTime: number): void {
         switch (action.type) {
             case 'Play': {
-                // Apply custom waveform/envelope
-                if (action.waveform) this.setWaveform(action.waveform);
-                if (action.envelope) {
-                    this.adsr = {
+                // Determine waveform for THIS action (action-specific or current default)
+                const actionWaveform = action.waveform
+                    ? this.normalizeWaveform(action.waveform)
+                    : this.waveform;
+
+                // Determine ADSR for THIS action (action-specific or current default)
+                const actionAdsr: AdsrParams = action.envelope
+                    ? {
                         attack: action.envelope[0],
                         decay: action.envelope[1],
                         sustain: action.envelope[2],
                         release: action.envelope[3],
-                    };
-                }
+                    }
+                    : this.adsr;
 
                 // Get volume for this track
                 const trackVolume = this.getTrackVolume(action.track_id);
@@ -284,7 +306,7 @@ export class CadenceAudioEngine {
                         const normalizedGain = trackVolume / Math.sqrt(noteCount);
 
                         for (const freq of event.frequencies) {
-                            this.scheduleNote(freq, time, durationSec, normalizedGain);
+                            this.scheduleNote(freq, time, durationSec, normalizedGain, actionWaveform, actionAdsr);
                         }
                     }
                     time += durationSec;
