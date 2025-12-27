@@ -52,7 +52,7 @@ A web-based editor for the Cadence music programming language with live syntax h
 - [x] Canvas-based piano roll component (`piano-roll.ts`)
 - [x] Parse patterns to extract notes with timing (`get_events_at_position`)
 - [x] Color-code notes by pitch class (12 colors in `NOTE_COLORS`)
-- [ ] Playhead indicator for current beat
+- [x] Playhead indicator for current beat
 
 ### 2.2 Pattern Data API ✅
 - [x] `to_events()` returns frequencies, durations, rest flags
@@ -96,7 +96,7 @@ A web-based editor for the Cadence music programming language with live syntax h
 - [x] Play/Stop functionality
 - [x] Tempo control (BPM slider) connected to engine
 - [x] Live coding support (update without cycle reset)
-- [ ] Loop/cycle visualization (playhead indicator)
+- [x] Loop/cycle visualization (playhead indicator)
 
 ---
 
