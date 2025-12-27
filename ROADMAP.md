@@ -64,7 +64,9 @@ A production-ready music programming language for chord progressions and harmoni
 
 ### 2.3 Functions ✅
 - [x] User-defined functions: `fn my_pattern(key) { ... }`
-- [ ] Higher-order functions (map, filter)
+- [x] Full statement execution in function bodies (let, if, loops)
+- [x] Void functions (`Value::Unit`)
+- [x] `map()` with dynamic dispatch (any function works)
 - [ ] Closures for pattern capture
 
 ---
@@ -86,6 +88,7 @@ A production-ready music programming language for chord progressions and harmoni
 ### 3.3 Pattern System ✅
 - [x] Cycle-based patterns: `"C E G _"` (underscore = rest)
 - [x] Pattern operators: `fast`, `slow`, `rev`, `every`
+- [x] TidalCycles-style pattern functions: `rotate`, `take`, `drop`, `palindrome`, `stutter`, `concat`, `len`, `transpose`, `chunk`
 - [x] Mini-notation parser (string -> pattern)
 - [x] Pattern variable resolution: `"cmaj fmaj"` resolves variables at evaluation time
 

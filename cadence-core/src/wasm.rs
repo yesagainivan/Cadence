@@ -881,6 +881,7 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                     Value::String(_) => ("string".to_string(), None),
                     Value::Boolean(_) => ("boolean".to_string(), None),
                     Value::Function { .. } => ("function".to_string(), None),
+                    Value::Unit => ("unit".to_string(), None),
                 };
                 (Some(vt), props)
             }
