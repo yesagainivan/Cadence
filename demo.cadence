@@ -208,7 +208,7 @@ let progression = "[C4, E4, G4] [A3, C4, E4] [F3, A3, C4] [G3, B3, D4]"
 let progression = smooth("[C4, E4, G4] [A3, C4, E4] [F3, A3, C4] [G3, B3, D4]") // use smooth voice leading!
 let progression = smooth("Do Re [F3, A3, C4] [G3, B3, D4]")
 
-let progression = Ivan;
+let progression = Ivan.pan(50);
 
 // Pad layer with soft envelope
 let pads = slow(progression, 2).env(11, 20, 80, 50).wave("sine")
@@ -225,13 +225,13 @@ let shimmer = fast(arp_notes, 2).env(10, 50, 30, 100).wave("saw")
 // Melodic line with variation every 2 cycles
 let lead = every(2, "rev", "G5 _ E5 _ C5 D5 E5 _").rev().fast(2).env("pluck")
 let lead = every(2, "rev", "G5 _ E5 _ C5 B4 C5 _").rev().fast(2).env("pluck")
-let lead = "G5 _ E5 _ C5 _ D5 _".fast(2).env("pluck").rotate(0)
+let lead = "G5 _ E5 _ C5 _ D5 _".fast(2).env("pluck").rotate(0).pan(10)
 
 // Ping for melody
 let ping = "C5 _ D5 _ E _ C".fast(1).env(80, 61, 0, 15);
 
 // Rhythmic pulse with rests
-let pulse = "C3 _ _ C3 _ C3 _ _".wave("square").env(5, 20, 0, 50)
+let pulse = "C3 _ _ C3 _ C3 _ _".wave("square").env(5, 20, 0, 50).pan(60)
 
 // --- The Arrangement ---
 
@@ -240,7 +240,7 @@ track 1 play pads loop
 track 1 volume 30
 
 // Layer 2: Low End (Bass)  
-// track 2 play bass loop
+track 2 play bass loop
 track 2 volume 30
 
 // Layer 3: Texture (Shimmer)

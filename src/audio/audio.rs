@@ -22,6 +22,8 @@ pub struct TrackState {
     pub envelope: Option<(f32, f32, f32, f32)>,
     /// Waveform type for this track
     pub waveform: Waveform,
+    /// Stereo pan position (0.0 = left, 0.5 = center, 1.0 = right)
+    pub pan: f32,
     /// Force envelope retrigger on next note (for same-note sequences like [C5 C5])
     pub retrigger: bool,
 }
@@ -34,6 +36,7 @@ impl Default for TrackState {
             is_playing: true,
             envelope: None,                // Use default ADSR
             waveform: Waveform::default(), // Sine by default
+            pan: 0.5,                      // Center by default
             retrigger: false,
         }
     }
@@ -69,6 +72,7 @@ pub enum AudioPlayerCommand {
     SetTrackVolume(usize, f32),
     SetTrackEnvelope(usize, Option<(f32, f32, f32, f32)>),
     SetTrackWaveform(usize, Waveform),
+    SetTrackPan(usize, f32),
     SetMasterVolume(f32),
     Play,
     Pause,
@@ -194,7 +198,7 @@ impl AudioPlayerInternal {
                         track_retrigger_seen.insert(*track_id, track_state.retrigger);
                     }
 
-                    // 2. Generate audio
+                    // 2. Generate audio with stereo panning
                     for frame in data.chunks_mut(channels) {
                         if is_playing {
                             master_amplitude = (master_amplitude + master_fade_rate).min(1.0);
@@ -202,47 +206,55 @@ impl AudioPlayerInternal {
                             master_amplitude = (master_amplitude - master_fade_rate).max(0.0);
                         }
 
-                        let mut mixed_value = 0.0;
+                        let mut left_mix = 0.0;
+                        let mut right_mix = 0.0;
                         let mut active_count = 0;
 
-                        // Sum all oscillators
-                        // Note: We need to consider track volume here too
+                        // Sum all oscillators with per-track panning
                         for oscillator in oscillators.iter_mut() {
-                            let track_vol = state
+                            let (track_vol, track_pan) = state
                                 .tracks
                                 .get(&oscillator.track_id)
-                                .map(|t| t.volume)
-                                .unwrap_or(1.0);
+                                .map(|t| (t.volume, t.pan))
+                                .unwrap_or((1.0, 0.5));
 
                             let sample = oscillator.next_sample();
                             if sample.abs() > 0.0001 {
-                                mixed_value += sample * track_vol;
+                                // Equal-power panning: use sqrt for smooth stereo field
+                                let left_gain = (1.0 - track_pan).sqrt();
+                                let right_gain = track_pan.sqrt();
+
+                                left_mix += sample * track_vol * left_gain;
+                                right_mix += sample * track_vol * right_gain;
                                 active_count += 1;
                             }
                         }
 
-                        // Normalize?
-                        // Simple normalization strategy:
-                        // Use tanh or soft clipping to handle summing,
-                        // or just scale down by a constant factor assuming max polyphony.
-                        // Let's try soft clipping for now (tanh-like behavior) to prevent harsh digital clipping
-                        // but allow loudness.
-                        // Actually, let's stick to safe scaling for now:
+                        // Apply headroom scaling
                         if active_count > 0 {
-                            // Rough heuristic: assume typical play is 3-6 notes.
-                            // Don't divide linearly by count or it gets too quiet with many notes.
-                            // Divide by sqrt(count) for better power preservation, or just a fixed headroom.
-                            mixed_value *= 0.3;
+                            left_mix *= 0.3;
+                            right_mix *= 0.3;
                         }
 
-                        // Hard limiter just in case
-                        mixed_value = mixed_value.clamp(-1.0, 1.0);
+                        // Hard limiter
+                        left_mix = left_mix.clamp(-1.0, 1.0);
+                        right_mix = right_mix.clamp(-1.0, 1.0);
 
-                        mixed_value *= master_volume * master_amplitude;
+                        // Apply master volume and amplitude
+                        left_mix *= master_volume * master_amplitude;
+                        right_mix *= master_volume * master_amplitude;
 
-                        let value: T = cpal::Sample::from_sample(mixed_value);
-                        for sample in frame.iter_mut() {
-                            *sample = value;
+                        // Write to output channels (stereo or mono)
+                        if channels >= 2 {
+                            frame[0] = T::from_sample(left_mix);
+                            frame[1] = T::from_sample(right_mix);
+                            // Fill remaining channels with center mix for surround
+                            for sample in frame.iter_mut().skip(2) {
+                                *sample = T::from_sample((left_mix + right_mix) * 0.5);
+                            }
+                        } else {
+                            // Mono output: use center mix
+                            frame[0] = T::from_sample((left_mix + right_mix) * 0.5);
                         }
                     }
 
@@ -315,6 +327,16 @@ impl AudioPlayerInternal {
             .map_err(|e| anyhow!("Lock error: {}", e))?;
         let track = state.tracks.entry(track_id).or_default();
         track.waveform = waveform;
+        Ok(())
+    }
+
+    fn set_track_pan(&mut self, track_id: usize, pan: f32) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
+        let track = state.tracks.entry(track_id).or_default();
+        track.pan = pan.clamp(0.0, 1.0);
         Ok(())
     }
 
@@ -395,6 +417,11 @@ impl AudioPlayerHandle {
                             eprintln!("Failed to set track waveform: {}", e);
                         }
                     }
+                    AudioPlayerCommand::SetTrackPan(track_id, pan) => {
+                        if let Err(e) = player.set_track_pan(track_id, pan) {
+                            eprintln!("Failed to set track pan: {}", e);
+                        }
+                    }
                     AudioPlayerCommand::SetMasterVolume(vol) => {
                         if let Err(e) = player.set_master_volume(vol) {
                             eprintln!("Failed to set master volume: {}", e);
@@ -455,6 +482,13 @@ impl AudioPlayerHandle {
     pub fn set_track_waveform(&self, track_id: usize, waveform: Waveform) -> Result<()> {
         self.command_tx
             .send(AudioPlayerCommand::SetTrackWaveform(track_id, waveform))
+            .map_err(|e| anyhow!("Failed to send command: {}", e))
+    }
+
+    /// Set the pan position for a specific track (0.0 = left, 0.5 = center, 1.0 = right)
+    pub fn set_track_pan(&self, track_id: usize, pan: f32) -> Result<()> {
+        self.command_tx
+            .send(AudioPlayerCommand::SetTrackPan(track_id, pan))
             .map_err(|e| anyhow!("Failed to send command: {}", e))
     }
 

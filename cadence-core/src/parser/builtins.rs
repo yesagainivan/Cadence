@@ -727,6 +727,7 @@ impl FunctionRegistry {
                         result.beats_per_cycle = pattern.beats_per_cycle;
                         result.envelope = pattern.envelope;
                         result.waveform = pattern.waveform;
+                        result.pan = pattern.pan;
                         Ok(Value::Pattern(result))
                     } else {
                         // Pattern has non-chord steps - fall back to whole-pattern operations
@@ -1364,6 +1365,36 @@ impl FunctionRegistry {
                     .ok_or_else(|| anyhow!("Unknown waveform: {}", wave_name))?;
 
                 pattern.waveform = Some(waveform);
+                Ok(Value::Pattern(pattern))
+            }),
+        );
+
+        // Pan function for stereo positioning
+        self.register(
+            "pan",
+            "Audio",
+            "Sets the stereo pan for a pattern (0=left, 50=center, 100=right).",
+            "pattern.pan(value)",
+            Arc::new(|evaluator, args, env| {
+                if args.len() != 2 {
+                    return Err(anyhow!("pan() expects 2 arguments: pattern, value"));
+                }
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let pan_value = evaluator.eval_with_env(args[1].clone(), env)?;
+
+                let mut pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    _ => return Err(anyhow!("pan() first argument must be a pattern")),
+                };
+
+                let pan = match pan_value {
+                    Value::Number(n) => (n as f32 / 100.0).clamp(0.0, 1.0),
+                    // Small numbers (0-11) are parsed as notes, extract pitch class
+                    Value::Note(n) => (n.pitch_class() as f32 / 100.0).clamp(0.0, 1.0),
+                    _ => return Err(anyhow!("pan() expects a number (0-100)")),
+                };
+
+                pattern.pan = Some(pan);
                 Ok(Value::Pattern(pattern))
             }),
         );

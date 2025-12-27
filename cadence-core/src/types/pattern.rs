@@ -183,6 +183,8 @@ pub struct Pattern {
     pub envelope: Option<(f32, f32, f32, f32)>, // (attack, decay, sustain, release)
     /// Optional waveform for this pattern
     pub waveform: Option<Waveform>,
+    /// Optional stereo pan (0.0 = left, 0.5 = center, 1.0 = right)
+    pub pan: Option<f32>,
 }
 
 impl Pattern {
@@ -193,6 +195,7 @@ impl Pattern {
             beats_per_cycle: 4.0,
             envelope: None,
             waveform: None,
+            pan: None,
         }
     }
 
@@ -203,6 +206,7 @@ impl Pattern {
             beats_per_cycle: 4.0,
             envelope: None,
             waveform: None,
+            pan: None,
         }
     }
 
@@ -426,6 +430,7 @@ impl Pattern {
             beats_per_cycle: self.beats_per_cycle,
             envelope: self.envelope,
             waveform: self.waveform.clone(),
+            pan: self.pan,
         })
     }
 
@@ -491,6 +496,7 @@ impl Pattern {
             beats_per_cycle,
             envelope: Some((0.01, 0.1, 0.7, 0.3)),
             waveform: None,
+            pan: None,
         }
     }
 

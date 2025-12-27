@@ -137,6 +137,24 @@ impl PlaybackSource {
         }
     }
 
+    /// Get the pan from the source (if it's a pattern with pan)
+    pub fn get_pan(&self) -> Result<Option<f32>> {
+        match self {
+            PlaybackSource::Static(_) => Ok(None),
+            PlaybackSource::Reactive { expression, env } => {
+                let evaluator = Evaluator::new();
+                let env_guard = env
+                    .read()
+                    .map_err(|e| anyhow::anyhow!("Environment lock poisoned: {}", e))?;
+                let value = evaluator.eval_with_env(expression.clone(), Some(&env_guard))?;
+                match value {
+                    Value::Pattern(pattern) => Ok(pattern.pan),
+                    _ => Ok(None),
+                }
+            }
+        }
+    }
+
     /// Get the number of events in this source (evaluates if reactive)
     pub fn len(&self) -> Result<usize> {
         Ok(self.evaluate()?.len())
@@ -782,6 +800,13 @@ impl PlaybackLoop {
                 .set_track_waveform(self.track_id, waveform)
             {
                 eprintln!("Failed to set waveform: {}", e);
+            }
+        }
+
+        // Set the pan for this track (from pattern if available)
+        if let Ok(Some(pan)) = config.source.get_pan() {
+            if let Err(e) = self.audio_handle.set_track_pan(self.track_id, pan) {
+                eprintln!("Failed to set pan: {}", e);
             }
         }
 
