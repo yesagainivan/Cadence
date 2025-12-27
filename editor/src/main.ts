@@ -13,7 +13,7 @@ import { bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { cadenceWasm } from './lang-cadence-wasm';
-import { initWasm, parseCode, isWasmReady, getEventsAtPosition } from './cadence-wasm';
+import { initWasm, parseCode, isWasmReady, getEventsAtPosition, getContextAtCursor } from './cadence-wasm';
 import { audioEngine } from './audio-engine';
 import { PianoRoll } from './piano-roll';
 
@@ -140,6 +140,21 @@ function updateCursorPosition(view: EditorView): void {
   const cursorPosEl = document.getElementById('cursor-pos');
   if (cursorPosEl) {
     cursorPosEl.textContent = `Ln ${line.number}, Col ${col}`;
+  }
+
+  // Debug: Test get_context_at_cursor API
+  if (isWasmReady()) {
+    const code = view.state.doc.toString();
+    const context = getContextAtCursor(code, pos);
+    if (context) {
+      console.log('📍 Cursor Context:', {
+        type: context.statement_type,
+        valueType: context.value_type,
+        variable: context.variable_name,
+        props: context.properties,
+        span: `${context.span.start}-${context.span.end}`,
+      });
+    }
   }
 }
 

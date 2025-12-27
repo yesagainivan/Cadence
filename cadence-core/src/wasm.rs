@@ -580,6 +580,242 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
     serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
 }
 
+// ============================================================================
+// Cursor Context API (for Properties Panel)
+// ============================================================================
+
+/// Editable properties for a cursor context
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct EditablePropertiesJS {
+    /// Current waveform (if pattern/play)
+    pub waveform: Option<String>,
+    /// Current ADSR envelope: [attack, decay, sustain, release]
+    pub envelope: Option<[f32; 4]>,
+    /// Current tempo (if tempo statement)
+    pub tempo: Option<f32>,
+    /// Current volume (if volume statement)
+    pub volume: Option<f32>,
+    /// Beats per cycle (if pattern)
+    pub beats_per_cycle: Option<f32>,
+}
+
+/// Source span information
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SpanInfoJS {
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Cursor context for the Properties Panel
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CursorContextJS {
+    /// Type of statement at cursor
+    pub statement_type: String,
+    /// The evaluated value type (if applicable)
+    pub value_type: Option<String>,
+    /// Editable properties for this context
+    pub properties: Option<EditablePropertiesJS>,
+    /// Source span for replacement
+    pub span: SpanInfoJS,
+    /// Variable name if this is a let/assign statement
+    pub variable_name: Option<String>,
+}
+
+/// Get cursor context for the statement at the given position
+/// Returns CursorContextJS with statement metadata and editable properties
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
+    use crate::parser::ast::{Statement, Value};
+    use crate::parser::evaluator::Evaluator;
+    use crate::parser::interpreter::Interpreter;
+    use crate::parser::statement_parser::parse_spanned_statements;
+
+    // Parse with span tracking
+    let spanned_program = match parse_spanned_statements(code) {
+        Ok(p) => p,
+        Err(_) => return JsValue::NULL,
+    };
+
+    // Find statement containing cursor position
+    let spanned_stmt = match spanned_program.statement_at(position) {
+        Some(s) => s,
+        None => return JsValue::NULL,
+    };
+
+    // Run the full program to populate environment
+    let mut interpreter = Interpreter::new();
+    let program = spanned_program.to_program();
+    let _ = interpreter.run_program(&program);
+
+    let env = interpreter.environment.read().unwrap();
+    let evaluator = Evaluator::new();
+
+    // Determine statement type and extract expression if applicable
+    let (statement_type, expr_opt, variable_name) = match &spanned_stmt.statement {
+        Statement::Let { name, value } => {
+            ("let".to_string(), Some(value.clone()), Some(name.clone()))
+        }
+        Statement::Assign { name, value } => (
+            "assign".to_string(),
+            Some(value.clone()),
+            Some(name.clone()),
+        ),
+        Statement::Play { target, .. } => ("play".to_string(), Some(target.clone()), None),
+        Statement::Expression(e) => ("expression".to_string(), Some(e.clone()), None),
+        Statement::Tempo(bpm) => {
+            // Direct tempo statement
+            let context = CursorContextJS {
+                statement_type: "tempo".to_string(),
+                value_type: Some("number".to_string()),
+                properties: Some(EditablePropertiesJS {
+                    waveform: None,
+                    envelope: None,
+                    tempo: Some(*bpm),
+                    volume: None,
+                    beats_per_cycle: None,
+                }),
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                },
+                variable_name: None,
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Volume(vol) => {
+            // Direct volume statement
+            let context = CursorContextJS {
+                statement_type: "volume".to_string(),
+                value_type: Some("number".to_string()),
+                properties: Some(EditablePropertiesJS {
+                    waveform: None,
+                    envelope: None,
+                    tempo: None,
+                    volume: Some(*vol),
+                    beats_per_cycle: None,
+                }),
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                },
+                variable_name: None,
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Waveform(name) => {
+            // Direct waveform statement
+            let context = CursorContextJS {
+                statement_type: "waveform".to_string(),
+                value_type: Some("string".to_string()),
+                properties: Some(EditablePropertiesJS {
+                    waveform: Some(name.clone()),
+                    envelope: None,
+                    tempo: None,
+                    volume: None,
+                    beats_per_cycle: None,
+                }),
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                },
+                variable_name: None,
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Stop => {
+            let context = CursorContextJS {
+                statement_type: "stop".to_string(),
+                value_type: None,
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                },
+                variable_name: None,
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Comment(text) => {
+            let context = CursorContextJS {
+                statement_type: "comment".to_string(),
+                value_type: None,
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                },
+                variable_name: Some(text.clone()),
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        _ => {
+            // Other statement types (loop, repeat, if, etc.)
+            let context = CursorContextJS {
+                statement_type: format!("{:?}", spanned_stmt.statement)
+                    .split('(')
+                    .next()
+                    .unwrap_or("unknown")
+                    .to_lowercase(),
+                value_type: None,
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                },
+                variable_name: None,
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+    };
+
+    // If we have an expression, evaluate it to get properties
+    let (value_type, properties) = if let Some(expr) = expr_opt {
+        match evaluator.eval_with_env(expr, Some(&env)) {
+            Ok(value) => {
+                let (vt, props) = match value {
+                    Value::Pattern(ref p) => {
+                        let props = EditablePropertiesJS {
+                            waveform: p.waveform.as_ref().map(|w| w.name().to_string()),
+                            envelope: p.envelope.map(|(a, d, s, r)| [a, d, s, r]),
+                            tempo: None,
+                            volume: None,
+                            beats_per_cycle: Some(p.beats_per_cycle),
+                        };
+                        ("pattern".to_string(), Some(props))
+                    }
+                    Value::Chord(_) => ("chord".to_string(), None),
+                    Value::Note(_) => ("note".to_string(), None),
+                    Value::Number(_) => ("number".to_string(), None),
+                    Value::String(_) => ("string".to_string(), None),
+                    Value::Boolean(_) => ("boolean".to_string(), None),
+                    Value::Function { .. } => ("function".to_string(), None),
+                };
+                (Some(vt), props)
+            }
+            Err(_) => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+
+    let context = CursorContextJS {
+        statement_type,
+        value_type,
+        properties,
+        span: SpanInfoJS {
+            start: spanned_stmt.start,
+            end: spanned_stmt.end,
+        },
+        variable_name,
+    };
+
+    serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL)
+}
+
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub struct WasmInterpreter {

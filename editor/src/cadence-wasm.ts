@@ -5,7 +5,7 @@
  * providing access to tokenization and parsing functions.
  */
 
-import init, { tokenize, parse_and_check, run_script, get_events_at_position, WasmInterpreter } from './wasm/cadence_core.js';
+import init, { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, WasmInterpreter } from './wasm/cadence_core.js';
 
 export interface HighlightSpan {
     start_line: number;
@@ -110,6 +110,44 @@ export interface ScriptResult {
     output: string[];
 }
 
+// ============================================================================
+// Cursor Context Types (for Properties Panel)
+// ============================================================================
+
+/** Editable properties for a cursor context */
+export interface EditableProperties {
+    /** Current waveform (if pattern/play) */
+    waveform: string | null;
+    /** Current ADSR envelope: [attack, decay, sustain, release] */
+    envelope: [number, number, number, number] | null;
+    /** Current tempo (if tempo statement) */
+    tempo: number | null;
+    /** Current volume (if volume statement) */
+    volume: number | null;
+    /** Beats per cycle (if pattern) */
+    beats_per_cycle: number | null;
+}
+
+/** Source span information */
+export interface SpanInfo {
+    start: number;
+    end: number;
+}
+
+/** Cursor context for the Properties Panel */
+export interface CursorContext {
+    /** Type of statement at cursor */
+    statement_type: string;
+    /** The evaluated value type (if applicable) */
+    value_type: string | null;
+    /** Editable properties for this context */
+    properties: EditableProperties | null;
+    /** Source span for replacement */
+    span: SpanInfo;
+    /** Variable name if this is a let/assign statement */
+    variable_name: string | null;
+}
+
 let wasmInitialized = false;
 let initPromise: Promise<void> | null = null;
 
@@ -212,5 +250,23 @@ export function getEventsAtPosition(code: string, position: number): PatternEven
     }
 }
 
+/**
+ * Get cursor context for the statement at the given position
+ * Returns CursorContext with statement metadata and editable properties
+ */
+export function getContextAtCursor(code: string, position: number): CursorContext | null {
+    if (!wasmInitialized) {
+        return null;
+    }
+
+    try {
+        const result = get_context_at_cursor(code, position);
+        return result as CursorContext | null;
+    } catch (e) {
+        console.error('Get context at cursor error:', e);
+        return null;
+    }
+}
+
 // Re-export for convenience
-export { tokenize, parse_and_check, run_script, get_events_at_position, WasmInterpreter };
+export { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, WasmInterpreter };
