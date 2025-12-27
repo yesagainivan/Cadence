@@ -4,6 +4,7 @@
 //! with support for rests, repetition, and grouping.
 
 use super::audio_config::Waveform;
+use super::drum::DrumSound;
 use crate::types::{Chord, Note};
 use anyhow::{anyhow, Result};
 use std::fmt;
@@ -74,6 +75,8 @@ pub enum PatternStep {
     Repeat(Box<PatternStep>, usize),
     /// Unresolved variable reference (resolved at evaluation time)
     Variable(String),
+    /// Drum sound: kick, snare, hh, etc.
+    Drum(DrumSound),
 }
 
 impl PatternStep {
@@ -103,6 +106,7 @@ impl PatternStep {
                     name
                 )
             }
+            PatternStep::Drum(d) => vec![(vec![d.display_frequency()], false)],
         }
     }
 
@@ -127,6 +131,19 @@ impl PatternStep {
                     name
                 )
             }
+            PatternStep::Drum(d) => {
+                // Create a pseudo-NoteInfo for drum visualization
+                vec![(
+                    vec![NoteInfo {
+                        midi: d.midi_note(),
+                        frequency: d.display_frequency(),
+                        name: d.short_name().to_string(),
+                        pitch_class: d.midi_note() % 12,
+                        octave: (d.midi_note() / 12) as i8 - 1,
+                    }],
+                    false,
+                )]
+            }
         }
     }
 
@@ -143,6 +160,7 @@ impl PatternStep {
                 PatternStep::Repeat(Box::new(step.transpose(semitones)), *count)
             }
             PatternStep::Variable(name) => PatternStep::Variable(name.clone()),
+            PatternStep::Drum(d) => PatternStep::Drum(*d), // Drums don't transpose
         }
     }
 }
@@ -165,6 +183,7 @@ impl fmt::Display for PatternStep {
             }
             PatternStep::Repeat(step, count) => write!(f, "{}*{}", step, count),
             PatternStep::Variable(name) => write!(f, "{}", name),
+            PatternStep::Drum(d) => write!(f, "{}", d),
         }
     }
 }
@@ -709,6 +728,7 @@ impl Pattern {
                 }
                 PatternStep::Rest => {}
                 PatternStep::Variable(_) => {} // Variables don't contribute notes until resolved
+                PatternStep::Drum(_) => {}     // Drums don't contribute melodic notes
             }
         }
 
@@ -898,7 +918,9 @@ impl fmt::Display for Pattern {
 /// Check if a pattern step contains actual pattern content (not just variable references)
 fn has_non_variable_content(step: &PatternStep) -> bool {
     match step {
-        PatternStep::Note(_) | PatternStep::Chord(_) | PatternStep::Rest => true,
+        PatternStep::Note(_) | PatternStep::Chord(_) | PatternStep::Rest | PatternStep::Drum(_) => {
+            true
+        }
         PatternStep::Group(steps) => steps.iter().any(has_non_variable_content),
         PatternStep::Repeat(inner, _) => has_non_variable_content(inner),
         PatternStep::Variable(_) => false,
@@ -961,25 +983,32 @@ fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
                 let step = maybe_parse_repeat(&mut chars, step)?;
                 steps.push(step);
             }
-            // Lowercase letter - could be a flat note (a-g) or a variable (longer identifier)
+            // Lowercase letter - could be a flat note (a-g), a drum, or a variable
             'a'..='g' => {
                 let token = take_note_or_identifier(&mut chars);
                 // Check if it looks like a note (single letter + optional accidental + optional octave)
-                // or an identifier (multiple letters like "cmaj", "bass", etc.)
-                let step = match token.parse::<Note>() {
-                    Ok(note) => PatternStep::Note(note),
-                    Err(_) => {
-                        // Not a valid note, treat as variable
-                        PatternStep::Variable(token)
-                    }
+                // or a drum name, or an identifier
+                let step = if let Ok(note) = token.parse::<Note>() {
+                    PatternStep::Note(note)
+                } else if let Some(drum) = DrumSound::from_str(&token) {
+                    PatternStep::Drum(drum)
+                } else {
+                    // Not a valid note or drum, treat as variable
+                    PatternStep::Variable(token)
                 };
                 let step = maybe_parse_repeat(&mut chars, step)?;
                 steps.push(step);
             }
-            // Identifier starting with h-z (definitely a variable, not a note)
+            // Identifier starting with h-z (could be drum like 'kick', 'hh', or variable)
             'h'..='z' | 'H'..='Z' => {
                 let ident = take_identifier(&mut chars);
-                let step = maybe_parse_repeat(&mut chars, PatternStep::Variable(ident))?;
+                // Check if it's a drum name first
+                let step = if let Some(drum) = DrumSound::from_str(&ident) {
+                    PatternStep::Drum(drum)
+                } else {
+                    PatternStep::Variable(ident)
+                };
+                let step = maybe_parse_repeat(&mut chars, step)?;
                 steps.push(step);
             }
             // Unknown

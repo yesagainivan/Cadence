@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use cadence_core::types::DrumSound;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, SizedSample, Stream, StreamConfig};
 use std::collections::HashMap;
@@ -6,6 +7,7 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
+use super::drum_synth::DrumOscillator;
 use super::oscillator::EnvelopedOscillator;
 use crate::types::Waveform;
 
@@ -51,6 +53,8 @@ pub struct AudioState {
     pub volume: f32,
     /// Master playback status
     pub is_playing: bool,
+    /// Pending drum triggers: (track_id, drum_sound)
+    pub pending_drums: Vec<(usize, DrumSound)>,
 }
 
 impl Default for AudioState {
@@ -59,6 +63,7 @@ impl Default for AudioState {
             tracks: HashMap::new(),
             volume: 0.2,       // Default to 20% master volume
             is_playing: false, // Start paused
+            pending_drums: Vec::new(),
         }
     }
 }
@@ -73,6 +78,7 @@ pub enum AudioPlayerCommand {
     SetTrackEnvelope(usize, Option<(f32, f32, f32, f32)>),
     SetTrackWaveform(usize, Waveform),
     SetTrackPan(usize, f32),
+    PlayDrum(usize, DrumSound),
     SetMasterVolume(f32),
     Play,
     Pause,
@@ -119,6 +125,7 @@ impl AudioPlayerInternal {
         let sample_rate = config.sample_rate.0 as f32;
 
         let mut oscillators: Vec<EnvelopedOscillator> = Vec::new();
+        let mut drum_oscillators: Vec<DrumOscillator> = Vec::new();
         // Track current frequencies per track: Map<TrackId, Vec<Freq>>
         let mut track_frequencies: HashMap<usize, Vec<f32>> = HashMap::new();
         // Track current waveforms per track to detect changes
@@ -137,7 +144,7 @@ impl AudioPlayerInternal {
             .build_output_stream(
                 config,
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-                    let state = match state.lock() {
+                    let mut state = match state.lock() {
                         Ok(s) => s,
                         Err(e) => {
                             eprintln!("Failed to lock audio state: {}", e);
@@ -150,6 +157,15 @@ impl AudioPlayerInternal {
 
                     let master_volume = state.volume;
                     let is_playing = state.is_playing;
+
+                    // Spawn drum oscillators for pending triggers
+                    for (track_id, drum_sound) in state.pending_drums.drain(..) {
+                        drum_oscillators.push(DrumOscillator::new(
+                            drum_sound,
+                            sample_rate,
+                            track_id,
+                        ));
+                    }
 
                     // 1. Sync oscillators with state
                     // Check for changes in each track
@@ -206,11 +222,11 @@ impl AudioPlayerInternal {
                             master_amplitude = (master_amplitude - master_fade_rate).max(0.0);
                         }
 
-                        let mut left_mix = 0.0;
-                        let mut right_mix = 0.0;
+                        let mut left_mix = 0.0f32;
+                        let mut right_mix = 0.0f32;
                         let mut active_count = 0;
 
-                        // Sum all oscillators with per-track panning
+                        // Sum all melodic oscillators with per-track panning
                         for oscillator in oscillators.iter_mut() {
                             let (track_vol, track_pan) = state
                                 .tracks
@@ -221,6 +237,25 @@ impl AudioPlayerInternal {
                             let sample = oscillator.next_sample();
                             if sample.abs() > 0.0001 {
                                 // Equal-power panning: use sqrt for smooth stereo field
+                                let left_gain = (1.0 - track_pan).sqrt();
+                                let right_gain = track_pan.sqrt();
+
+                                left_mix += sample * track_vol * left_gain;
+                                right_mix += sample * track_vol * right_gain;
+                                active_count += 1;
+                            }
+                        }
+
+                        // Sum all drum oscillators (one-shot, with panning)
+                        for drum_osc in drum_oscillators.iter_mut() {
+                            let (track_vol, track_pan) = state
+                                .tracks
+                                .get(&drum_osc.track_id)
+                                .map(|t| (t.volume, t.pan))
+                                .unwrap_or((1.0, 0.5));
+
+                            let sample = drum_osc.next_sample();
+                            if sample.abs() > 0.0001 {
                                 let left_gain = (1.0 - track_pan).sqrt();
                                 let right_gain = track_pan.sqrt();
 
@@ -259,6 +294,7 @@ impl AudioPlayerInternal {
                     }
 
                     oscillators.retain(|osc| !osc.is_finished());
+                    drum_oscillators.retain(|osc| !osc.is_finished());
                 },
                 err_fn,
                 None,
@@ -337,6 +373,15 @@ impl AudioPlayerInternal {
             .map_err(|e| anyhow!("Lock error: {}", e))?;
         let track = state.tracks.entry(track_id).or_default();
         track.pan = pan.clamp(0.0, 1.0);
+        Ok(())
+    }
+
+    fn play_drum(&mut self, track_id: usize, drum: DrumSound) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
+        state.pending_drums.push((track_id, drum));
         Ok(())
     }
 
@@ -422,6 +467,11 @@ impl AudioPlayerHandle {
                             eprintln!("Failed to set track pan: {}", e);
                         }
                     }
+                    AudioPlayerCommand::PlayDrum(track_id, drum) => {
+                        if let Err(e) = player.play_drum(track_id, drum) {
+                            eprintln!("Failed to play drum: {}", e);
+                        }
+                    }
                     AudioPlayerCommand::SetMasterVolume(vol) => {
                         if let Err(e) = player.set_master_volume(vol) {
                             eprintln!("Failed to set master volume: {}", e);
@@ -489,6 +539,13 @@ impl AudioPlayerHandle {
     pub fn set_track_pan(&self, track_id: usize, pan: f32) -> Result<()> {
         self.command_tx
             .send(AudioPlayerCommand::SetTrackPan(track_id, pan))
+            .map_err(|e| anyhow!("Failed to send command: {}", e))
+    }
+
+    /// Trigger a drum sound on a specific track
+    pub fn play_drum(&self, track_id: usize, drum: DrumSound) -> Result<()> {
+        self.command_tx
+            .send(AudioPlayerCommand::PlayDrum(track_id, drum))
             .map_err(|e| anyhow!("Failed to send command: {}", e))
     }
 
