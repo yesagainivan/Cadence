@@ -589,6 +589,20 @@ impl PlaybackLoop {
                 let _ = self.audio_handle.set_track_volume(self.track_id, 1.0);
             }
             PlaybackCommand::QueueProgression(config, mode) => {
+                // For Beat mode when an infinite loop is already playing,
+                // replace immediately rather than stacking in queue
+                // This prevents the "compounding" bug where multiple play commands
+                // result in multiple simultaneous instances
+                let is_infinite_loop = self
+                    .current_progression
+                    .as_ref()
+                    .map_or(false, |p| p.loop_count.is_none());
+
+                if matches!(mode, QueueMode::Beat) && is_infinite_loop {
+                    // Clear queue and set as next (will switch on next beat)
+                    self.pending_queue.clear();
+                }
+
                 self.pending_queue.push_back((config, mode));
                 self.is_playing.store(true, Ordering::Relaxed);
             }
@@ -811,14 +825,13 @@ impl PlaybackLoop {
         self.chord_index += 1;
 
         // Calculate next chord beat using per-event duration
-        // Pattern events have their own duration from to_events()
+        // Pattern events from to_events() already have absolute durations in beats
+        // (computed from beats_per_cycle / steps.len()), not relative durations
         // Non-pattern events use the config's note_duration as fallback
         let base_duration = self.duration_to_beats(&config.note_duration);
         let duration_beats = if *event_duration > 0.0 {
-            // Use the event's own duration, scaled by the base duration
-            // Pattern events are relative (e.g., 0.5 = half of a step)
-            // We multiply by base_duration to get actual beat timing
-            event_duration * base_duration
+            // Use the event's own duration directly - it's already in beats
+            *event_duration
         } else {
             base_duration
         };
