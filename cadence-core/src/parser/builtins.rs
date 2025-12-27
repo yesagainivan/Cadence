@@ -176,6 +176,265 @@ impl FunctionRegistry {
         );
 
         self.register(
+            "rotate",
+            "Pattern",
+            "Rotates pattern steps by n positions. Positive rotates right, negative rotates left.",
+            "rotate(pattern: Pattern, n: Number) -> Pattern",
+            Arc::new(|evaluator, args, env| {
+                if args.len() != 2 {
+                    return Err(anyhow!("rotate() expects 2 arguments: pattern, n"));
+                }
+
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let n_value = evaluator.eval_with_env(args[1].clone(), env)?;
+
+                let pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    Value::String(s) => crate::types::Pattern::parse(&s)
+                        .map_err(|e| anyhow!("rotate(): invalid pattern: {}", e))?,
+                    _ => return Err(anyhow!("rotate() first argument must be a pattern")),
+                };
+
+                let n = match n_value {
+                    Value::Number(n) => n,
+                    Value::Note(note) => note.pitch_class() as i32,
+                    _ => return Err(anyhow!("rotate() second argument must be a number")),
+                };
+
+                Ok(Value::Pattern(pattern.rotate(n)))
+            }),
+        );
+
+        self.register(
+            "take",
+            "Pattern",
+            "Takes the first n steps of a pattern.",
+            "take(pattern: Pattern, n: Number) -> Pattern",
+            Arc::new(|evaluator, args, env| {
+                if args.len() != 2 {
+                    return Err(anyhow!("take() expects 2 arguments: pattern, n"));
+                }
+
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let n_value = evaluator.eval_with_env(args[1].clone(), env)?;
+
+                let pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    Value::String(s) => crate::types::Pattern::parse(&s)
+                        .map_err(|e| anyhow!("take(): invalid pattern: {}", e))?,
+                    _ => return Err(anyhow!("take() first argument must be a pattern")),
+                };
+
+                let n = match n_value {
+                    Value::Number(n) => n.max(0) as usize,
+                    Value::Note(note) => note.pitch_class() as usize,
+                    _ => return Err(anyhow!("take() second argument must be a number")),
+                };
+
+                Ok(Value::Pattern(pattern.take(n)))
+            }),
+        );
+
+        self.register(
+            "chunk",
+            "Pattern",
+            "Takes the first n steps of a pattern (alias for take).",
+            "chunk(pattern: Pattern, n: Number) -> Pattern",
+            Arc::new(|evaluator, args, env| {
+                if args.len() != 2 {
+                    return Err(anyhow!("chunk() expects 2 arguments: pattern, n"));
+                }
+
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let n_value = evaluator.eval_with_env(args[1].clone(), env)?;
+
+                let pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    Value::String(s) => crate::types::Pattern::parse(&s)
+                        .map_err(|e| anyhow!("chunk(): invalid pattern: {}", e))?,
+                    _ => return Err(anyhow!("chunk() first argument must be a pattern")),
+                };
+
+                let n = match n_value {
+                    Value::Number(n) => n.max(0) as usize,
+                    Value::Note(note) => note.pitch_class() as usize,
+                    _ => return Err(anyhow!("chunk() second argument must be a number")),
+                };
+
+                Ok(Value::Pattern(pattern.take(n)))
+            }),
+        );
+
+        self.register(
+            "drop",
+            "Pattern",
+            "Drops the first n steps of a pattern.",
+            "drop(pattern: Pattern, n: Number) -> Pattern",
+            Arc::new(|evaluator, args, env| {
+                if args.len() != 2 {
+                    return Err(anyhow!("drop() expects 2 arguments: pattern, n"));
+                }
+
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let n_value = evaluator.eval_with_env(args[1].clone(), env)?;
+
+                let pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    Value::String(s) => crate::types::Pattern::parse(&s)
+                        .map_err(|e| anyhow!("drop(): invalid pattern: {}", e))?,
+                    _ => return Err(anyhow!("drop() first argument must be a pattern")),
+                };
+
+                let n = match n_value {
+                    Value::Number(n) => n.max(0) as usize,
+                    Value::Note(note) => note.pitch_class() as usize,
+                    _ => return Err(anyhow!("drop() second argument must be a number")),
+                };
+
+                Ok(Value::Pattern(pattern.drop_steps(n)))
+            }),
+        );
+
+        self.register(
+            "palindrome",
+            "Pattern",
+            "Creates a palindrome: pattern followed by its reverse.",
+            "palindrome(pattern: Pattern) -> Pattern",
+            Arc::new(|evaluator, args, env| {
+                if args.len() != 1 {
+                    return Err(anyhow!("palindrome() expects 1 argument: pattern"));
+                }
+
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
+
+                let pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    Value::String(s) => crate::types::Pattern::parse(&s)
+                        .map_err(|e| anyhow!("palindrome(): invalid pattern: {}", e))?,
+                    _ => return Err(anyhow!("palindrome() argument must be a pattern")),
+                };
+
+                Ok(Value::Pattern(pattern.palindrome()))
+            }),
+        );
+
+        self.register(
+            "stutter",
+            "Pattern",
+            "Repeats each step n times.",
+            "stutter(pattern: Pattern, n: Number) -> Pattern",
+            Arc::new(|evaluator, args, env| {
+                if args.len() != 2 {
+                    return Err(anyhow!("stutter() expects 2 arguments: pattern, n"));
+                }
+
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let n_value = evaluator.eval_with_env(args[1].clone(), env)?;
+
+                let pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    Value::String(s) => crate::types::Pattern::parse(&s)
+                        .map_err(|e| anyhow!("stutter(): invalid pattern: {}", e))?,
+                    _ => return Err(anyhow!("stutter() first argument must be a pattern")),
+                };
+
+                let n = match n_value {
+                    Value::Number(n) => n.max(1) as usize,
+                    Value::Note(note) => (note.pitch_class() as usize).max(1),
+                    _ => return Err(anyhow!("stutter() second argument must be a number")),
+                };
+
+                Ok(Value::Pattern(pattern.stutter(n)))
+            }),
+        );
+
+        self.register(
+            "len",
+            "Pattern",
+            "Returns the number of steps in a pattern.",
+            "len(pattern: Pattern) -> Number",
+            Arc::new(|evaluator, args, env| {
+                if args.len() != 1 {
+                    return Err(anyhow!("len() expects 1 argument: pattern"));
+                }
+
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
+
+                let pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    Value::String(s) => crate::types::Pattern::parse(&s)
+                        .map_err(|e| anyhow!("len(): invalid pattern: {}", e))?,
+                    _ => return Err(anyhow!("len() argument must be a pattern")),
+                };
+
+                Ok(Value::Number(pattern.len() as i32))
+            }),
+        );
+
+        self.register(
+            "concat",
+            "Pattern",
+            "Concatenates two patterns together.",
+            "concat(pattern1: Pattern, pattern2: Pattern) -> Pattern",
+            Arc::new(|evaluator, args, env| {
+                if args.len() != 2 {
+                    return Err(anyhow!("concat() expects 2 arguments: pattern1, pattern2"));
+                }
+
+                let p1_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let p2_value = evaluator.eval_with_env(args[1].clone(), env)?;
+
+                let p1 = match p1_value {
+                    Value::Pattern(p) => p,
+                    Value::String(s) => crate::types::Pattern::parse(&s)
+                        .map_err(|e| anyhow!("concat(): invalid first pattern: {}", e))?,
+                    _ => return Err(anyhow!("concat() first argument must be a pattern")),
+                };
+
+                let p2 = match p2_value {
+                    Value::Pattern(p) => p,
+                    Value::String(s) => crate::types::Pattern::parse(&s)
+                        .map_err(|e| anyhow!("concat(): invalid second pattern: {}", e))?,
+                    _ => return Err(anyhow!("concat() second argument must be a pattern")),
+                };
+
+                Ok(Value::Pattern(p1.concat(p2)))
+            }),
+        );
+
+        self.register(
+            "transpose",
+            "Pattern",
+            "Transposes all notes in a pattern by n semitones.",
+            "transpose(pattern: Pattern, semitones: Number) -> Pattern",
+            Arc::new(|evaluator, args, env| {
+                if args.len() != 2 {
+                    return Err(anyhow!(
+                        "transpose() expects 2 arguments: pattern, semitones"
+                    ));
+                }
+
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let semitones_value = evaluator.eval_with_env(args[1].clone(), env)?;
+
+                let pattern = match pattern_value {
+                    Value::Pattern(p) => p,
+                    Value::String(s) => crate::types::Pattern::parse(&s)
+                        .map_err(|e| anyhow!("transpose(): invalid pattern: {}", e))?,
+                    _ => return Err(anyhow!("transpose() first argument must be a pattern")),
+                };
+
+                let semitones = match semitones_value {
+                    Value::Number(n) => n as i8,
+                    Value::Note(note) => note.pitch_class() as i8,
+                    _ => return Err(anyhow!("transpose() second argument must be a number")),
+                };
+
+                Ok(Value::Pattern(pattern.transpose(semitones)))
+            }),
+        );
+
+        self.register(
             "every",
             "Pattern",
             "Applies a transformation every n cycles.",
@@ -423,9 +682,18 @@ impl FunctionRegistry {
 
                 let progression_value = evaluator.eval_with_env(progression_expr, env)?;
                 if let Value::Pattern(pattern) = progression_value {
+                    // Apply known chord transformations
                     let mapped = match func_name.as_str() {
                         "invert" => pattern.map_chords(|chord| chord.invert()),
-                        _ => return Err(anyhow!("Unknown function for map: {}", func_name)),
+                        "rev" | "reverse" => pattern.rev(),
+                        _ => {
+                            // Try to evaluate as a function call on each chord
+                            // For now, return an error with helpful message
+                            return Err(anyhow!(
+                                "map() only supports: invert, rev. Got: {}",
+                                func_name
+                            ));
+                        }
                     };
                     Ok(Value::Pattern(mapped))
                 } else {

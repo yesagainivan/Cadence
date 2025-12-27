@@ -729,6 +729,74 @@ impl Pattern {
         self
     }
 
+    /// Rotate steps by n positions
+    /// Positive n rotates right (last element moves to front)
+    /// Negative n rotates left (first element moves to end)
+    pub fn rotate(mut self, n: i32) -> Self {
+        if self.steps.is_empty() {
+            return self;
+        }
+        let len = self.steps.len() as i32;
+        // Normalize n to positive rotation amount
+        let n = ((n % len) + len) % len;
+        if n == 0 {
+            return self;
+        }
+        let n = n as usize;
+        // Rotate right by n: take last n elements and move to front
+        let mut rotated = self.steps.split_off(self.steps.len() - n);
+        rotated.append(&mut self.steps);
+        self.steps = rotated;
+        self
+    }
+
+    /// Take the first n steps of the pattern
+    pub fn take(mut self, n: usize) -> Self {
+        self.steps.truncate(n);
+        self
+    }
+
+    /// Drop the first n steps of the pattern
+    pub fn drop_steps(mut self, n: usize) -> Self {
+        if n >= self.steps.len() {
+            self.steps.clear();
+        } else {
+            self.steps = self.steps.split_off(n);
+        }
+        self
+    }
+
+    /// Create a palindrome: pattern followed by its reverse
+    pub fn palindrome(mut self) -> Self {
+        let reversed: Vec<PatternStep> = self.steps.iter().rev().cloned().collect();
+        self.steps.extend(reversed);
+        // Double the cycle length to accommodate the palindrome
+        self.beats_per_cycle *= 2.0;
+        self
+    }
+
+    /// Repeat each step n times
+    pub fn stutter(mut self, n: usize) -> Self {
+        if n <= 1 {
+            return self;
+        }
+        let mut new_steps = Vec::with_capacity(self.steps.len() * n);
+        for step in self.steps {
+            for _ in 0..n {
+                new_steps.push(step.clone());
+            }
+        }
+        self.steps = new_steps;
+        self
+    }
+
+    /// Concatenate another pattern onto this one
+    pub fn concat(mut self, other: Pattern) -> Self {
+        self.steps.extend(other.steps);
+        self.beats_per_cycle += other.beats_per_cycle;
+        self
+    }
+
     /// Parse from mini-notation string
     ///
     /// Syntax:
@@ -1328,5 +1396,114 @@ mod tests {
         let p = Pattern::parse("C foo E bar G").unwrap();
         let vars = p.get_variable_names();
         assert_eq!(vars, vec!["foo", "bar"]);
+    }
+
+    // Tests for new pattern manipulation methods
+    #[test]
+    fn test_rotate_right() {
+        let p = Pattern::parse("C D E F").unwrap().rotate(1);
+        // Should rotate right: F C D E
+        match &p.steps[0] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 5), // F
+            _ => panic!("Expected Note F"),
+        }
+        match &p.steps[1] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0), // C
+            _ => panic!("Expected Note C"),
+        }
+    }
+
+    #[test]
+    fn test_rotate_left() {
+        let p = Pattern::parse("C D E F").unwrap().rotate(-1);
+        // Should rotate left: D E F C
+        match &p.steps[0] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 2), // D
+            _ => panic!("Expected Note D"),
+        }
+        match &p.steps[3] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0), // C
+            _ => panic!("Expected Note C"),
+        }
+    }
+
+    #[test]
+    fn test_take() {
+        let p = Pattern::parse("C D E F").unwrap().take(2);
+        assert_eq!(p.steps.len(), 2);
+        match &p.steps[0] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0), // C
+            _ => panic!("Expected Note C"),
+        }
+        match &p.steps[1] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 2), // D
+            _ => panic!("Expected Note D"),
+        }
+    }
+
+    #[test]
+    fn test_drop_steps() {
+        let p = Pattern::parse("C D E F").unwrap().drop_steps(2);
+        assert_eq!(p.steps.len(), 2);
+        match &p.steps[0] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 4), // E
+            _ => panic!("Expected Note E"),
+        }
+        match &p.steps[1] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 5), // F
+            _ => panic!("Expected Note F"),
+        }
+    }
+
+    #[test]
+    fn test_palindrome() {
+        let p = Pattern::parse("C D E").unwrap().palindrome();
+        assert_eq!(p.steps.len(), 6); // C D E E D C
+        assert_eq!(p.beats_per_cycle, 8.0); // Doubled from 4.0
+                                            // First three: C D E
+        match &p.steps[0] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0), // C
+            _ => panic!("Expected Note C"),
+        }
+        // Last three: E D C
+        match &p.steps[3] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 4), // E
+            _ => panic!("Expected Note E"),
+        }
+        match &p.steps[5] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0), // C
+            _ => panic!("Expected Note C"),
+        }
+    }
+
+    #[test]
+    fn test_stutter() {
+        let p = Pattern::parse("C D").unwrap().stutter(3);
+        assert_eq!(p.steps.len(), 6); // C C C D D D
+        for i in 0..3 {
+            match &p.steps[i] {
+                PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0), // C
+                _ => panic!("Expected Note C"),
+            }
+        }
+        for i in 3..6 {
+            match &p.steps[i] {
+                PatternStep::Note(n) => assert_eq!(n.pitch_class(), 2), // D
+                _ => panic!("Expected Note D"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_concat() {
+        let p1 = Pattern::parse("C D").unwrap();
+        let p2 = Pattern::parse("E F").unwrap();
+        let combined = p1.concat(p2);
+        assert_eq!(combined.steps.len(), 4);
+        assert_eq!(combined.beats_per_cycle, 8.0); // 4 + 4
+        match &combined.steps[2] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 4), // E
+            _ => panic!("Expected Note E"),
+        }
     }
 }
