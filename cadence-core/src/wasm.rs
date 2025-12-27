@@ -531,6 +531,13 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
         Statement::Expression(e) => e.clone(),
         Statement::Let { value, .. } => value.clone(),
         Statement::Assign { value, .. } => value.clone(),
+        Statement::Track { body, .. } => {
+            // Unwrap the inner statement (typically a Play statement)
+            match body.as_ref() {
+                Statement::Play { target, .. } => target.clone(),
+                _ => return JsValue::NULL,
+            }
+        }
         _ => return JsValue::NULL,
     };
 
@@ -800,6 +807,36 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                 variable_name: Some(text.clone()),
             };
             return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Track { id, body } => {
+            // Unwrap the inner statement (typically a Play statement)
+            let body_desc = format!("{}", body);
+            match body.as_ref() {
+                Statement::Play { target, .. } => {
+                    // Delegate to the pattern evaluation logic below
+                    (
+                        format!("Track {{ id: {}, body: {} }}", id, body_desc),
+                        Some(target.clone()),
+                        None,
+                    )
+                }
+                _ => {
+                    // Non-play body
+                    let context = CursorContextJS {
+                        statement_type: format!("track {}", id),
+                        value_type: None,
+                        properties: None,
+                        span: SpanInfoJS {
+                            start: spanned_stmt.start,
+                            end: spanned_stmt.end,
+                            utf16_start: spanned_stmt.utf16_start,
+                            utf16_end: spanned_stmt.utf16_end,
+                        },
+                        variable_name: None,
+                    };
+                    return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+                }
+            }
         }
         _ => {
             // Other statement types (loop, repeat, if, etc.)

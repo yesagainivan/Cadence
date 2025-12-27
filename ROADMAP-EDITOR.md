@@ -67,21 +67,24 @@ A web-based editor for the Cadence music programming language with live syntax h
 
 ---
 
-## Phase 3: Properties Panel
+## Phase 3: Properties Panel ✅ Complete
 
-### 3.1 Cursor Context API
-- [ ] `get_context_at_cursor(input: &str, pos: usize) -> CursorContext`
-- [ ] Return AST node type, parent context, editable properties
+### 3.1 Cursor Context API ✅
+- [x] `get_context_at_cursor(input: &str, pos: usize) -> CursorContext`
+- [x] Return AST node type, parent context, editable properties
+- [x] Handle `Statement::Track` to extract inner Play target
+- [x] Handle `Statement::Play`, `Let`, `Assign`, `Expression`
 
-### 3.2 Property Editors
-- [ ] **Envelope Editor**: Visual ADSR curve (attack, decay, sustain, release)
-- [ ] **Waveform Picker**: Sine, saw, square, triangle with preview
-- [ ] **Pattern Editor**: Step sequencer view for pattern mini-notation
-- [ ] **Chord Wheel**: Circle of fifths / chord quality selector
+### 3.2 Property Editors ✅
+- [x] **Envelope Editor**: Visual ADSR curve (attack, decay, sustain, release)
+- [x] **Waveform Picker**: Sine, saw, square, triangle with preview
+- [ ] **Pattern Editor**: Step sequencer view for pattern mini-notation *(stretch)*
+- [ ] **Chord Wheel**: Circle of fifths / chord quality selector *(stretch)*
 
-### 3.3 Bidirectional Sync
-- [ ] Editing in panel updates source code
-- [ ] Source code changes update panel in real-time
+### 3.3 Bidirectional Sync ✅
+- [x] Editing in panel updates source code
+- [x] Source code changes update panel in real-time
+- [x] Smart insertion point (before `loop`/`queue` keywords)
 
 ---
 
@@ -141,7 +144,7 @@ A web-based editor for the Cadence music programming language with live syntax h
 | Validation | WASM (Rust parser) | ✅ Working |
 | Audio playback | Web Audio API | ✅ Working |
 | MIDI visualization | Canvas 2D | ✅ Working |
-| Property editing | TBD | 🔜 Next |
+| Property editing | Properties Panel | ✅ Working |
 
 ---
 
@@ -168,8 +171,10 @@ A web-based editor for the Cadence music programming language with live syntax h
 
 ## Next Steps
 
-1. **Properties Panel** — Cursor context API and visual editors (Phase 3)
-   - Start with `get_context_at_cursor()` WASM function
-   - Build first property editor (e.g., ADSR envelope visualizer)
-2. **AudioWorklet** — Lower latency audio scheduling (stretch)
-3. **Staff Notation** — VexFlow integration for traditional notation (stretch)
+1. **Code Cleanup** — Refactor WASM API
+   - Unify `get_context_at_cursor()` and `get_events_at_position()` via shared `get_visualizable_expression()` helper
+   - Remove unused imports in `evaluator.rs` and `wasm.rs`
+   - Remove unused `take_note` function in `pattern.rs`
+2. **Pattern Editor** — Step sequencer view for pattern mini-notation *(stretch)*
+3. **AudioWorklet** — Lower latency audio scheduling *(stretch)*
+4. **Staff Notation** — VexFlow integration for traditional notation *(stretch)*

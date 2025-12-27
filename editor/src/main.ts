@@ -295,6 +295,20 @@ async function init(): Promise<void> {
 
       const fullStatementText = code.slice(spanStart, fullEnd);
 
+      // Find the correct insertion point for new method calls
+      // Should be BEFORE 'loop' or 'queue' keywords, not at the statement end
+      const findInsertionPoint = (): number => {
+        // Look for standalone 'loop' or 'queue' keywords (not inside strings)
+        // Match word boundary to avoid matching inside identifiers
+        const loopMatch = fullStatementText.match(/\s+(loop|queue)(\s|$)/);
+        if (loopMatch && loopMatch.index !== undefined) {
+          // Insert just before the space+keyword
+          return spanStart + loopMatch.index;
+        }
+        // No loop/queue keyword, use spanEnd
+        return spanEnd;
+      };
+
       if (change.type === 'waveform') {
         const waveformValue = change.value as string;
 
@@ -317,15 +331,16 @@ async function init(): Promise<void> {
           });
           console.log(`✏️ Replaced waveform: ${match[0]} → .wave("${waveformValue}")`);
         } else {
-          // Insert .wave(...) at end of base statement (spanEnd, not fullEnd)
+          // Insert .wave(...) at correct position (before loop/queue if present)
+          const insertPos = findInsertionPoint();
           transaction = editor.state.update({
             changes: {
-              from: spanEnd,
-              to: spanEnd,
+              from: insertPos,
+              to: insertPos,
               insert: `.wave("${waveformValue}")`,
             },
           });
-          console.log(`✏️ Added waveform at pos ${spanEnd}: .wave("${waveformValue}")`);
+          console.log(`✏️ Added waveform at pos ${insertPos}: .wave("${waveformValue}")`);
         }
 
         editor.dispatch(transaction);
@@ -351,15 +366,16 @@ async function init(): Promise<void> {
           });
           console.log(`✏️ Replaced envelope: ${match[0]} → .env(${a}, ${d}, ${s}, ${r})`);
         } else {
-          // Insert .env(...) at end of base statement (spanEnd, not fullEnd)
+          // Insert .env(...) at correct position (before loop/queue if present)
+          const insertPos = findInsertionPoint();
           transaction = editor.state.update({
             changes: {
-              from: spanEnd,
-              to: spanEnd,
+              from: insertPos,
+              to: insertPos,
               insert: `.env(${a}, ${d}, ${s}, ${r})`,
             },
           });
-          console.log(`✏️ Added envelope at pos ${spanEnd}: .env(${a}, ${d}, ${s}, ${r})`);
+          console.log(`✏️ Added envelope at pos ${insertPos}: .env(${a}, ${d}, ${s}, ${r})`);
         }
 
         editor.dispatch(transaction);

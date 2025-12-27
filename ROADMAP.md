@@ -87,6 +87,7 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] Cycle-based patterns: `"C E G _"` (underscore = rest)
 - [x] Pattern operators: `fast`, `slow`, `rev`, `every`
 - [x] Mini-notation parser (string -> pattern)
+- [x] Pattern variable resolution: `"cmaj fmaj"` resolves variables at evaluation time
 
 ### 3.4 Multiple Voices ✅
 - [x] Named tracks/voices (`track N { ... }`)
