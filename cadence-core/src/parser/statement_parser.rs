@@ -8,7 +8,7 @@
 //! - `loop { ... }`
 //! - `repeat 4 { ... }`
 
-use crate::parser::ast::{Expression, Program, Statement};
+use crate::parser::ast::{Expression, Program, SpannedProgram, SpannedStatement, Statement};
 use crate::parser::lexer::{Lexer, Span, SpannedToken, Token};
 use anyhow::{anyhow, Result};
 
@@ -70,6 +70,62 @@ impl StatementParser {
         }
     }
 
+    /// Get the end offset of the previous token (for accurate span tracking)
+    /// Returns the offset AFTER the last character of the previous token
+    fn previous_token_end(&self) -> usize {
+        if self.position == 0 {
+            return 0;
+        }
+        if let Some(prev_token) = self.tokens.get(self.position - 1) {
+            // Calculate end by adding token text length to its start offset
+            let text_len = Self::token_text_len(&prev_token.token);
+            prev_token.span.offset + text_len
+        } else {
+            self.current_span().offset
+        }
+    }
+
+    /// Get approximate text length of a token (for span calculation)
+    fn token_text_len(token: &Token) -> usize {
+        match token {
+            Token::Let => 3,
+            Token::Play => 4,
+            Token::Stop => 4,
+            Token::Loop => 4,
+            Token::Repeat => 6,
+            Token::If => 2,
+            Token::Else => 4,
+            Token::Break => 5,
+            Token::Continue => 8,
+            Token::Return => 6,
+            Token::Track => 5,
+            Token::On => 2,
+            Token::Tempo => 5,
+            Token::Volume => 6,
+            Token::Waveform => 8,
+            Token::Load => 4,
+            Token::Fn => 2,
+            Token::Queue => 5,
+            Token::Identifier(s) => s.len(),
+            Token::Number(n) => n.to_string().len(),
+            Token::Float(f) => format!("{}", f).len(),
+            Token::Note(s) => s.len(),
+            Token::StringLiteral(s) => s.len() + 2, // Include quotes
+            Token::Comment(s) => s.len() + 2,       // Include //
+            Token::LeftParen | Token::RightParen => 1,
+            Token::LeftBracket | Token::RightBracket => 1,
+            Token::LeftBrace | Token::RightBrace => 1,
+            Token::LeftDoubleBracket | Token::RightDoubleBracket => 2,
+            Token::Comma | Token::Dot => 1,
+            Token::Equals | Token::Plus | Token::Minus => 1,
+            Token::Ampersand | Token::Pipe | Token::Caret => 1,
+            Token::Semicolon | Token::Newline => 1,
+            Token::Boolean(_) => 5,                      // "true" or "false"
+            Token::DoubleEquals | Token::NotEquals => 2, // == or !=
+            Token::Eof => 0,
+        }
+    }
+
     /// Expect a specific token
     fn expect(&mut self, expected: &Token) -> Result<()> {
         if self.current() == expected {
@@ -107,6 +163,35 @@ impl StatementParser {
 
             let stmt = self.parse_statement()?;
             program.push(stmt);
+        }
+
+        Ok(program)
+    }
+
+    /// Parse a complete program with source location tracking for each statement
+    pub fn parse_spanned_program(&mut self) -> Result<SpannedProgram> {
+        let mut program = SpannedProgram::new();
+
+        while !self.check(&Token::Eof) {
+            // Skip semicolons, newlines, and comments between statements
+            while self.is_skippable() {
+                self.advance();
+            }
+
+            if self.check(&Token::Eof) {
+                break;
+            }
+
+            // Record start position
+            let start = self.current_span().offset;
+
+            let stmt = self.parse_statement()?;
+
+            // Record end position as the end of the last consumed token
+            // This ensures the span covers all characters of the statement
+            let end = self.previous_token_end();
+
+            program.push(SpannedStatement::new(stmt, start, end));
         }
 
         Ok(program)
@@ -797,6 +882,12 @@ pub fn parse_statements(input: &str) -> Result<Program> {
     parser.parse_program()
 }
 
+/// Convenience function to parse a string into statements with source spans
+pub fn parse_spanned_statements(input: &str) -> Result<SpannedProgram> {
+    let mut parser = StatementParser::new(input)?;
+    parser.parse_spanned_program()
+}
+
 /// Convenience function to parse a string into a single expression
 pub fn parse_expression(input: &str) -> Result<Expression> {
     let mut parser = StatementParser::new(input)?;
@@ -1155,6 +1246,183 @@ mod expression_tests {
         if let Expression::Transpose { target, semitones } = expr {
             assert_eq!(semitones, 2);
             assert!(matches!(*target, Expression::FunctionCall { .. }));
+        }
+    }
+
+    #[test]
+    fn test_spanned_statement_boundaries() {
+        // Test that statement spans cover the entire statement text
+        let code = "tempo 120";
+        let program = parse_spanned_statements(code).unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        let stmt = &program.statements[0];
+        eprintln!("Code: '{}' (len {})", code, code.len());
+        eprintln!("Statement span: start={}, end={}", stmt.start, stmt.end);
+
+        // Check every position
+        for i in 0..code.len() {
+            let found = stmt.contains(i);
+            let ch = code.chars().nth(i).unwrap_or('?');
+            eprintln!("  pos {}: {} '{}'", i, if found { "✓" } else { "✗" }, ch);
+        }
+
+        assert_eq!(stmt.start, 0, "Statement should start at 0");
+        // End should include the last character (exclusive end, so >= len)
+        assert!(
+            stmt.end >= code.len(),
+            "Statement end {} should cover entire '{}' (len {})",
+            stmt.end,
+            code,
+            code.len()
+        );
+    }
+
+    #[test]
+    fn test_spanned_statement_with_pattern() {
+        // Test pattern statement spans - this is a realistic user case
+        let code = r#"let x = "C E G _""#;
+        let program = parse_spanned_statements(code).unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        let stmt = &program.statements[0];
+
+        eprintln!("\nPattern statement test:");
+        eprintln!("Code: {:?} (len {})", code, code.len());
+        eprintln!("Statement span: start={}, end={}", stmt.start, stmt.end);
+
+        // Check every position
+        for i in 0..code.len() {
+            let found = stmt.contains(i);
+            let ch = code.chars().nth(i).unwrap_or('?');
+            eprintln!("  pos {:2}: {} '{}'", i, if found { "✓" } else { "✗" }, ch);
+        }
+
+        // Position near end should be found
+        let near_end = code.len() - 2; // Inside the closing quote
+        assert!(
+            stmt.contains(near_end),
+            "Position {} should be in statement (start={}, end={})",
+            near_end,
+            stmt.start,
+            stmt.end
+        );
+
+        // ALL positions should be found
+        for i in 0..code.len() {
+            assert!(stmt.contains(i), "Position {} should be in statement", i);
+        }
+    }
+
+    #[test]
+    fn test_spanned_multiple_statements() {
+        let code = "tempo 120\nplay x loop";
+        let program = parse_spanned_statements(code).unwrap();
+        assert_eq!(program.statements.len(), 2);
+
+        eprintln!("\nMulti-line test:");
+        eprintln!("Code: {:?} (len {})", code, code.len());
+
+        for (i, stmt) in program.statements.iter().enumerate() {
+            eprintln!("Statement {}: start={}, end={}", i, stmt.start, stmt.end);
+        }
+
+        // The first statement "tempo 120" is 9 chars, ends at position 9
+        // Position 8 is '0' - should be in first statement
+        let stmt1 = &program.statements[0];
+        eprintln!(
+            "Position 8 (last char of 'tempo 120'): in stmt0? {}",
+            stmt1.contains(8)
+        );
+        assert!(
+            stmt1.contains(8),
+            "Last char of first statement should be found"
+        );
+
+        // First statement should contain position 5
+        assert!(program.statement_at(5).is_some());
+        // Second statement should contain position in "loop"
+        let loop_pos = code.find("loop").unwrap() + 2;
+        assert!(
+            program.statement_at(loop_pos).is_some(),
+            "Position {} in 'loop' should find statement",
+            loop_pos
+        );
+    }
+
+    #[test]
+    fn test_spanned_boundary_strict() {
+        // Strict test: the exact edge case user reported
+        // When cursor is at the LAST character of a statement (e.g., the `]` in `[C, E, G]`),
+        // it should still find that statement
+
+        let code = "let cmaj = [C, E, G]";
+        let program = parse_spanned_statements(code).unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        let stmt = &program.statements[0];
+
+        // The closing `]` is at position 19 (0-indexed), code.len() = 20
+        let last_char_pos = code.len() - 1; // Position 19, the `]`
+        assert_eq!(
+            code.chars().nth(last_char_pos),
+            Some(']'),
+            "Expected ] at last position"
+        );
+
+        // This is the critical assertion - last character MUST be in the span
+        assert!(
+            stmt.contains(last_char_pos),
+            "Position {} (the `]`) MUST be in statement span (start={}, end={}). Fix failed!",
+            last_char_pos,
+            stmt.start,
+            stmt.end
+        );
+
+        // Also verify span end is >= length (exclusive end)
+        assert!(
+            stmt.end >= code.len(),
+            "Span end {} must be >= code length {} to include last char",
+            stmt.end,
+            code.len()
+        );
+    }
+
+    #[test]
+    fn test_spanned_multi_line_boundaries() {
+        // Test that each statement in a multi-line program covers all its characters
+        let code = "let a = [C]\nlet b = [D]\nlet c = [E]";
+        let program = parse_spanned_statements(code).unwrap();
+        assert_eq!(program.statements.len(), 3);
+
+        // Each statement should cover its last character
+        for (i, stmt) in program.statements.iter().enumerate() {
+            // Last char before the span ends should be included
+            if stmt.end > 0 {
+                assert!(
+                    stmt.contains(stmt.end - 1),
+                    "Statement {} end-1 position {} not covered (start={}, end={})",
+                    i,
+                    stmt.end - 1,
+                    stmt.start,
+                    stmt.end
+                );
+            }
+        }
+
+        // Verify no gaps between statements cause lookups to fail
+        // Every position in the code should find SOME statement
+        for pos in 0..code.len() {
+            let ch = code.chars().nth(pos).unwrap();
+            // Skip newline positions - those are legitimately between statements
+            if ch != '\n' {
+                assert!(
+                    program.statement_at(pos).is_some(),
+                    "Position {} ('{}') must find a statement but returned None",
+                    pos,
+                    ch
+                );
+            }
         }
     }
 }

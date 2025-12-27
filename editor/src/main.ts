@@ -13,7 +13,7 @@ import { bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { cadenceWasm } from './lang-cadence-wasm';
-import { initWasm, parseCode, isWasmReady, runScript } from './cadence-wasm';
+import { initWasm, parseCode, isWasmReady, getEventsAtPosition } from './cadence-wasm';
 import { audioEngine } from './audio-engine';
 import { PianoRoll } from './piano-roll';
 
@@ -112,6 +112,8 @@ function createEditor(container: HTMLElement): EditorView {
       EditorView.updateListener.of((update) => {
         if (update.selectionSet) {
           updateCursorPosition(update.view);
+          // Also update piano roll when cursor moves
+          updatePianoRollAtCursor(update.view);
         }
         if (update.docChanged) {
           // Debounced validation
@@ -141,6 +143,29 @@ function updateCursorPosition(view: EditorView): void {
   }
 }
 
+/**
+ * Update piano roll based on statement at cursor position
+ */
+function updatePianoRollAtCursor(view: EditorView): void {
+  if (!pianoRoll || !isWasmReady()) return;
+
+  const code = view.state.doc.toString();
+  const cursorPos = view.state.selection.main.head;
+
+  // Get events for the statement at cursor position
+  const events = getEventsAtPosition(code, cursorPos);
+
+  // Debug: uncomment to trace cursor positions
+  // console.log(`🎹 Piano roll: cursor=${cursorPos}, len=${code.length}, events=${events?.length ?? 'null'}`);
+
+  if (events && events.length > 0) {
+    pianoRoll.update(events);
+  } else {
+    // Clear piano roll if no events
+    pianoRoll.update([]);
+  }
+}
+
 // Validation debounce timer
 let validationTimer: number | null = null;
 
@@ -156,17 +181,8 @@ function scheduleValidation(view: EditorView): void {
     const result = validateCode(view);
     const code = view.state.doc.toString();
 
-    // Update piano roll visualization
-    if (result && result.success && pianoRoll) {
-      const scriptResult = runScript(code);
-      if (scriptResult.success && scriptResult.actions.length > 0) {
-        // Find the first Play action and show its events
-        const playAction = scriptResult.actions.find(a => a.type === 'Play');
-        if (playAction && playAction.type === 'Play') {
-          pianoRoll.update(playAction.events);
-        }
-      }
-    }
+    // Update piano roll with statement at cursor position
+    updatePianoRollAtCursor(view);
 
     // Live update audio if valid and playing
     if (result && result.success && audioEngine.playing) {

@@ -118,16 +118,30 @@ impl fmt::Display for Token {
     }
 }
 
-/// Position in source code
+/// Position in source code (line/column for display, offset for indexing)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Span {
     pub line: usize,
     pub column: usize,
+    /// Byte offset from start of source (for range-based operations)
+    pub offset: usize,
 }
 
 impl Span {
     pub fn new(line: usize, column: usize) -> Self {
-        Span { line, column }
+        Span {
+            line,
+            column,
+            offset: 0,
+        }
+    }
+
+    pub fn with_offset(line: usize, column: usize, offset: usize) -> Self {
+        Span {
+            line,
+            column,
+            offset,
+        }
     }
 }
 
@@ -176,9 +190,14 @@ impl Lexer {
         }
     }
 
-    /// Get the current span (position in source)
+    /// Get the current byte offset (position in char array)
+    pub fn current_offset(&self) -> usize {
+        self.position
+    }
+
+    /// Get the current span (position in source) including byte offset
     fn current_span(&self) -> Span {
-        Span::new(self.line, self.column)
+        Span::with_offset(self.line, self.column, self.position)
     }
 
     /// Advance to the next character

@@ -158,6 +158,9 @@ A web-based editor for the Cadence music programming language with live syntax h
 11. **Web Audio playback** — Full oscillator/ADSR synthesis in `audio-engine.ts`
 12. **Transport controls** — Play/Stop buttons and tempo slider
 13. **Live coding** — `updateScript()` preserves cycle position during edits
+14. **Statement span tracking** — `SpannedStatement`/`SpannedProgram` types with byte offset tracking
+15. **Cursor-aware piano roll** — `get_events_at_position()` WASM function shows statement at cursor
+    - *Note: Uses UX heuristic to show preceding statement when cursor is in trailing whitespace/newlines*
 
 ---
 

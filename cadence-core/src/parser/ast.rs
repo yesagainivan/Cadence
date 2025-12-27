@@ -33,6 +33,97 @@ impl Default for Program {
     }
 }
 
+// ============================================================================
+// Spanned versions for source tracking (editor integration)
+// ============================================================================
+
+/// A statement with source location tracking
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpannedStatement {
+    pub statement: Statement,
+    /// Byte offset of statement start in source
+    pub start: usize,
+    /// Byte offset of statement end in source
+    pub end: usize,
+}
+
+impl SpannedStatement {
+    pub fn new(statement: Statement, start: usize, end: usize) -> Self {
+        SpannedStatement {
+            statement,
+            start,
+            end,
+        }
+    }
+
+    /// Check if a given position (byte offset) is within this statement
+    pub fn contains(&self, position: usize) -> bool {
+        position >= self.start && position < self.end
+    }
+}
+
+/// A program with source location tracking for each statement
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpannedProgram {
+    pub statements: Vec<SpannedStatement>,
+}
+
+impl SpannedProgram {
+    pub fn new() -> Self {
+        SpannedProgram {
+            statements: Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self, stmt: SpannedStatement) {
+        self.statements.push(stmt);
+    }
+
+    /// Find the statement containing the given position (byte offset).
+    /// If position is in a gap between statements (trailing whitespace/newlines),
+    /// returns the preceding statement for better UX.
+    pub fn statement_at(&self, position: usize) -> Option<&SpannedStatement> {
+        // First, try exact match within a statement's span
+        if let Some(stmt) = self.statements.iter().find(|s| s.contains(position)) {
+            return Some(stmt);
+        }
+
+        // UX heuristic: if cursor is in trailing whitespace after a statement,
+        // return that statement so the piano roll doesn't suddenly go blank.
+        // Find the statement with the highest `end` that is <= position.
+        let mut best: Option<&SpannedStatement> = None;
+        for stmt in &self.statements {
+            if stmt.end <= position {
+                match best {
+                    None => best = Some(stmt),
+                    Some(prev) if stmt.end > prev.end => best = Some(stmt),
+                    Some(_) => {}
+                }
+            }
+        }
+
+        // Return if we found one - position is in trailing whitespace/newlines
+        best
+    }
+
+    /// Convert to regular Program (strips span info)
+    pub fn to_program(&self) -> Program {
+        Program {
+            statements: self
+                .statements
+                .iter()
+                .map(|s| s.statement.clone())
+                .collect(),
+        }
+    }
+}
+
+impl Default for SpannedProgram {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Statement types for scripting
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {

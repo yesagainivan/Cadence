@@ -449,6 +449,116 @@ pub fn run_script(input: &str) -> JsValue {
     .unwrap_or(JsValue::NULL)
 }
 
+/// Get play events for the statement at the given cursor position
+/// This is used by the piano roll to visualize the pattern at the cursor
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
+    use crate::parser::ast::{Statement, Value};
+    use crate::parser::evaluator::Evaluator;
+    use crate::parser::interpreter::Interpreter;
+    use crate::parser::statement_parser::parse_spanned_statements;
+
+    // Parse with span tracking
+    let spanned_program = match parse_spanned_statements(code) {
+        Ok(p) => p,
+        Err(_) => return JsValue::NULL,
+    };
+
+    // Find statement containing cursor position
+    let spanned_stmt = match spanned_program.statement_at(position) {
+        Some(s) => s,
+        None => return JsValue::NULL,
+    };
+
+    // Run the full program first to populate environment
+    let mut interpreter = Interpreter::new();
+    let program = spanned_program.to_program();
+    let _ = interpreter.run_program(&program);
+
+    let env = interpreter.environment.read().unwrap();
+    let evaluator = Evaluator::new();
+
+    // Extract the expression to visualize
+    let expr = match &spanned_stmt.statement {
+        Statement::Play { target, .. } => target.clone(),
+        Statement::Expression(e) => e.clone(),
+        Statement::Let { value, .. } => value.clone(),
+        Statement::Assign { value, .. } => value.clone(),
+        _ => return JsValue::NULL,
+    };
+
+    // Evaluate the expression
+    let value = match evaluator.eval_with_env(expr, Some(&env)) {
+        Ok(v) => v,
+        Err(_) => return JsValue::NULL,
+    };
+
+    // Convert to events
+    let events: Vec<PlayEventJS> = match value {
+        Value::Pattern(p) => p
+            .to_rich_events()
+            .iter()
+            .map(|e| PlayEventJS {
+                notes: e
+                    .notes
+                    .iter()
+                    .map(|n| NoteInfoJS {
+                        midi: n.midi,
+                        frequency: n.frequency,
+                        name: n.name.clone(),
+                        pitch_class: n.pitch_class,
+                        octave: n.octave,
+                    })
+                    .collect(),
+                frequencies: e.notes.iter().map(|n| n.frequency).collect(),
+                start_beat: e.start_beat,
+                duration: e.duration,
+                is_rest: e.is_rest,
+            })
+            .collect(),
+        Value::Chord(c) => {
+            let notes: Vec<NoteInfoJS> = c
+                .notes_vec()
+                .iter()
+                .map(|n| NoteInfoJS {
+                    midi: n.midi_note(),
+                    frequency: n.frequency(),
+                    name: n.full_name(),
+                    pitch_class: n.pitch_class(),
+                    octave: n.octave(),
+                })
+                .collect();
+            let frequencies: Vec<f32> = c.notes_vec().iter().map(|n| n.frequency()).collect();
+            vec![PlayEventJS {
+                notes,
+                frequencies,
+                start_beat: 0.0,
+                duration: 1.0,
+                is_rest: false,
+            }]
+        }
+        Value::Note(n) => {
+            vec![PlayEventJS {
+                notes: vec![NoteInfoJS {
+                    midi: n.midi_note(),
+                    frequency: n.frequency(),
+                    name: n.full_name(),
+                    pitch_class: n.pitch_class(),
+                    octave: n.octave(),
+                }],
+                frequencies: vec![n.frequency()],
+                start_beat: 0.0,
+                duration: 1.0,
+                is_rest: false,
+            }]
+        }
+        _ => return JsValue::NULL,
+    };
+
+    serde_wasm_bindgen::to_value(&events).unwrap_or(JsValue::NULL)
+}
+
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub struct WasmInterpreter {

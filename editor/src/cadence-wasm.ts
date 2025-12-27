@@ -5,7 +5,7 @@
  * providing access to tokenization and parsing functions.
  */
 
-import init, { tokenize, parse_and_check, run_script, WasmInterpreter } from './wasm/cadence_core.js';
+import init, { tokenize, parse_and_check, run_script, get_events_at_position, WasmInterpreter } from './wasm/cadence_core.js';
 
 export interface HighlightSpan {
     start_line: number;
@@ -186,5 +186,23 @@ export function runScript(input: string): ScriptResult {
     }
 }
 
+/**
+ * Get play events for the statement at the given cursor position
+ * Returns the events for rendering in the piano roll
+ */
+export function getEventsAtPosition(code: string, position: number): PlayEvent[] | null {
+    if (!wasmInitialized) {
+        return null;
+    }
+
+    try {
+        const result = get_events_at_position(code, position);
+        return result as PlayEvent[] | null;
+    } catch (e) {
+        console.error('Get events at position error:', e);
+        return null;
+    }
+}
+
 // Re-export for convenience
-export { tokenize, parse_and_check, run_script, WasmInterpreter };
+export { tokenize, parse_and_check, run_script, get_events_at_position, WasmInterpreter };
