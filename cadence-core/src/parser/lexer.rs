@@ -125,6 +125,8 @@ pub struct Span {
     pub column: usize,
     /// Byte offset from start of source (for range-based operations)
     pub offset: usize,
+    /// Byte length of the token (for accurate end position calculation)
+    pub len: usize,
 }
 
 impl Span {
@@ -133,6 +135,7 @@ impl Span {
             line,
             column,
             offset: 0,
+            len: 0,
         }
     }
 
@@ -141,7 +144,22 @@ impl Span {
             line,
             column,
             offset,
+            len: 0,
         }
+    }
+
+    pub fn with_len(line: usize, column: usize, offset: usize, len: usize) -> Self {
+        Span {
+            line,
+            column,
+            offset,
+            len,
+        }
+    }
+
+    /// Get the end byte offset (offset + len)
+    pub fn end(&self) -> usize {
+        self.offset + self.len
     }
 }
 
@@ -196,6 +214,7 @@ impl Lexer {
     }
 
     /// Get the current span (position in source) including byte offset
+    #[allow(dead_code)]
     fn current_span(&self) -> Span {
         Span::with_offset(self.line, self.column, self.position)
     }
@@ -651,13 +670,23 @@ impl Lexer {
 
     /// Get the next token with its span (position info)
     /// Note: Span is captured AFTER skipping whitespace to get accurate token positions
+    /// Length is calculated by comparing position before/after tokenizing
     pub fn next_spanned_token(&mut self) -> Result<SpannedToken> {
         // Skip whitespace FIRST so span reflects actual token position
         self.skip_horizontal_whitespace();
 
-        // Now capture span at the actual token start position
-        let span = self.current_span();
+        // Capture start position
+        let start_offset = self.position;
+        let start_line = self.line;
+        let start_column = self.column;
+
+        // Tokenize (this advances position)
         let token = self.next_token()?;
+
+        // Calculate length from position difference
+        let len = self.position - start_offset;
+
+        let span = Span::with_len(start_line, start_column, start_offset, len);
         Ok(SpannedToken::new(token, span))
     }
 

@@ -23,7 +23,7 @@ let pianoRoll: PianoRoll | null = null;
 let propertiesPanel: PropertiesPanel | null = null;
 
 // Sample Cadence code
-const SAMPLE_CODE = `// Welcome to Cadence! 🎵
+const SAMPLE_CODE = `// Welcome to Cadence!
 // A music programming language for live coding
 
 // Set the tempo
@@ -277,6 +277,57 @@ async function init(): Promise<void> {
   // Initialize properties panel
   try {
     propertiesPanel = new PropertiesPanel('properties-panel');
+
+    // Set up property change handler
+    propertiesPanel.setOnPropertyChange((change) => {
+      const code = editor.state.doc.toString();
+
+      // Find the end of the full statement (including any chained methods)
+      // by searching for newline or semicolon after spanEnd
+      let fullEnd = change.spanEnd;
+      while (fullEnd < code.length && code[fullEnd] !== '\n' && code[fullEnd] !== ';') {
+        fullEnd++;
+      }
+
+      const fullStatementText = code.slice(change.spanStart, fullEnd);
+
+      if (change.type === 'waveform') {
+        const waveformValue = change.value as string;
+
+        // Check if .wave(...) already exists in the FULL statement (including chained methods)
+        const waveRegex = /\.wave\s*\(\s*["'][^"']*["']\s*\)/g;
+        const match = waveRegex.exec(fullStatementText);
+
+        let transaction;
+
+        if (match && match.index !== undefined) {
+          // Replace existing .wave(...) at exact position
+          const matchStart = change.spanStart + match.index;
+          const matchEnd = matchStart + match[0].length;
+          transaction = editor.state.update({
+            changes: {
+              from: matchStart,
+              to: matchEnd,
+              insert: `.wave("${waveformValue}")`,
+            },
+          });
+          console.log(`✏️ Replaced waveform: ${match[0]} → .wave("${waveformValue}")`);
+        } else {
+          // Insert .wave(...) at end of base statement (spanEnd, not fullEnd)
+          transaction = editor.state.update({
+            changes: {
+              from: change.spanEnd,
+              to: change.spanEnd,
+              insert: `.wave("${waveformValue}")`,
+            },
+          });
+          console.log(`✏️ Added waveform at pos ${change.spanEnd}: .wave("${waveformValue}")`);
+        }
+
+        editor.dispatch(transaction);
+      }
+    });
+
     log('✓ Properties panel initialized');
   } catch (e) {
     log(`⚠ Properties panel failed: ${e}`);

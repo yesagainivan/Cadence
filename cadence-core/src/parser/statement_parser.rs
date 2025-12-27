@@ -77,15 +77,17 @@ impl StatementParser {
             return 0;
         }
         if let Some(prev_token) = self.tokens.get(self.position - 1) {
-            // Calculate end by adding token text length to its start offset
-            let text_len = Self::token_text_len(&prev_token.token);
-            prev_token.span.offset + text_len
+            // Use span.end() which is calculated from actual lexing
+            prev_token.span.end()
         } else {
             self.current_span().offset
         }
     }
 
     /// Get approximate text length of a token (for span calculation)
+    /// Note: Not currently used since Span now has exact `len` field from lexer,
+    /// but kept for potential debugging/alternative implementations.
+    #[allow(dead_code)]
     fn token_text_len(token: &Token) -> usize {
         match token {
             Token::Let => 3,

@@ -10,12 +10,29 @@ import type { CursorContext, EditableProperties } from './cadence-wasm';
 /** Waveform options for the picker */
 const WAVEFORMS = ['sine', 'saw', 'square', 'triangle'] as const;
 
+/** Callback for when a property is changed */
+export type PropertyChangeHandler = (change: PropertyChange) => void;
+
+/** Describes a property change to apply to source code */
+export interface PropertyChange {
+    /** Type of change */
+    type: 'waveform' | 'tempo' | 'volume' | 'envelope';
+    /** New value */
+    value: string | number | number[];
+    /** Start byte of statement */
+    spanStart: number;
+    /** End byte of statement */
+    spanEnd: number;
+}
+
 /**
  * Properties Panel manages the sidebar panel that shows
  * editable properties for the current cursor context.
  */
 export class PropertiesPanel {
     private container: HTMLElement;
+    private currentContext: CursorContext | null = null;
+    private onPropertyChange: PropertyChangeHandler | null = null;
 
     constructor(containerId: string) {
         const el = document.getElementById(containerId);
@@ -27,9 +44,17 @@ export class PropertiesPanel {
     }
 
     /**
+     * Set the callback for property changes
+     */
+    setOnPropertyChange(handler: PropertyChangeHandler): void {
+        this.onPropertyChange = handler;
+    }
+
+    /**
      * Update the panel with new cursor context
      */
     update(context: CursorContext | null): void {
+        this.currentContext = context;
 
         if (!context) {
             this.renderEmpty();
@@ -136,10 +161,16 @@ export class PropertiesPanel {
                 btn.classList.add('active');
             }
 
-            // Future: Add click handler to update code
+            // Fire callback when waveform is selected
             btn.addEventListener('click', () => {
-                console.log(`🎛️ Waveform selected: ${wf}`);
-                // TODO: Update source code at span position
+                if (this.onPropertyChange && this.currentContext) {
+                    this.onPropertyChange({
+                        type: 'waveform',
+                        value: wf,
+                        spanStart: this.currentContext.span.start,
+                        spanEnd: this.currentContext.span.end,
+                    });
+                }
             });
 
             picker.appendChild(btn);
