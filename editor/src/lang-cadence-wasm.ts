@@ -37,10 +37,9 @@ for (const [tokenType, cssClass] of Object.entries(TOKEN_CLASSES)) {
 function spansToDecorations(spans: HighlightSpan[], doc: any): DecorationSet {
     const builder = new RangeSetBuilder<Decoration>();
 
-    // Sort spans by position (required for RangeSetBuilder)
+    // Sort spans by UTF-16 position (required for RangeSetBuilder)
     const sortedSpans = [...spans].sort((a, b) => {
-        if (a.start_line !== b.start_line) return a.start_line - b.start_line;
-        return a.start_col - b.start_col;
+        return a.utf16_start - b.utf16_start;
     });
 
     for (const span of sortedSpans) {
@@ -51,24 +50,24 @@ function spansToDecorations(spans: HighlightSpan[], doc: any): DecorationSet {
         if (!mark) continue;
 
         try {
-            // Convert line/column to document offset
-            // WASM uses 1-indexed lines and columns
-            const line = doc.line(span.start_line);
-            const from = line.from + (span.start_col - 1);
-            const to = from + span.text.length;
+            // Use UTF-16 offsets directly - these are compatible with JavaScript string positions
+            // This correctly handles emoji and other multi-byte characters
+            const from = span.utf16_start;
+            const to = from + span.utf16_len;
 
             // Ensure we don't go past the document end
             if (from >= 0 && to <= doc.length && from < to) {
                 builder.add(from, to, mark);
             }
         } catch (e) {
-            // Line doesn't exist, skip
+            // Skip on error
             continue;
         }
     }
 
     return builder.finish();
 }
+
 
 /**
  * ViewPlugin that applies WASM tokenization as decorations

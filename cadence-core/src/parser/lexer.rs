@@ -127,6 +127,10 @@ pub struct Span {
     pub offset: usize,
     /// Byte length of the token (for accurate end position calculation)
     pub len: usize,
+    /// UTF-16 code unit offset (for JavaScript/CodeMirror interop)
+    pub utf16_offset: usize,
+    /// UTF-16 code unit length
+    pub utf16_len: usize,
 }
 
 impl Span {
@@ -136,6 +140,8 @@ impl Span {
             column,
             offset: 0,
             len: 0,
+            utf16_offset: 0,
+            utf16_len: 0,
         }
     }
 
@@ -145,6 +151,8 @@ impl Span {
             column,
             offset,
             len: 0,
+            utf16_offset: 0,
+            utf16_len: 0,
         }
     }
 
@@ -154,6 +162,27 @@ impl Span {
             column,
             offset,
             len,
+            utf16_offset: 0,
+            utf16_len: 0,
+        }
+    }
+
+    /// Create a span with all fields including UTF-16 offsets
+    pub fn full(
+        line: usize,
+        column: usize,
+        offset: usize,
+        len: usize,
+        utf16_offset: usize,
+        utf16_len: usize,
+    ) -> Self {
+        Span {
+            line,
+            column,
+            offset,
+            len,
+            utf16_offset,
+            utf16_len,
         }
     }
 
@@ -191,6 +220,8 @@ pub struct Lexer {
     line: usize,
     /// Current column number (1-indexed)
     column: usize,
+    /// Current UTF-16 code unit offset (for JavaScript interop)
+    utf16_position: usize,
 }
 
 impl Lexer {
@@ -205,6 +236,7 @@ impl Lexer {
             current_char,
             line: 1,
             column: 1,
+            utf16_position: 0,
         }
     }
 
@@ -221,6 +253,10 @@ impl Lexer {
 
     /// Advance to the next character
     fn advance(&mut self) {
+        // Track UTF-16 code units (1 for BMP chars, 2 for surrogates like emoji)
+        if let Some(ch) = self.current_char {
+            self.utf16_position += ch.len_utf16();
+        }
         // Track newlines for line/column counting
         if self.current_char == Some('\n') {
             self.line += 1;
@@ -675,18 +711,27 @@ impl Lexer {
         // Skip whitespace FIRST so span reflects actual token position
         self.skip_horizontal_whitespace();
 
-        // Capture start position
+        // Capture start position (both char-based and UTF-16)
         let start_offset = self.position;
+        let start_utf16 = self.utf16_position;
         let start_line = self.line;
         let start_column = self.column;
 
         // Tokenize (this advances position)
         let token = self.next_token()?;
 
-        // Calculate length from position difference
+        // Calculate lengths from position differences
         let len = self.position - start_offset;
+        let utf16_len = self.utf16_position - start_utf16;
 
-        let span = Span::with_len(start_line, start_column, start_offset, len);
+        let span = Span::full(
+            start_line,
+            start_column,
+            start_offset,
+            len,
+            start_utf16,
+            utf16_len,
+        );
         Ok(SpannedToken::new(token, span))
     }
 
@@ -1079,5 +1124,67 @@ mod tests {
             Token::StringLiteral(s) => assert_eq!(s, r#"fast("C E G", 2)"#),
             _ => panic!("Expected string literal"),
         }
+    }
+
+    #[test]
+    fn test_utf16_offset_emoji() {
+        // Emoji 🎵 = 1 char but 2 UTF-16 code units (surrogate pair)
+        // "// 🎵\n" = 3 + 2 (emoji) + 1 (newline) = 6 UTF-16 units
+        let mut lexer = Lexer::new("// 🎵\nlet x = 1");
+        let tokens = lexer.tokenize_spanned().unwrap();
+
+        // Find the 'let' token
+        let let_token = tokens
+            .iter()
+            .find(|t| matches!(t.token, Token::Let))
+            .unwrap();
+
+        // Char offset should be 5 (// 🎵\n = 5 chars: /, /, space, 🎵, newline)
+        assert_eq!(let_token.span.offset, 5, "char offset should be 5");
+
+        // UTF-16 offset should be 6 (🎵 counts as 2 UTF-16 code units)
+        assert_eq!(let_token.span.utf16_offset, 6, "UTF-16 offset should be 6");
+
+        // 'let' is 3 chars and 3 UTF-16 units
+        assert_eq!(let_token.span.len, 3);
+        assert_eq!(let_token.span.utf16_len, 3);
+    }
+
+    #[test]
+    fn test_utf16_offset_bmp_chars() {
+        // CJK characters like 你好 are in BMP = 1 UTF-16 unit each
+        // "// 你好\n" = 3 + 2 (chars) + 1 (newline) = 6 UTF-16 units (same as chars)
+        let mut lexer = Lexer::new("// 你好\nlet y = 2");
+        let tokens = lexer.tokenize_spanned().unwrap();
+
+        let let_token = tokens
+            .iter()
+            .find(|t| matches!(t.token, Token::Let))
+            .unwrap();
+
+        // Both char and UTF-16 offset should be 6 for BMP-only text
+        assert_eq!(let_token.span.offset, 6, "char offset should be 6");
+        assert_eq!(
+            let_token.span.utf16_offset, 6,
+            "UTF-16 offset should also be 6 for BMP chars"
+        );
+    }
+
+    #[test]
+    fn test_utf16_offset_multiple_emoji() {
+        // Two emojis in a comment: 🎵🎹 = 2 chars but 4 UTF-16 code units
+        let mut lexer = Lexer::new("// 🎵🎹\nC");
+        let tokens = lexer.tokenize_spanned().unwrap();
+
+        let note_token = tokens
+            .iter()
+            .find(|t| matches!(t.token, Token::Note(_)))
+            .unwrap();
+
+        // Char offset: // (2) + space (1) + 🎵 (1) + 🎹 (1) + newline (1) = 6
+        assert_eq!(note_token.span.offset, 6, "char offset should be 6");
+
+        // UTF-16 offset: // (2) + space (1) + 🎵 (2) + 🎹 (2) + newline (1) = 8
+        assert_eq!(note_token.span.utf16_offset, 8, "UTF-16 offset should be 8");
     }
 }

@@ -1,31 +1,19 @@
-cadence> let chords = "[G5,C5,E5] [Bb4,D5,F5]".slow(2);
-cadence> let chords = "[G5,C5,E5] [[Bb4,D5,F5] _ _ [F4,A4,C5]]".slow(2);
-cadence> Error: slow() expects (pattern, factor_note)
-cadence> let chords = "[G5,C5,E5] [[Bb4,D5,F5] [F4,A4,C5]]".slow(2);
-Error: slow() expects (pattern, factor_note)
-cadence> let x = "[G5,C5,E5] [[Bb4,D5,F5] [F4,A4,C5]]"
-cadence> x
-"[G5,C5,E5] [[Bb4,D5,F5] [F4,A4,C5]]"
-cadence> on 6 play x
-cadence> Playing "[G5,C5,E5] [[Bb4,D5,F5] [F4,A4,C5]]" (Track 6)
-🔊 Playing "[G5,C5,E5] [[Bb4,D5,F5] [F4,A4,C5]]" (Track 6) - live reactive!
-Failed to evaluate playback source: Cannot play a string "[G5,C5,E5] [[Bb4,D5,F5] [F4,A4,C5]]"
-cadence> let chords = "[G5,C5,E5] [Bb4,D5,F5] [F4,A4,C5]".slow(2);
-
 ---
 
-## Editor: Emoji Position Mismatch
+## Editor: Emoji Position Mismatch ✅ Fixed
 
-**Status**: Known issue, workaround in place
+**Status**: Resolved via UTF-16 offset tracking
 
-**Problem**: When code contains emojis (e.g., `// Welcome 🎵`), span positions from Rust are off by 1+ characters in JavaScript.
+**Problem**: When code contains emojis (e.g., `// Welcome 🎵`), span positions from Rust were off by 1+ characters in JavaScript.
 
 **Root cause**:
 - Rust `Vec<char>` counts emoji as 1 character
 - JavaScript strings count emoji as 2 UTF-16 code units (surrogate pair)
 
-**Impact**: Property edits insert at wrong positions, corrupting code.
+**Fix Applied**:
+- Added `utf16_offset` and `utf16_len` fields to Rust `Span` struct
+- Lexer now tracks UTF-16 position alongside char position
+- WASM bindings expose UTF-16 offsets in `HighlightSpan` and `SpanInfoJS`
+- TypeScript editor uses UTF-16 positions for highlighting and property edits
 
-**Workaround**: Removed emojis from sample code.
-
-**Fix**: Track byte offsets in Rust, convert to JS string positions using `TextEncoder`.
+**Impact**: Property edits now insert at correct positions even with emoji in code.

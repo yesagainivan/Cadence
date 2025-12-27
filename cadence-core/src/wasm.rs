@@ -20,6 +20,10 @@ pub struct HighlightSpan {
     pub end_col: usize,
     pub token_type: String,
     pub text: String,
+    /// UTF-16 code unit offset from start of source (for JavaScript interop)
+    pub utf16_start: usize,
+    /// UTF-16 code unit length of token
+    pub utf16_len: usize,
 }
 
 impl HighlightSpan {
@@ -37,6 +41,8 @@ impl HighlightSpan {
             end_col,
             token_type,
             text,
+            utf16_start: token.span.utf16_offset,
+            utf16_len: token.span.utf16_len,
         }
     }
 
@@ -476,8 +482,8 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
         Err(_) => return JsValue::NULL,
     };
 
-    // Find statement containing cursor position
-    let spanned_stmt = match spanned_program.statement_at(position) {
+    // Find statement containing cursor position (using UTF-16 since position comes from JS)
+    let spanned_stmt = match spanned_program.statement_at_utf16(position) {
         Some(s) => s,
         None => return JsValue::NULL,
     };
@@ -606,6 +612,10 @@ pub struct EditablePropertiesJS {
 pub struct SpanInfoJS {
     pub start: usize,
     pub end: usize,
+    /// UTF-16 code unit offset for JavaScript string operations
+    pub utf16_start: usize,
+    /// UTF-16 code unit end position
+    pub utf16_end: usize,
 }
 
 /// Cursor context for the Properties Panel
@@ -640,8 +650,8 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
         Err(_) => return JsValue::NULL,
     };
 
-    // Find statement containing cursor position
-    let spanned_stmt = match spanned_program.statement_at(position) {
+    // Find statement containing cursor position (using UTF-16 since position comes from JS)
+    let spanned_stmt = match spanned_program.statement_at_utf16(position) {
         Some(s) => s,
         None => return JsValue::NULL,
     };
@@ -681,6 +691,8 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                 span: SpanInfoJS {
                     start: spanned_stmt.start,
                     end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
                 },
                 variable_name: None,
             };
@@ -701,6 +713,8 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                 span: SpanInfoJS {
                     start: spanned_stmt.start,
                     end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
                 },
                 variable_name: None,
             };
@@ -721,6 +735,8 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                 span: SpanInfoJS {
                     start: spanned_stmt.start,
                     end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
                 },
                 variable_name: None,
             };
@@ -734,6 +750,8 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                 span: SpanInfoJS {
                     start: spanned_stmt.start,
                     end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
                 },
                 variable_name: None,
             };
@@ -747,6 +765,8 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                 span: SpanInfoJS {
                     start: spanned_stmt.start,
                     end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
                 },
                 variable_name: Some(text.clone()),
             };
@@ -765,6 +785,8 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                 span: SpanInfoJS {
                     start: spanned_stmt.start,
                     end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
                 },
                 variable_name: None,
             };
@@ -809,7 +831,10 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
         span: SpanInfoJS {
             start: spanned_stmt.start,
             end: spanned_stmt.end,
+            utf16_start: spanned_stmt.utf16_start,
+            utf16_end: spanned_stmt.utf16_end,
         },
+
         variable_name,
     };
 

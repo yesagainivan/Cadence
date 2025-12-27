@@ -282,14 +282,18 @@ async function init(): Promise<void> {
     propertiesPanel.setOnPropertyChange((change) => {
       const code = editor.state.doc.toString();
 
+      // Use UTF-16 offsets for accurate positioning with emoji/multi-byte chars
+      const spanStart = change.spanStart;  // Note: PropertyChange now uses UTF-16 positions
+      const spanEnd = change.spanEnd;
+
       // Find the end of the full statement (including any chained methods)
       // by searching for newline or semicolon after spanEnd
-      let fullEnd = change.spanEnd;
+      let fullEnd = spanEnd;
       while (fullEnd < code.length && code[fullEnd] !== '\n' && code[fullEnd] !== ';') {
         fullEnd++;
       }
 
-      const fullStatementText = code.slice(change.spanStart, fullEnd);
+      const fullStatementText = code.slice(spanStart, fullEnd);
 
       if (change.type === 'waveform') {
         const waveformValue = change.value as string;
@@ -302,7 +306,7 @@ async function init(): Promise<void> {
 
         if (match && match.index !== undefined) {
           // Replace existing .wave(...) at exact position
-          const matchStart = change.spanStart + match.index;
+          const matchStart = spanStart + match.index;
           const matchEnd = matchStart + match[0].length;
           transaction = editor.state.update({
             changes: {
@@ -316,17 +320,18 @@ async function init(): Promise<void> {
           // Insert .wave(...) at end of base statement (spanEnd, not fullEnd)
           transaction = editor.state.update({
             changes: {
-              from: change.spanEnd,
-              to: change.spanEnd,
+              from: spanEnd,
+              to: spanEnd,
               insert: `.wave("${waveformValue}")`,
             },
           });
-          console.log(`✏️ Added waveform at pos ${change.spanEnd}: .wave("${waveformValue}")`);
+          console.log(`✏️ Added waveform at pos ${spanEnd}: .wave("${waveformValue}")`);
         }
 
         editor.dispatch(transaction);
       }
     });
+
 
     log('✓ Properties panel initialized');
   } catch (e) {

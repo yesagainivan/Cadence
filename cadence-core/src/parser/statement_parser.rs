@@ -84,6 +84,18 @@ impl StatementParser {
         }
     }
 
+    /// Get the UTF-16 end offset of the previous token
+    fn previous_token_utf16_end(&self) -> usize {
+        if self.position == 0 {
+            return 0;
+        }
+        if let Some(prev_token) = self.tokens.get(self.position - 1) {
+            prev_token.span.utf16_offset + prev_token.span.utf16_len
+        } else {
+            self.current_span().utf16_offset
+        }
+    }
+
     /// Get approximate text length of a token (for span calculation)
     /// Note: Not currently used since Span now has exact `len` field from lexer,
     /// but kept for potential debugging/alternative implementations.
@@ -184,16 +196,25 @@ impl StatementParser {
                 break;
             }
 
-            // Record start position
-            let start = self.current_span().offset;
+            // Record start position (both char and UTF-16)
+            let start_span = self.current_span();
+            let start = start_span.offset;
+            let utf16_start = start_span.utf16_offset;
 
             let stmt = self.parse_statement()?;
 
             // Record end position as the end of the last consumed token
             // This ensures the span covers all characters of the statement
             let end = self.previous_token_end();
+            let utf16_end = self.previous_token_utf16_end();
 
-            program.push(SpannedStatement::new(stmt, start, end));
+            program.push(SpannedStatement::with_utf16(
+                stmt,
+                start,
+                end,
+                utf16_start,
+                utf16_end,
+            ));
         }
 
         Ok(program)

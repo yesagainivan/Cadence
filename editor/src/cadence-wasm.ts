@@ -14,6 +14,10 @@ export interface HighlightSpan {
     end_col: number;
     token_type: string;
     text: string;
+    /** UTF-16 code unit offset from start of source (for JavaScript string operations) */
+    utf16_start: number;
+    /** UTF-16 code unit length of token */
+    utf16_len: number;
 }
 
 export interface ParseResult {
@@ -132,6 +136,10 @@ export interface EditableProperties {
 export interface SpanInfo {
     start: number;
     end: number;
+    /** UTF-16 code unit offset for JavaScript string operations */
+    utf16_start: number;
+    /** UTF-16 code unit end position */
+    utf16_end: number;
 }
 
 /** Cursor context for the Properties Panel */

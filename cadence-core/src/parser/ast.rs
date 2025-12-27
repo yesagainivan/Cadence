@@ -45,6 +45,10 @@ pub struct SpannedStatement {
     pub start: usize,
     /// Byte offset of statement end in source
     pub end: usize,
+    /// UTF-16 code unit offset of statement start (for JavaScript interop)
+    pub utf16_start: usize,
+    /// UTF-16 code unit offset of statement end
+    pub utf16_end: usize,
 }
 
 impl SpannedStatement {
@@ -53,12 +57,37 @@ impl SpannedStatement {
             statement,
             start,
             end,
+            utf16_start: 0,
+            utf16_end: 0,
+        }
+    }
+
+    /// Create with UTF-16 offsets
+    pub fn with_utf16(
+        statement: Statement,
+        start: usize,
+        end: usize,
+        utf16_start: usize,
+        utf16_end: usize,
+    ) -> Self {
+        SpannedStatement {
+            statement,
+            start,
+            end,
+            utf16_start,
+            utf16_end,
         }
     }
 
     /// Check if a given position (byte offset) is within this statement
     pub fn contains(&self, position: usize) -> bool {
         position >= self.start && position < self.end
+    }
+
+    /// Check if a given UTF-16 position is within this statement
+    /// Use this when position comes from JavaScript/CodeMirror
+    pub fn contains_utf16(&self, position: usize) -> bool {
+        position >= self.utf16_start && position < self.utf16_end
     }
 }
 
@@ -103,6 +132,30 @@ impl SpannedProgram {
         }
 
         // Return if we found one - position is in trailing whitespace/newlines
+        best
+    }
+
+    /// Find the statement containing the given UTF-16 position.
+    /// Use this when position comes from JavaScript/CodeMirror.
+    pub fn statement_at_utf16(&self, position: usize) -> Option<&SpannedStatement> {
+        // First, try exact match within a statement's UTF-16 span
+        if let Some(stmt) = self.statements.iter().find(|s| s.contains_utf16(position)) {
+            return Some(stmt);
+        }
+
+        // UX heuristic: if cursor is in trailing whitespace after a statement,
+        // return that statement so the piano roll doesn't suddenly go blank.
+        let mut best: Option<&SpannedStatement> = None;
+        for stmt in &self.statements {
+            if stmt.utf16_end <= position {
+                match best {
+                    None => best = Some(stmt),
+                    Some(prev) if stmt.utf16_end > prev.utf16_end => best = Some(stmt),
+                    Some(_) => {}
+                }
+            }
+        }
+
         best
     }
 

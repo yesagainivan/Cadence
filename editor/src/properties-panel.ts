@@ -19,11 +19,12 @@ export interface PropertyChange {
     type: 'waveform' | 'tempo' | 'volume' | 'envelope';
     /** New value */
     value: string | number | number[];
-    /** Start byte of statement */
+    /** UTF-16 start position of statement (for JS string operations) */
     spanStart: number;
-    /** End byte of statement */
+    /** UTF-16 end position of statement */
     spanEnd: number;
 }
+
 
 /**
  * Properties Panel manages the sidebar panel that shows
@@ -167,11 +168,13 @@ export class PropertiesPanel {
                     this.onPropertyChange({
                         type: 'waveform',
                         value: wf,
-                        spanStart: this.currentContext.span.start,
-                        spanEnd: this.currentContext.span.end,
+                        // Use UTF-16 positions for correct emoji/multi-byte character handling
+                        spanStart: this.currentContext.span.utf16_start,
+                        spanEnd: this.currentContext.span.utf16_end,
                     });
                 }
             });
+
 
             picker.appendChild(btn);
         }
