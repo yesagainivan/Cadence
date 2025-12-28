@@ -30,6 +30,8 @@ pub enum InterpreterAction {
         /// None = immediate play, Some(mode) = queue with specified sync mode
         queue_mode: Option<QueueMode>,
         track_id: usize,
+        /// Pre-evaluated display value (so we don't re-evaluate after scope is gone)
+        display_value: Value,
     },
     /// Set the tempo (global)
     SetTempo(f32),
@@ -233,6 +235,7 @@ impl Interpreter {
                     looping: *looping,
                     queue_mode,
                     track_id: self.current_track,
+                    display_value: val.clone(),
                 });
                 if *looping {
                     println!("Playing {} (looping, Track {})", val, self.current_track);
@@ -673,7 +676,7 @@ impl Interpreter {
                 duration: _,
             } => {
                 // Evaluate target in local env
-                let _val = self
+                let val = self
                     .evaluator
                     .eval_with_env(target.clone(), Some(local_env))?;
                 self.actions.push(InterpreterAction::PlayExpression {
@@ -681,6 +684,7 @@ impl Interpreter {
                     looping: *looping,
                     queue_mode: None,
                     track_id: self.current_track,
+                    display_value: val,
                 });
                 Ok(ControlFlow::Normal)
             }

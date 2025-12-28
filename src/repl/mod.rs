@@ -155,7 +155,6 @@ impl Repl {
     /// Execute an interpreter action (triggers actual audio/state changes)
     fn execute_action(&mut self, action: InterpreterAction, _ctx: &mut CommandContext) {
         use crate::audio::playback_engine::ProgressionConfig;
-        use crate::parser::Evaluator;
 
         match action {
             InterpreterAction::PlayExpression {
@@ -163,29 +162,27 @@ impl Repl {
                 looping,
                 queue_mode,
                 track_id,
+                display_value,
             } => {
                 let engine = self.get_engine(track_id);
 
-                // Get the shared environment for reactive evaluation
-                let shared_env = self.interpreter.shared_environment();
-
-                // Validate expression can be evaluated (catch errors early)
-                let evaluator = Evaluator::new();
-                let display_value = {
-                    let env_guard = shared_env.read().unwrap();
-                    match evaluator.eval_with_env(expression.clone(), Some(&env_guard)) {
-                        Ok(v) => v,
+                // Choose playback mode based on looping:
+                // - Looping: Use reactive playback for live variable updates
+                // - Non-looping: Use static playback from pre-evaluated value
+                //   (avoids scope issues when loop variables go out of scope)
+                let mut config = if looping {
+                    let shared_env = self.interpreter.shared_environment();
+                    ProgressionConfig::new_reactive(expression, shared_env)
+                } else {
+                    // Use static playback from the pre-evaluated value
+                    match ProgressionConfig::new_from_value(&display_value) {
+                        Ok(c) => c,
                         Err(e) => {
-                            println!("{} Failed to evaluate expression: {}", "Error:".red(), e);
+                            println!("{} {}", "Playback error:".red(), e);
                             return;
                         }
                     }
                 };
-
-                // Use reactive playback - the expression will be re-evaluated on each beat
-                // This enables live variable updates: `play a loop` then `a = E` will
-                // change the sound on the next beat!
-                let mut config = ProgressionConfig::new_reactive(expression, shared_env);
 
                 // For patterns, set the note duration based on the pattern's step timing
                 // Each step gets an equal share of the cycle (default 4 beats)
@@ -300,14 +297,13 @@ impl Repl {
     /// the track playing `bass` will automatically pick up the new value
     /// WITHOUT needing to restart the progression!
     fn execute_action_queued(&mut self, action: InterpreterAction, ctx: &mut CommandContext) {
-        use crate::parser::Evaluator;
-
         match action {
             InterpreterAction::PlayExpression {
                 expression,
                 looping: true, // Only handle looped expressions specially
                 queue_mode: _,
                 track_id,
+                display_value,
             } => {
                 let engine = self.get_engine(track_id);
 
@@ -315,24 +311,7 @@ impl Repl {
                 // The reactive expression will automatically pick up variable changes
                 // on the next beat. This is what makes hot-reload feel like the REPL.
                 if engine.is_playing() {
-                    // Just validate that the expression is still valid
-                    let shared_env = self.interpreter.shared_environment();
-                    let evaluator = Evaluator::new();
-                    let display_value = {
-                        let env_guard = shared_env.read().unwrap();
-                        match evaluator.eval_with_env(expression.clone(), Some(&env_guard)) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                println!(
-                                    "{} Expression error on Track {}: {}",
-                                    "Error:".red(),
-                                    track_id,
-                                    e
-                                );
-                                return;
-                            }
-                        }
-                    };
+                    // Use the pre-evaluated display_value from when the action was created
                     println!(
                         "🔄 Track {} updated: {} (reactive, no restart needed)",
                         track_id, display_value
@@ -347,6 +326,7 @@ impl Repl {
                         looping: true,
                         queue_mode: None, // Immediate play since track isn't running
                         track_id,
+                        display_value,
                     },
                     ctx,
                 );

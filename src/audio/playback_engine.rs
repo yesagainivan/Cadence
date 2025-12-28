@@ -251,6 +251,19 @@ impl ProgressionConfig {
         }
     }
 
+    /// Create a new progression config from a pre-evaluated Value
+    /// Used for non-looping plays where reactive updates aren't needed
+    pub fn new_from_value(value: &Value) -> Result<Self> {
+        let events = PlaybackSource::value_to_frequencies(value)?;
+        let freqs: Vec<Vec<f32>> = events.into_iter().map(|(f, _)| f).collect();
+        Ok(Self {
+            source: PlaybackSource::Static(freqs),
+            note_duration: Duration::Beats(1.0),
+            gap_duration: Duration::Beats(0.0),
+            loop_count: Some(1),
+        })
+    }
+
     /// Set the note duration
     pub fn with_duration(mut self, duration: Duration) -> Self {
         self.note_duration = duration;

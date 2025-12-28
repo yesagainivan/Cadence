@@ -242,6 +242,7 @@ impl Evaluator {
                 let right_val = self.eval_with_env(*right, env)?;
 
                 match (left_val, right_val) {
+                    // Numeric arithmetic
                     (Value::Number(l), Value::Number(r)) => {
                         let result = match operator {
                             ArithmeticOp::Add => l + r,
@@ -261,6 +262,35 @@ impl Evaluator {
                             }
                         };
                         Ok(Value::Number(result))
+                    }
+                    // Runtime transposition: Note +/- Number
+                    (Value::Note(note), Value::Number(n)) => {
+                        let semitones = match operator {
+                            ArithmeticOp::Add => n as i8,
+                            ArithmeticOp::Subtract => -(n as i8),
+                            _ => return Err(anyhow!("Only +/- supported for note transposition")),
+                        };
+                        Ok(Value::Note(note + semitones))
+                    }
+                    // Runtime transposition: Chord +/- Number
+                    (Value::Chord(chord), Value::Number(n)) => {
+                        let semitones = match operator {
+                            ArithmeticOp::Add => n as i8,
+                            ArithmeticOp::Subtract => -(n as i8),
+                            _ => return Err(anyhow!("Only +/- supported for chord transposition")),
+                        };
+                        Ok(Value::Chord(chord + semitones))
+                    }
+                    // Runtime transposition: Pattern +/- Number
+                    (Value::Pattern(pattern), Value::Number(n)) => {
+                        let semitones = match operator {
+                            ArithmeticOp::Add => n as i8,
+                            ArithmeticOp::Subtract => -(n as i8),
+                            _ => {
+                                return Err(anyhow!("Only +/- supported for pattern transposition"))
+                            }
+                        };
+                        Ok(Value::Pattern(pattern + semitones))
                     }
                     (l, r) => Err(anyhow!(
                         "Arithmetic operations require numeric values, got {:?} and {:?}",
