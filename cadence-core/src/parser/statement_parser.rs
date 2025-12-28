@@ -151,6 +151,7 @@ impl StatementParser {
             | Token::DotDot
             | Token::In => 2, // <=, >=, &&, ||, .., in
             Token::For => 3,
+            Token::Wait => 4,
             Token::Eof => 0,
         }
     }
@@ -254,6 +255,7 @@ impl StatementParser {
             Token::Loop => self.parse_loop_statement(),
             Token::Repeat => self.parse_repeat_statement(),
             Token::For => self.parse_for_statement(),
+            Token::Wait => self.parse_wait_statement(),
             Token::If => self.parse_if_statement(),
             Token::Break => {
                 self.advance();
@@ -552,6 +554,14 @@ impl StatementParser {
             end,
             body,
         })
+    }
+
+    /// Parse: wait <expression>
+    /// Advances virtual time by the specified number of beats
+    fn parse_wait_statement(&mut self) -> Result<Statement> {
+        self.expect(&Token::Wait)?;
+        let beats = self.parse_expression()?;
+        Ok(Statement::Wait { beats })
     }
 
     /// Parse: if <condition> { statements } [else if ... | else { statements }]

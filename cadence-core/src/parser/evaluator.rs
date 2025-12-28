@@ -614,6 +614,12 @@ impl Evaluator {
                 Statement::Comment(_) => {
                     // No-op
                 }
+
+                // Wait is a side-effect (virtual time advancement) - no-op in pure evaluation
+                Statement::Wait { .. } => {
+                    // In pure function evaluation, wait is ignored
+                    // It only has meaning in the interpreter context
+                }
             }
         }
 

@@ -67,6 +67,7 @@ pub enum Token {
     For,      // for
     In,       // in
     DotDot,   // ..
+    Wait,     // wait (for virtual time scheduling)
 
     // Identifiers (for function names and variables)
     Identifier(String), // invert, transpose, prog, etc.
@@ -137,6 +138,7 @@ impl fmt::Display for Token {
             Token::For => write!(f, "for"),
             Token::In => write!(f, "in"),
             Token::DotDot => write!(f, ".."),
+            Token::Wait => write!(f, "wait"),
             Token::Identifier(name) => write!(f, "{}", name),
             Token::Comment(text) => write!(f, "//{}", text),
             Token::Eof => write!(f, "EOF"),
@@ -737,6 +739,7 @@ impl Lexer {
                         "on" => Token::On,
                         "for" => Token::For,
                         "in" => Token::In,
+                        "wait" => Token::Wait,
                         "true" => Token::Boolean(true),
                         "false" => Token::Boolean(false),
                         _ => {

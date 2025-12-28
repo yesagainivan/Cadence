@@ -6,7 +6,7 @@ use crate::parser::ast::{Expression, Program, Statement, Value};
 use crate::parser::environment::{Environment, SharedEnvironment};
 use crate::parser::evaluator::Evaluator;
 use crate::parser::statement_parser::parse_statements;
-use crate::types::QueueMode;
+use crate::types::{QueueMode, ScheduledEvent};
 use anyhow::{anyhow, Result};
 use std::sync::{Arc, RwLock};
 
@@ -32,6 +32,9 @@ pub enum InterpreterAction {
         track_id: usize,
         /// Pre-evaluated display value (so we don't re-evaluate after scope is gone)
         display_value: Value,
+        /// Scheduled beat offset from script start (for virtual time via `wait`)
+        /// None = immediate playback, Some(beat) = play at this beat offset
+        scheduled_beat: Option<f64>,
     },
     /// Set the tempo (global)
     SetTempo(f32),
@@ -59,8 +62,12 @@ pub struct Interpreter {
     in_track_block: bool,
     /// Last evaluated expression result
     last_eval_result: Option<Value>,
-    /// Actions collected during execution (for host to execute)
+    /// Actions collected during execution (for host to execute immediately)
     actions: Vec<InterpreterAction>,
+    /// Virtual time counter (in beats) - advances with `wait` statements
+    pub virtual_time: f64,
+    /// Scheduled events for future execution (Sonic Pi style)
+    scheduled_events: Vec<ScheduledEvent>,
 }
 
 impl Interpreter {
@@ -75,6 +82,8 @@ impl Interpreter {
             in_track_block: false,
             last_eval_result: None,
             actions: Vec::new(),
+            virtual_time: 0.0,
+            scheduled_events: Vec::new(),
         }
     }
 
@@ -91,6 +100,16 @@ impl Interpreter {
     /// Clear collected actions without returning them
     pub fn clear_actions(&mut self) {
         self.actions.clear();
+    }
+
+    /// Take scheduled events (clears internal list)
+    pub fn take_scheduled_events(&mut self) -> Vec<ScheduledEvent> {
+        std::mem::take(&mut self.scheduled_events)
+    }
+
+    /// Reset virtual time to 0 (call at start of new script execution)
+    pub fn reset_virtual_time(&mut self) {
+        self.virtual_time = 0.0;
     }
 
     /// Run a complete program
@@ -236,6 +255,12 @@ impl Interpreter {
                     queue_mode,
                     track_id: self.current_track,
                     display_value: val.clone(),
+                    // Capture virtual time for scheduled playback
+                    scheduled_beat: if self.virtual_time > 0.0 {
+                        Some(self.virtual_time)
+                    } else {
+                        None
+                    },
                 });
                 if *looping {
                     println!("Playing {} (looping, Track {})", val, self.current_track);
@@ -435,6 +460,17 @@ impl Interpreter {
                     .unwrap()
                     .define(name.clone(), func_value);
                 println!("Defined function: {}({})", name, params.join(", "));
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::Wait { beats } => {
+                let val = self.eval_expression(beats)?;
+                let beat_count = match val {
+                    Value::Number(n) => n as f64,
+                    _ => return Err(anyhow!("wait requires a numeric value")),
+                };
+                // Advance virtual time (non-blocking!)
+                self.virtual_time += beat_count;
                 Ok(ControlFlow::Normal)
             }
         }
@@ -685,6 +721,12 @@ impl Interpreter {
                     queue_mode: None,
                     track_id: self.current_track,
                     display_value: val,
+                    // Capture virtual time for scheduled playback
+                    scheduled_beat: if self.virtual_time > 0.0 {
+                        Some(self.virtual_time)
+                    } else {
+                        None
+                    },
                 });
                 Ok(ControlFlow::Normal)
             }
@@ -721,6 +763,19 @@ impl Interpreter {
 
             // Comments are no-ops
             Statement::Comment(_) => Ok(ControlFlow::Normal),
+
+            // Wait advances virtual time
+            Statement::Wait { beats } => {
+                let val = self
+                    .evaluator
+                    .eval_with_env(beats.clone(), Some(local_env))?;
+                let beat_count = match val {
+                    Value::Number(n) => n as f64,
+                    _ => return Err(anyhow!("wait requires a numeric value")),
+                };
+                self.virtual_time += beat_count;
+                Ok(ControlFlow::Normal)
+            }
         }
     }
 }
@@ -1074,5 +1129,93 @@ mod tests {
             }
             _ => panic!("Expected Stop action"),
         }
+    }
+
+    // =========================================================================
+    // Virtual Time / Wait Tests
+    // =========================================================================
+
+    #[test]
+    fn test_wait_advances_virtual_time() {
+        let mut interpreter = Interpreter::new();
+        assert_eq!(interpreter.virtual_time, 0.0);
+
+        let program = parse_statements("wait 2").unwrap();
+        interpreter.run_program(&program).unwrap();
+
+        assert_eq!(interpreter.virtual_time, 2.0);
+    }
+
+    #[test]
+    fn test_wait_in_loop_accumulates() {
+        let mut interpreter = Interpreter::new();
+        assert_eq!(interpreter.virtual_time, 0.0);
+
+        // For loop with 3 iterations, each waiting 1 beat
+        let program = parse_statements(
+            r#"
+            for i in 0..3 {
+                wait 1
+            }
+        "#,
+        )
+        .unwrap();
+        interpreter.run_program(&program).unwrap();
+
+        // Should have accumulated 3 beats
+        assert_eq!(interpreter.virtual_time, 3.0);
+    }
+
+    #[test]
+    fn test_wait_with_expression() {
+        let mut interpreter = Interpreter::new();
+
+        // wait with a variable
+        let program = parse_statements(
+            r#"
+            let duration = 5
+            wait duration
+        "#,
+        )
+        .unwrap();
+        interpreter.run_program(&program).unwrap();
+
+        assert_eq!(interpreter.virtual_time, 5.0);
+    }
+
+    #[test]
+    fn test_for_loop_with_play_and_wait() {
+        let mut interpreter = Interpreter::new();
+
+        // This is the main use case: playing notes sequentially in a loop
+        let program = parse_statements(
+            r#"
+            for i in 0..3 {
+                play C + i
+                wait 1
+            }
+        "#,
+        )
+        .unwrap();
+        interpreter.run_program(&program).unwrap();
+
+        // Should have 3 play actions
+        let actions = interpreter.take_actions();
+        assert_eq!(actions.len(), 3);
+
+        // Virtual time should be 3 beats
+        assert_eq!(interpreter.virtual_time, 3.0);
+    }
+
+    #[test]
+    fn test_reset_virtual_time() {
+        let mut interpreter = Interpreter::new();
+
+        let program = parse_statements("wait 5").unwrap();
+        interpreter.run_program(&program).unwrap();
+        assert_eq!(interpreter.virtual_time, 5.0);
+
+        interpreter.reset_virtual_time();
+        assert_eq!(interpreter.virtual_time, 0.0);
     }
 }

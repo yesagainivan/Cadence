@@ -64,7 +64,8 @@ impl HighlightSpan {
             | Token::Fn
             | Token::On
             | Token::For
-            | Token::In => "keyword".to_string(),
+            | Token::In
+            | Token::Wait => "keyword".to_string(),
 
             // Control keywords
             Token::Tempo | Token::Volume | Token::Waveform | Token::Queue => {
@@ -159,6 +160,7 @@ impl HighlightSpan {
             Token::On => "on".to_string(),
             Token::For => "for".to_string(),
             Token::In => "in".to_string(),
+            Token::Wait => "wait".to_string(),
             Token::Tempo => "tempo".to_string(),
             Token::Volume => "volume".to_string(),
             Token::Waveform => "waveform".to_string(),

@@ -163,6 +163,7 @@ impl Repl {
                 queue_mode,
                 track_id,
                 display_value,
+                scheduled_beat,
             } => {
                 let engine = self.get_engine(track_id);
 
@@ -201,7 +202,19 @@ impl Repl {
                 // Ensure the clock is running before starting playback
                 self.clock.start();
 
-                if let Some(mode) = queue_mode {
+                // Determine the effective queue mode based on scheduled_beat (virtual time)
+                // If scheduled_beat is set, use it to schedule the playback via queue
+                let effective_queue_mode = if let Some(beat_offset) = scheduled_beat {
+                    // Convert beat offset to a queue mode
+                    // We use Beats(N) where N is the ceiling of the beat offset
+                    // (queue at least 1 beat in the future for any non-zero offset)
+                    let beats = (beat_offset.ceil() as u32).max(1);
+                    Some(crate::types::QueueMode::Beats(beats))
+                } else {
+                    queue_mode
+                };
+
+                if let Some(mode) = effective_queue_mode {
                     if let Err(e) = engine.queue_progression_with_mode(config, mode) {
                         println!("{} {}", "Playback error:".red(), e);
                     } else {
@@ -221,10 +234,13 @@ impl Repl {
                                 }
                             }
                         };
-                        println!(
-                            "🔁 Queued {} for {}... (Track {})",
-                            display_value, mode_str, track_id
-                        );
+                        // Only print for explicit queue_mode, not for scheduled beats
+                        if queue_mode.is_some() {
+                            println!(
+                                "🔁 Queued {} for {}... (Track {})",
+                                display_value, mode_str, track_id
+                            );
+                        }
                     }
                 } else {
                     if let Err(e) = engine.play_progression(config) {
@@ -304,6 +320,7 @@ impl Repl {
                 queue_mode: _,
                 track_id,
                 display_value,
+                scheduled_beat,
             } => {
                 let engine = self.get_engine(track_id);
 
@@ -327,6 +344,7 @@ impl Repl {
                         queue_mode: None, // Immediate play since track isn't running
                         track_id,
                         display_value,
+                        scheduled_beat,
                     },
                     ctx,
                 );

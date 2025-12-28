@@ -220,6 +220,9 @@ pub enum Statement {
         params: Vec<String>,
         body: Vec<Statement>,
     },
+
+    /// Wait statement: wait <beats> (advances virtual time)
+    Wait { beats: Expression },
 }
 
 impl fmt::Display for Statement {
@@ -267,6 +270,7 @@ impl fmt::Display for Statement {
             Statement::FunctionDef { name, params, .. } => {
                 write!(f, "fn {}({}) {{ ... }}", name, params.join(", "))
             }
+            Statement::Wait { beats } => write!(f, "wait {}", beats),
         }
     }
 }
