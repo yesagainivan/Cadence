@@ -12,7 +12,7 @@ use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::{ClockTick, Duration};
 use crate::audio::midi::{frequency_to_midi, MidiOutputHandle};
 use crate::parser::{Evaluator, Expression, SharedEnvironment, Value};
-use crate::types::Waveform;
+use crate::types::{DrumSound, PlaybackEvent, Waveform};
 use anyhow::Result;
 use crossbeam_channel::{select, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use std::collections::VecDeque;
@@ -98,6 +98,41 @@ impl PlaybackSource {
             )),
             Value::Unit => Err(anyhow::anyhow!("Cannot play unit (void)")),
             Value::Array(_) => Err(anyhow::anyhow!("Cannot play an array directly")),
+        }
+    }
+
+    /// Get rich events including drums (for drum-aware playback)
+    pub fn evaluate_rich(&self) -> Result<Vec<PlaybackEvent>> {
+        match self {
+            PlaybackSource::Static(_) => {
+                // Static sources don't have drums, return empty events
+                Ok(vec![])
+            }
+            PlaybackSource::Reactive { expression, env } => {
+                let evaluator = Evaluator::new();
+                let env_guard = env
+                    .read()
+                    .map_err(|e| anyhow::anyhow!("Environment lock poisoned: {}", e))?;
+                let value = evaluator.eval_with_env(expression.clone(), Some(&env_guard))?;
+                match value {
+                    Value::Pattern(pattern) => Ok(pattern.to_rich_events()),
+                    _ => Ok(vec![]),
+                }
+            }
+        }
+    }
+
+    /// Get drums for a specific event index (if source is a pattern with drums)
+    pub fn get_drums_at(&self, event_index: usize) -> Result<Vec<DrumSound>> {
+        match self.evaluate_rich() {
+            Ok(events) => {
+                if event_index < events.len() {
+                    Ok(events[event_index].drums.clone())
+                } else {
+                    Ok(vec![])
+                }
+            }
+            Err(_) => Ok(vec![]),
         }
     }
 
@@ -827,6 +862,15 @@ impl PlaybackLoop {
                 .set_track_notes(self.track_id, chord_frequencies.clone())
             {
                 eprintln!("Failed to set notes: {}", e);
+            }
+
+            // Trigger drums for this event (if any)
+            if let Ok(drums) = config.source.get_drums_at(self.chord_index) {
+                for drum in drums {
+                    if let Err(e) = self.audio_handle.play_drum(self.track_id, drum) {
+                        eprintln!("Failed to play drum: {}", e);
+                    }
+                }
             }
         } else {
             // Clear audio notes if audio is disabled (MIDI-only mode)

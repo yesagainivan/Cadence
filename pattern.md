@@ -246,3 +246,33 @@ let cmaj = [C, E, G]
 let fmaj = [F, A, C]
 let progression = "cmaj fmaj C cmaj"
 play every(2,"rev",progression) loop
+
+//
+
+fn octave_up(chord) { return chord + 12 }
+map(octave_up, "Cmaj Fmaj")  // Works!
+
+map(invert, "Cmaj Fmaj")     // Still works
+map(transpose, "C D E F")    // Now works too!
+
+//
+
+let p = "C D E F"
+// Rotate right by 1: "F C D E"
+rotate(p, 1)
+// Take first 2: "C D"  
+take(p, 2)
+// Drop first 2: "E F"
+drop(p, 2)
+// Palindrome: "C D E F F E D C"
+palindrome(p)
+// Stutter by 2: "C C D D E E F F"
+stutter(p, 2)
+// Length: 4
+len(p)
+// Transpose up 5 semitones
+transpose(p, 5)
+// Concat two patterns
+concat("C D", "E F")
+
+//

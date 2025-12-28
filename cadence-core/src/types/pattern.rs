@@ -52,6 +52,8 @@ impl NoteInfo {
 pub struct PlaybackEvent {
     /// Notes in this event (empty for rests)
     pub notes: Vec<NoteInfo>,
+    /// Drum sounds in this event (for percussion)
+    pub drums: Vec<DrumSound>,
     /// Start time in beats relative to pattern start
     pub start_beat: f32,
     /// Duration in beats
@@ -106,7 +108,8 @@ impl PatternStep {
                     name
                 )
             }
-            PatternStep::Drum(d) => vec![(vec![d.display_frequency()], false)],
+            // Drums return empty frequencies - the sound comes from DrumOscillator, not melodic oscillators
+            PatternStep::Drum(_) => vec![(vec![], false)],
         }
     }
 
@@ -144,6 +147,31 @@ impl PatternStep {
                     false,
                 )]
             }
+        }
+    }
+
+    /// Flatten this step into separate notes and drums for playback
+    /// Returns (Vec<NoteInfo>, Vec<DrumSound>, is_rest) preserving type distinction
+    pub fn to_step_info(&self) -> Vec<(Vec<NoteInfo>, Vec<DrumSound>, bool)> {
+        match self {
+            PatternStep::Note(n) => vec![(vec![NoteInfo::from_note(n)], vec![], false)],
+            PatternStep::Chord(c) => {
+                let notes: Vec<NoteInfo> = c.notes_vec().iter().map(NoteInfo::from_note).collect();
+                vec![(notes, vec![], false)]
+            }
+            PatternStep::Rest => vec![(vec![], vec![], true)],
+            PatternStep::Group(steps) => steps.iter().flat_map(|s| s.to_step_info()).collect(),
+            PatternStep::Repeat(step, count) => {
+                let inner = step.to_step_info();
+                (0..*count).flat_map(|_| inner.clone()).collect()
+            }
+            PatternStep::Variable(name) => {
+                panic!(
+                    "Unresolved variable '{}' in pattern - call resolve_variables() first",
+                    name
+                )
+            }
+            PatternStep::Drum(d) => vec![(vec![], vec![*d], false)],
         }
     }
 
@@ -282,13 +310,14 @@ impl Pattern {
         let mut current_beat: f32 = 0.0;
 
         for step in &self.steps {
-            let note_infos_list = step.to_note_infos();
-            let count = note_infos_list.len();
+            let step_info_list = step.to_step_info();
+            let count = step_info_list.len();
             let event_duration = step_beats / count as f32;
 
-            for (notes, is_rest) in note_infos_list {
+            for (notes, drums, is_rest) in step_info_list {
                 events.push(PlaybackEvent {
                     notes,
+                    drums,
                     start_beat: current_beat,
                     duration: event_duration,
                     is_rest,
