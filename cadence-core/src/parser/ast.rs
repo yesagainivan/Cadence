@@ -510,6 +510,72 @@ impl fmt::Display for Expression {
     }
 }
 
+use crate::types::DrumSound;
+
+/// Playback info extracted from a Value - frequencies, duration, and optional drums
+#[derive(Debug, Clone)]
+pub struct PlaybackInfo {
+    /// Frequencies to play (Hz) - empty for rests
+    pub frequencies: Vec<f32>,
+    /// Duration of this event in beats
+    pub duration_beats: f32,
+    /// Drum sounds to trigger
+    pub drums: Vec<DrumSound>,
+}
+
+impl Value {
+    /// Convert this value to playback information for scheduling
+    ///
+    /// Returns a list of (frequencies, duration, drums) tuples for each step/event.
+    /// For a single note/chord, returns one entry.
+    /// For a pattern, returns one entry per step.
+    pub fn to_playback_info(&self) -> Result<Vec<PlaybackInfo>, String> {
+        match self {
+            Value::Note(note) => Ok(vec![PlaybackInfo {
+                frequencies: vec![note.frequency()],
+                duration_beats: 1.0,
+                drums: vec![],
+            }]),
+            Value::Chord(chord) => Ok(vec![PlaybackInfo {
+                frequencies: chord.notes_vec().iter().map(|n| n.frequency()).collect(),
+                duration_beats: 1.0,
+                drums: vec![],
+            }]),
+            Value::Pattern(pattern) => {
+                // Convert pattern to playback info with per-event durations
+                Ok(pattern
+                    .to_rich_events()
+                    .into_iter()
+                    .map(|event| PlaybackInfo {
+                        frequencies: if event.is_rest {
+                            vec![]
+                        } else {
+                            event.notes.iter().map(|n| n.frequency).collect()
+                        },
+                        duration_beats: event.duration,
+                        drums: event.drums,
+                    })
+                    .collect())
+            }
+            Value::String(s) => {
+                // Try to parse string as a pattern
+                if let Ok(pattern) = Pattern::parse(s) {
+                    Value::Pattern(pattern).to_playback_info()
+                } else {
+                    Err(format!("Cannot play a string \"{}\"", s))
+                }
+            }
+            Value::Boolean(_) => Err("Cannot play a boolean value".to_string()),
+            Value::Number(_) => Err("Cannot play a raw number".to_string()),
+            Value::Function { name, .. } => {
+                Err(format!("Cannot play a function '{}' - call it first", name))
+            }
+            Value::Unit => Err("Cannot play unit (void)".to_string()),
+            Value::Array(_) => Err("Cannot play an array directly".to_string()),
+        }
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

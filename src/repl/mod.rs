@@ -4,6 +4,7 @@ use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::MasterClock;
 use crate::audio::midi::MidiOutputHandle;
 use crate::audio::playback_engine::PlaybackEngine;
+use crate::audio::scheduler::{Scheduler, SchedulerHandle};
 use crate::commands::{create_registry, CommandContext, CommandResult};
 use crate::parser::{parse_statements, Interpreter, InterpreterAction};
 use crate::repl::watcher::FileWatcher;
@@ -37,6 +38,8 @@ pub struct Repl {
     playback_engines: HashMap<usize, Arc<PlaybackEngine>>,
     /// Interpreter for scripting constructs
     interpreter: Interpreter,
+    /// Scheduler for virtual time event dispatch
+    scheduler_handle: SchedulerHandle,
 
     // Event channels
     tx_input: Sender<ReplEvent>,
@@ -77,6 +80,10 @@ impl Repl {
         let (tx_input, rx_input) = unbounded();
         let (tx_watcher, rx_watcher) = unbounded();
 
+        // Spawn the scheduler thread for virtual time event dispatch
+        let scheduler_tick_rx = clock.subscribe();
+        let scheduler_handle = Scheduler::spawn(audio_handle.clone(), scheduler_tick_rx);
+
         Ok(Repl {
             editor: Some(editor),
             audio_handle,
@@ -85,6 +92,7 @@ impl Repl {
             bpm,
             playback_engines,
             interpreter: Interpreter::new(),
+            scheduler_handle,
             tx_input,
             rx_input,
             tx_watcher,
@@ -472,10 +480,23 @@ impl Repl {
                                                     ),
                                                 }
 
-                                                // Execute collected actions
+                                                // Execute collected actions (immediate plays)
                                                 for action in self.interpreter.take_actions() {
                                                     self.execute_action(action, &mut ctx);
                                                 }
+
+                                                // Send scheduled events to the scheduler thread
+                                                let scheduled_events = self.interpreter.take_scheduled_events();
+                                                if !scheduled_events.is_empty() {
+                                                    // Get current beat for scheduling relative to now
+                                                    let base_beat = self.clock.current_beat();
+                                                    self.scheduler_handle.schedule(scheduled_events, base_beat);
+                                                    // Start the clock if not already running
+                                                    self.clock.start();
+                                                }
+
+                                                // Reset virtual time for next interaction
+                                                self.interpreter.reset_virtual_time();
                                             }
                                             Err(e) => println!(
                                                 "{} {}",

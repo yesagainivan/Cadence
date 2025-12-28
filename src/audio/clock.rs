@@ -5,9 +5,9 @@
 //!
 //! Follows the MIDI clock standard of 24 PPQN (pulses per quarter note).
 
-use crossbeam_channel::{Receiver, unbounded};
-use std::sync::Arc;
+use crossbeam_channel::{unbounded, Receiver};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration as StdDuration, Instant};
 
@@ -82,6 +82,8 @@ pub struct MasterClock {
     bpm: Arc<AtomicU64>,
     /// Whether the clock is currently running
     running: Arc<AtomicBool>,
+    /// Current beat position (stored as bits for atomic operations)
+    current_beat: Arc<AtomicU64>,
     /// Command sender to control the clock thread
     command_tx: crossbeam_channel::Sender<ClockCommand>,
     /// Clock thread handle
@@ -93,18 +95,21 @@ impl MasterClock {
     pub fn new(bpm: f32) -> Self {
         let bpm_atomic = Arc::new(AtomicU64::new(bpm.to_bits() as u64));
         let running = Arc::new(AtomicBool::new(false));
+        let current_beat = Arc::new(AtomicU64::new(0.0_f64.to_bits()));
         let (command_tx, command_rx) = crossbeam_channel::bounded(64);
 
         let bpm_clone = bpm_atomic.clone();
         let running_clone = running.clone();
+        let beat_clone = current_beat.clone();
 
         let thread = thread::spawn(move || {
-            ClockThread::new(bpm_clone, running_clone, command_rx).run();
+            ClockThread::new(bpm_clone, running_clone, beat_clone, command_rx).run();
         });
 
         MasterClock {
             bpm: bpm_atomic,
             running,
+            current_beat,
             command_tx,
             thread: Some(thread),
         }
@@ -155,6 +160,11 @@ impl MasterClock {
         let bpm = self.get_bpm();
         (60000.0 / bpm) as u64
     }
+
+    /// Get the current beat position of the clock
+    pub fn current_beat(&self) -> f64 {
+        f64::from_bits(self.current_beat.load(Ordering::Relaxed))
+    }
 }
 
 impl Drop for MasterClock {
@@ -173,6 +183,8 @@ type CrossbeamSender<T> = crossbeam_channel::Sender<T>;
 struct ClockThread {
     bpm: Arc<AtomicU64>,
     running: Arc<AtomicBool>,
+    /// Shared current beat position (updated atomically for external access)
+    shared_beat: Arc<AtomicU64>,
     command_rx: Receiver<ClockCommand>,
     /// List of subscribers to broadcast ticks to
     subscribers: Vec<CrossbeamSender<ClockTick>>,
@@ -187,11 +199,13 @@ impl ClockThread {
     fn new(
         bpm: Arc<AtomicU64>,
         running: Arc<AtomicBool>,
+        shared_beat: Arc<AtomicU64>,
         command_rx: Receiver<ClockCommand>,
     ) -> Self {
         Self {
             bpm,
             running,
+            shared_beat,
             command_rx,
             subscribers: Vec::new(),
             beat_number: 0,
@@ -301,6 +315,10 @@ impl ClockThread {
 
     fn emit_tick(&mut self) {
         let beat = self.beat_number as f64 + (self.tick_in_beat as f64 / TICKS_PER_BEAT as f64);
+
+        // Update shared beat position for external access
+        self.shared_beat.store(beat.to_bits(), Ordering::Relaxed);
+
         let tick = ClockTick {
             beat,
             beat_number: self.beat_number,

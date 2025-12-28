@@ -74,6 +74,8 @@ impl Default for AudioState {
 #[derive(Debug, Clone)]
 pub enum AudioPlayerCommand {
     SetTrackNotes(usize, Vec<f32>),
+    /// Trigger notes with forced envelope attack (for scheduled playback)
+    TriggerNote(usize, Vec<f32>),
     SetTrackVolume(usize, f32),
     SetTrackEnvelope(usize, Option<(f32, f32, f32, f32)>),
     SetTrackWaveform(usize, Waveform),
@@ -332,6 +334,21 @@ impl AudioPlayerInternal {
         Ok(())
     }
 
+    /// Trigger notes with forced envelope attack (for scheduled playback)
+    /// Always sets retrigger=true to ensure new envelope attack
+    fn trigger_note(&mut self, track_id: usize, notes: Vec<f32>) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
+        let track = state.tracks.entry(track_id).or_default();
+
+        // Always force retrigger for scheduled notes
+        track.retrigger = true;
+        track.notes = notes;
+        Ok(())
+    }
+
     fn set_track_volume(&mut self, track_id: usize, volume: f32) -> Result<()> {
         let mut state = self
             .state
@@ -447,6 +464,11 @@ impl AudioPlayerHandle {
                             eprintln!("Failed to set track notes: {}", e);
                         }
                     }
+                    AudioPlayerCommand::TriggerNote(track_id, notes) => {
+                        if let Err(e) = player.trigger_note(track_id, notes) {
+                            eprintln!("Failed to trigger note: {}", e);
+                        }
+                    }
                     AudioPlayerCommand::SetTrackVolume(track_id, vol) => {
                         if let Err(e) = player.set_track_volume(track_id, vol) {
                             eprintln!("Failed to set track volume: {}", e);
@@ -502,6 +524,14 @@ impl AudioPlayerHandle {
     pub fn set_track_notes(&self, track_id: usize, notes: Vec<f32>) -> Result<()> {
         self.command_tx
             .send(AudioPlayerCommand::SetTrackNotes(track_id, notes))
+            .map_err(|e| anyhow!("Failed to send command: {}", e))
+    }
+
+    /// Trigger notes with forced envelope attack (for scheduled playback)
+    /// Unlike set_track_notes, this always forces an envelope retrigger
+    pub fn trigger_note(&self, track_id: usize, notes: Vec<f32>) -> Result<()> {
+        self.command_tx
+            .send(AudioPlayerCommand::TriggerNote(track_id, notes))
             .map_err(|e| anyhow!("Failed to send command: {}", e))
     }
 

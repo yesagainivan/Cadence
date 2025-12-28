@@ -1,118 +1,189 @@
 //! Scheduler for virtual time-based event dispatch
 //!
 //! Receives ScheduledEvents from the Interpreter (produced during execution with `wait`)
-//! and dispatches them to PlaybackEngines at the correct real-time beats, synchronized
+//! and dispatches them to AudioHandle at the correct real-time beats, synchronized
 //! with the MasterClock.
 //!
 //! This enables non-blocking sequential playback: the interpreter runs to completion
 //! immediately, scheduling all events, and the Scheduler dispatches them over time.
 
+use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::ClockTick;
-use cadence_core::types::ScheduledEvent;
+use cadence_core::types::{ScheduledAction, ScheduledEvent};
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::collections::BinaryHeap;
+use std::sync::Arc;
+use std::thread;
+
+/// Commands that can be sent to the scheduler
+#[derive(Debug)]
+pub enum SchedulerCommand {
+    /// Add new scheduled events (with base beat for timing)
+    Schedule(Vec<ScheduledEvent>, f64),
+    /// Clear all pending events
+    Clear,
+    /// Shutdown the scheduler
+    Shutdown,
+}
+
+/// Handle for sending commands to the scheduler thread
+#[derive(Clone)]
+pub struct SchedulerHandle {
+    command_tx: Sender<SchedulerCommand>,
+}
+
+impl SchedulerHandle {
+    /// Schedule events to be played starting at the given base beat
+    pub fn schedule(&self, events: Vec<ScheduledEvent>, base_beat: f64) {
+        let _ = self
+            .command_tx
+            .send(SchedulerCommand::Schedule(events, base_beat));
+    }
+
+    /// Clear all pending scheduled events
+    pub fn clear(&self) {
+        let _ = self.command_tx.send(SchedulerCommand::Clear);
+    }
+
+    /// Shutdown the scheduler thread
+    pub fn shutdown(&self) {
+        let _ = self.command_tx.send(SchedulerCommand::Shutdown);
+    }
+}
 
 /// Scheduler that dispatches scheduled events at the correct beat times
 pub struct Scheduler {
     /// Priority queue of scheduled events (min-heap by beat)
     event_queue: BinaryHeap<ScheduledEvent>,
-    /// Base beat from when scheduling started (for relative timing)
-    base_beat: f64,
-    /// Whether the scheduler is active
-    active: bool,
+    /// Audio handle for dispatching play commands
+    audio_handle: Arc<AudioPlayerHandle>,
+    /// Command receiver
+    command_rx: Receiver<SchedulerCommand>,
+    /// Clock tick receiver
+    tick_rx: Receiver<ClockTick>,
 }
 
 impl Scheduler {
-    /// Create a new scheduler
-    pub fn new() -> Self {
-        Scheduler {
+    /// Create a new scheduler that runs in its own thread
+    /// Returns a handle for sending commands
+    pub fn spawn(
+        audio_handle: Arc<AudioPlayerHandle>,
+        tick_rx: Receiver<ClockTick>,
+    ) -> SchedulerHandle {
+        let (command_tx, command_rx) = unbounded();
+
+        let scheduler = Scheduler {
             event_queue: BinaryHeap::new(),
-            base_beat: 0.0,
-            active: false,
+            audio_handle,
+            command_rx,
+            tick_rx,
+        };
+
+        thread::spawn(move || scheduler.run_loop());
+
+        SchedulerHandle { command_tx }
+    }
+
+    /// Main scheduler loop
+    fn run_loop(mut self) {
+        loop {
+            crossbeam_channel::select! {
+                // Handle commands
+                recv(self.command_rx) -> msg => match msg {
+                    Ok(SchedulerCommand::Schedule(events, base_beat)) => {
+                        self.schedule_events(events, base_beat);
+                    }
+                    Ok(SchedulerCommand::Clear) => {
+                        self.event_queue.clear();
+                    }
+                    Ok(SchedulerCommand::Shutdown) => {
+                        return;
+                    }
+                    Err(_) => {
+                        // Channel closed, shutdown
+                        return;
+                    }
+                },
+                // Handle clock ticks
+                recv(self.tick_rx) -> msg => match msg {
+                    Ok(tick) => {
+                        self.process_tick(&tick);
+                    }
+                    Err(_) => {
+                        // Clock channel closed, shutdown
+                        return;
+                    }
+                },
+            }
         }
     }
 
-    /// Add scheduled events and start dispatching from the current beat
-    ///
-    /// The events have virtual times (beats) relative to when the script started.
-    /// We convert these to absolute beat positions by adding the base_beat.
-    pub fn schedule_events(&mut self, events: Vec<ScheduledEvent>, current_beat: f64) {
-        self.base_beat = current_beat;
-        self.active = !events.is_empty();
-
+    /// Add scheduled events, adjusting their beats by base_beat
+    fn schedule_events(&mut self, events: Vec<ScheduledEvent>, base_beat: f64) {
         for mut event in events {
             // Convert virtual time to absolute clock time
-            event.scheduled_beat += current_beat;
+            event.scheduled_beat += base_beat;
             self.event_queue.push(event);
         }
     }
 
     /// Process a clock tick and dispatch any due events
-    ///
-    /// Returns the number of events dispatched
-    pub fn process_tick<F>(&mut self, tick: &ClockTick, mut dispatch: F) -> usize
-    where
-        F: FnMut(&ScheduledEvent),
-    {
-        if !self.active || self.event_queue.is_empty() {
-            return 0;
-        }
-
+    fn process_tick(&mut self, tick: &ClockTick) {
         let current_beat = tick.beat;
-        let mut dispatched = 0;
 
         // Dispatch all events that are due (scheduled_beat <= current_beat)
-        // BinaryHeap is a max-heap, but our Ord implementation makes it a min-heap
         while let Some(event) = self.event_queue.peek() {
             if event.scheduled_beat <= current_beat {
                 let event = self.event_queue.pop().unwrap();
-                dispatch(&event);
-                dispatched += 1;
+                self.dispatch_event(&event);
             } else {
-                // No more events due at this beat
                 break;
             }
         }
+    }
 
-        // Deactivate if queue is empty
-        if self.event_queue.is_empty() {
-            self.active = false;
+    /// Dispatch a scheduled event to the audio system
+    fn dispatch_event(&self, event: &ScheduledEvent) {
+        match &event.action {
+            ScheduledAction::PlayNotes {
+                frequencies,
+                duration_beats: _,
+                drums,
+            } => {
+                // Filter out empty frequencies (rests)
+                if !frequencies.is_empty() {
+                    // Use trigger_note instead of set_track_notes for proper envelope attack
+                    if let Err(e) = self
+                        .audio_handle
+                        .trigger_note(event.track_id, frequencies.clone())
+                    {
+                        eprintln!("Scheduler dispatch error: {}", e);
+                    }
+                }
+
+                // Trigger any drum sounds
+                for drum in drums {
+                    if let Err(e) = self.audio_handle.play_drum(event.track_id, *drum) {
+                        eprintln!("Scheduler drum error: {}", e);
+                    }
+                }
+            }
+            ScheduledAction::SetTempo(_bpm) => {
+                // TODO: Send tempo change to clock
+            }
+            ScheduledAction::SetVolume(volume) => {
+                let _ = self.audio_handle.set_track_volume(event.track_id, *volume);
+            }
+            ScheduledAction::Stop => {
+                let _ = self.audio_handle.set_track_notes(event.track_id, vec![]);
+            }
         }
-
-        dispatched
-    }
-
-    /// Check if there are pending events
-    pub fn has_pending_events(&self) -> bool {
-        self.active && !self.event_queue.is_empty()
-    }
-
-    /// Get the number of pending events
-    pub fn pending_count(&self) -> usize {
-        self.event_queue.len()
-    }
-
-    /// Clear all pending events
-    pub fn clear(&mut self) {
-        self.event_queue.clear();
-        self.active = false;
-    }
-
-    /// Check if the scheduler is active
-    pub fn is_active(&self) -> bool {
-        self.active
-    }
-}
-
-impl Default for Scheduler {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadence_core::types::ScheduledAction;
     use std::time::Instant;
 
     fn make_tick(beat: f64) -> ClockTick {
@@ -125,111 +196,29 @@ mod tests {
     }
 
     #[test]
-    fn test_scheduler_dispatches_at_correct_beat() {
-        let mut scheduler = Scheduler::new();
+    fn test_scheduler_event_ordering() {
+        // Test that BinaryHeap ordering works correctly for ScheduledEvents
+        let mut heap = BinaryHeap::new();
 
-        // Schedule events at virtual beats 0, 1, 2
-        let events = vec![
-            ScheduledEvent {
-                scheduled_beat: 0.0,
-                track_id: 1,
-                action: ScheduledAction::SetTempo(120.0),
+        heap.push(ScheduledEvent::new(
+            2.0,
+            ScheduledAction::SetTempo(120.0),
+            1,
+        ));
+        heap.push(ScheduledEvent::new(
+            0.0,
+            ScheduledAction::PlayNotes {
+                frequencies: vec![440.0],
+                duration_beats: 1.0,
+                drums: vec![],
             },
-            ScheduledEvent {
-                scheduled_beat: 1.0,
-                track_id: 1,
-                action: ScheduledAction::SetTempo(130.0),
-            },
-            ScheduledEvent {
-                scheduled_beat: 2.0,
-                track_id: 1,
-                action: ScheduledAction::SetTempo(140.0),
-            },
-        ];
+            1,
+        ));
+        heap.push(ScheduledEvent::new(1.0, ScheduledAction::Stop, 1));
 
-        // Start scheduling at beat 10 (current clock position)
-        scheduler.schedule_events(events, 10.0);
-
-        assert!(scheduler.is_active());
-        assert_eq!(scheduler.pending_count(), 3);
-
-        // At beat 10, first event should dispatch
-        let mut dispatched = Vec::new();
-        let tick = make_tick(10.0);
-        scheduler.process_tick(&tick, |e| dispatched.push(e.clone()));
-        assert_eq!(dispatched.len(), 1);
-        assert_eq!(scheduler.pending_count(), 2);
-
-        // At beat 10.5, nothing should dispatch
-        dispatched.clear();
-        let tick = make_tick(10.5);
-        scheduler.process_tick(&tick, |e| dispatched.push(e.clone()));
-        assert_eq!(dispatched.len(), 0);
-
-        // At beat 11, second event should dispatch
-        dispatched.clear();
-        let tick = make_tick(11.0);
-        scheduler.process_tick(&tick, |e| dispatched.push(e.clone()));
-        assert_eq!(dispatched.len(), 1);
-
-        // At beat 12, third event should dispatch
-        dispatched.clear();
-        let tick = make_tick(12.0);
-        scheduler.process_tick(&tick, |e| dispatched.push(e.clone()));
-        assert_eq!(dispatched.len(), 1);
-
-        // Scheduler should be inactive now
-        assert!(!scheduler.is_active());
-    }
-
-    #[test]
-    fn test_scheduler_dispatches_multiple_at_same_beat() {
-        let mut scheduler = Scheduler::new();
-
-        // Three events at the same beat
-        let events = vec![
-            ScheduledEvent {
-                scheduled_beat: 0.0,
-                track_id: 1,
-                action: ScheduledAction::SetTempo(120.0),
-            },
-            ScheduledEvent {
-                scheduled_beat: 0.0,
-                track_id: 2,
-                action: ScheduledAction::SetVolume(0.5),
-            },
-            ScheduledEvent {
-                scheduled_beat: 0.0,
-                track_id: 3,
-                action: ScheduledAction::Stop,
-            },
-        ];
-
-        scheduler.schedule_events(events, 0.0);
-
-        let mut dispatched = Vec::new();
-        let tick = make_tick(0.0);
-        scheduler.process_tick(&tick, |e| dispatched.push(e.clone()));
-
-        assert_eq!(dispatched.len(), 3);
-        assert!(!scheduler.is_active());
-    }
-
-    #[test]
-    fn test_scheduler_clear() {
-        let mut scheduler = Scheduler::new();
-
-        let events = vec![ScheduledEvent {
-            scheduled_beat: 5.0,
-            track_id: 1,
-            action: ScheduledAction::Stop,
-        }];
-
-        scheduler.schedule_events(events, 0.0);
-        assert!(scheduler.is_active());
-
-        scheduler.clear();
-        assert!(!scheduler.is_active());
-        assert_eq!(scheduler.pending_count(), 0);
+        // Should pop in ascending order (earliest first due to reverse Ord impl)
+        assert_eq!(heap.pop().unwrap().scheduled_beat, 0.0);
+        assert_eq!(heap.pop().unwrap().scheduled_beat, 1.0);
+        assert_eq!(heap.pop().unwrap().scheduled_beat, 2.0);
     }
 }

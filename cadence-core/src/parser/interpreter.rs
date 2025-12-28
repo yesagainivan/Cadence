@@ -6,7 +6,7 @@ use crate::parser::ast::{Expression, Program, Statement, Value};
 use crate::parser::environment::{Environment, SharedEnvironment};
 use crate::parser::evaluator::Evaluator;
 use crate::parser::statement_parser::parse_statements;
-use crate::types::{QueueMode, ScheduledEvent};
+use crate::types::{QueueMode, ScheduledAction, ScheduledEvent};
 use anyhow::{anyhow, Result};
 use std::sync::{Arc, RwLock};
 
@@ -232,40 +232,68 @@ impl Interpreter {
             } => {
                 // Validate expression can be evaluated (catch errors early)
                 let val = self.eval_expression(target)?;
-                // Convert string queue mode to QueueMode enum
-                let queue_mode = ast_queue_mode.as_ref().map(|mode| {
-                    if let Some(n_str) = mode.strip_prefix("beats:") {
-                        // Parse beats:N format
-                        n_str
-                            .parse::<u32>()
-                            .ok()
-                            .map(QueueMode::Beats)
-                            .unwrap_or(QueueMode::Beat)
-                    } else {
-                        match mode.as_str() {
-                            "bar" => QueueMode::Bar,
-                            "cycle" => QueueMode::Cycle,
-                            _ => QueueMode::Beat, // default
+
+                // If we have virtual_time, this is a scheduled play (from a wait statement)
+                // Create a ScheduledEvent instead of an immediate InterpreterAction
+                if self.virtual_time > 0.0 && !*looping {
+                    // Convert value to playback info for scheduled execution
+                    match val.to_playback_info() {
+                        Ok(events) => {
+                            // Create ScheduledEvent for the first event (single plays typically have one)
+                            // For patterns, we schedule them starting at the virtual time
+                            let mut event_offset = 0.0;
+                            for event_info in events {
+                                self.scheduled_events.push(ScheduledEvent::new(
+                                    self.virtual_time + event_offset,
+                                    ScheduledAction::PlayNotes {
+                                        frequencies: event_info.frequencies,
+                                        duration_beats: event_info.duration_beats,
+                                        drums: event_info.drums,
+                                    },
+                                    self.current_track,
+                                ));
+                                event_offset += event_info.duration_beats as f64;
+                            }
+                        }
+                        Err(e) => {
+                            println!("Cannot schedule play: {}", e);
                         }
                     }
-                });
-                self.actions.push(InterpreterAction::PlayExpression {
-                    expression: target.clone(),
-                    looping: *looping,
-                    queue_mode,
-                    track_id: self.current_track,
-                    display_value: val.clone(),
-                    // Capture virtual time for scheduled playback
-                    scheduled_beat: if self.virtual_time > 0.0 {
-                        Some(self.virtual_time)
-                    } else {
-                        None
-                    },
-                });
-                if *looping {
-                    println!("Playing {} (looping, Track {})", val, self.current_track);
+                    println!(
+                        "Scheduled {} at beat {} (Track {})",
+                        val, self.virtual_time, self.current_track
+                    );
                 } else {
-                    println!("Playing {} (Track {})", val, self.current_track);
+                    // Immediate play - use InterpreterAction for REPL to handle
+                    let queue_mode = ast_queue_mode.as_ref().map(|mode| {
+                        if let Some(n_str) = mode.strip_prefix("beats:") {
+                            // Parse beats:N format
+                            n_str
+                                .parse::<u32>()
+                                .ok()
+                                .map(QueueMode::Beats)
+                                .unwrap_or(QueueMode::Beat)
+                        } else {
+                            match mode.as_str() {
+                                "bar" => QueueMode::Bar,
+                                "cycle" => QueueMode::Cycle,
+                                _ => QueueMode::Beat, // default
+                            }
+                        }
+                    });
+                    self.actions.push(InterpreterAction::PlayExpression {
+                        expression: target.clone(),
+                        looping: *looping,
+                        queue_mode,
+                        track_id: self.current_track,
+                        display_value: val.clone(),
+                        scheduled_beat: None, // Immediate plays don't need scheduling
+                    });
+                    if *looping {
+                        println!("Playing {} (looping, Track {})", val, self.current_track);
+                    } else {
+                        println!("Playing {} (Track {})", val, self.current_track);
+                    }
                 }
                 Ok(ControlFlow::Normal)
             }
@@ -1199,9 +1227,17 @@ mod tests {
         .unwrap();
         interpreter.run_program(&program).unwrap();
 
-        // Should have 3 play actions
+        // First play (at virtual_time=0) creates an InterpreterAction
         let actions = interpreter.take_actions();
-        assert_eq!(actions.len(), 3);
+        assert_eq!(
+            actions.len(),
+            1,
+            "First play at VT=0 should be an immediate action"
+        );
+
+        // Remaining plays (at virtual_time>0) become ScheduledEvents
+        let scheduled = interpreter.take_scheduled_events();
+        assert_eq!(scheduled.len(), 2, "Later plays become scheduled events");
 
         // Virtual time should be 3 beats
         assert_eq!(interpreter.virtual_time, 3.0);
