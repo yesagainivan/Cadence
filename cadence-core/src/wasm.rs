@@ -81,9 +81,14 @@ impl HighlightSpan {
             Token::StringLiteral(_) => "string".to_string(),
 
             // Operators
-            Token::Plus | Token::Minus | Token::Ampersand | Token::Pipe | Token::Caret => {
-                "operator".to_string()
-            }
+            Token::Plus
+            | Token::Minus
+            | Token::Star
+            | Token::Slash
+            | Token::Percent
+            | Token::Ampersand
+            | Token::Pipe
+            | Token::Caret => "operator".to_string(),
 
             // Comparison
             Token::DoubleEquals
@@ -160,6 +165,9 @@ impl HighlightSpan {
             Token::Queue => "queue".to_string(),
             Token::Plus => "+".to_string(),
             Token::Minus => "-".to_string(),
+            Token::Star => "*".to_string(),
+            Token::Slash => "/".to_string(),
+            Token::Percent => "%".to_string(),
             Token::Ampersand => "&".to_string(),
             Token::Pipe => "|".to_string(),
             Token::Caret => "^".to_string(),

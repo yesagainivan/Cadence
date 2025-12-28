@@ -230,6 +230,46 @@ impl Evaluator {
                 }
             }
 
+            // Binary arithmetic operations: +, -, *, /, %
+            Expression::BinaryOp {
+                left,
+                right,
+                operator,
+            } => {
+                use crate::parser::ast::ArithmeticOp;
+
+                let left_val = self.eval_with_env(*left, env)?;
+                let right_val = self.eval_with_env(*right, env)?;
+
+                match (left_val, right_val) {
+                    (Value::Number(l), Value::Number(r)) => {
+                        let result = match operator {
+                            ArithmeticOp::Add => l + r,
+                            ArithmeticOp::Subtract => l - r,
+                            ArithmeticOp::Multiply => l * r,
+                            ArithmeticOp::Divide => {
+                                if r == 0 {
+                                    return Err(anyhow!("Division by zero"));
+                                }
+                                l / r
+                            }
+                            ArithmeticOp::Modulo => {
+                                if r == 0 {
+                                    return Err(anyhow!("Modulo by zero"));
+                                }
+                                l % r
+                            }
+                        };
+                        Ok(Value::Number(result))
+                    }
+                    (l, r) => Err(anyhow!(
+                        "Arithmetic operations require numeric values, got {:?} and {:?}",
+                        l,
+                        r
+                    )),
+                }
+            }
+
             // Pre-evaluated value - just unwrap it
             Expression::Value(v) => Ok(*v),
 
@@ -866,6 +906,71 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("only works on chords"));
+    }
+
+    #[test]
+    fn test_eval_arithmetic_multiply() {
+        let result = eval("3 * 4").unwrap();
+        assert_eq!(result, Value::Number(12));
+    }
+
+    #[test]
+    fn test_eval_arithmetic_divide() {
+        let result = eval("10 / 2").unwrap();
+        assert_eq!(result, Value::Number(5));
+    }
+
+    #[test]
+    fn test_eval_arithmetic_modulo() {
+        let result = eval("10 % 3").unwrap();
+        assert_eq!(result, Value::Number(1));
+    }
+
+    #[test]
+    fn test_eval_arithmetic_add() {
+        let result = eval("3 + 4").unwrap();
+        assert_eq!(result, Value::Number(7));
+    }
+
+    #[test]
+    fn test_eval_arithmetic_subtract() {
+        let result = eval("10 - 3").unwrap();
+        assert_eq!(result, Value::Number(7));
+    }
+
+    #[test]
+    fn test_eval_arithmetic_bodmas_precedence() {
+        // 2 + 3 * 4 = 2 + 12 = 14 (not 20)
+        let result = eval("2 + 3 * 4").unwrap();
+        assert_eq!(result, Value::Number(14));
+    }
+
+    #[test]
+    fn test_eval_arithmetic_parentheses_override() {
+        // (2 + 3) * 4 = 5 * 4 = 20
+        let result = eval("(2 + 3) * 4").unwrap();
+        assert_eq!(result, Value::Number(20));
+    }
+
+    #[test]
+    fn test_eval_arithmetic_complex() {
+        // 100 + 10 * 5 - 20 / 2 = 100 + 50 - 10 = 140
+        let result = eval("100 + 10 * 5 - 20 / 2").unwrap();
+        assert_eq!(result, Value::Number(140));
+    }
+
+    #[test]
+    fn test_eval_arithmetic_division_by_zero() {
+        let result = eval("10 / 0");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Division by zero"));
+    }
+
+    #[test]
+    fn test_eval_arithmetic_modulo_by_zero() {
+        let result = eval("10 % 0");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Modulo by zero"));
     }
 }
 

@@ -365,6 +365,13 @@ pub enum Expression {
 
     /// Logical NOT: !expr
     LogicalNot(Box<Expression>),
+
+    /// Binary arithmetic operation: expr + expr, expr * expr, etc.
+    BinaryOp {
+        left: Box<Expression>,
+        right: Box<Expression>,
+        operator: ArithmeticOp,
+    },
 }
 
 /// Comparison operators
@@ -376,6 +383,16 @@ pub enum ComparisonOp {
     Greater,
     LessEqual,
     GreaterEqual,
+}
+
+/// Arithmetic operators
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArithmeticOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
 }
 
 /// Represents the result of evaluating an expression
@@ -470,6 +487,20 @@ impl fmt::Display for Expression {
             }
             Expression::LogicalNot(expr) => {
                 write!(f, "!{}", expr)
+            }
+            Expression::BinaryOp {
+                left,
+                right,
+                operator,
+            } => {
+                let op_str = match operator {
+                    ArithmeticOp::Add => "+",
+                    ArithmeticOp::Subtract => "-",
+                    ArithmeticOp::Multiply => "*",
+                    ArithmeticOp::Divide => "/",
+                    ArithmeticOp::Modulo => "%",
+                };
+                write!(f, "{} {} {}", left, op_str, right)
             }
         }
     }

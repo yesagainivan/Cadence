@@ -28,6 +28,9 @@ pub enum Token {
     // Operators
     Plus,         // +
     Minus,        // -
+    Star,         // *
+    Slash,        // /
+    Percent,      // %
     Ampersand,    // &
     Pipe,         // |
     Caret,        // ^
@@ -97,6 +100,9 @@ impl fmt::Display for Token {
             Token::Newline => write!(f, "\\n"),
             Token::Plus => write!(f, "+"),
             Token::Minus => write!(f, "-"),
+            Token::Star => write!(f, "*"),
+            Token::Slash => write!(f, "/"),
+            Token::Percent => write!(f, "%"),
             Token::Ampersand => write!(f, "&"),
             Token::Pipe => write!(f, "|"),
             Token::Caret => write!(f, "^"),
@@ -466,7 +472,7 @@ impl Lexer {
                     return Ok(Token::Newline);
                 }
 
-                // Comments
+                // Comments and division
                 Some('/') => {
                     match self.peek() {
                         Some('/') => {
@@ -478,9 +484,21 @@ impl Lexer {
                             continue; // Loop back to get next token
                         }
                         _ => {
-                            return Err(anyhow!("Unexpected character: '/'"));
+                            // Division operator
+                            self.advance();
+                            return Ok(Token::Slash);
                         }
                     }
+                }
+
+                Some('*') => {
+                    self.advance();
+                    return Ok(Token::Star);
+                }
+
+                Some('%') => {
+                    self.advance();
+                    return Ok(Token::Percent);
                 }
 
                 Some('[') => {

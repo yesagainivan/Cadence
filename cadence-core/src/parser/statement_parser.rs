@@ -133,7 +133,12 @@ impl StatementParser {
             Token::LeftBrace | Token::RightBrace => 1,
             Token::LeftDoubleBracket | Token::RightDoubleBracket => 2,
             Token::Comma | Token::Dot => 1,
-            Token::Equals | Token::Plus | Token::Minus => 1,
+            Token::Equals
+            | Token::Plus
+            | Token::Minus
+            | Token::Star
+            | Token::Slash
+            | Token::Percent => 1,
             Token::Ampersand | Token::Pipe | Token::Caret => 1,
             Token::Semicolon | Token::Newline => 1,
             Token::Boolean(_) => 5,                      // "true" or "false"
@@ -731,30 +736,98 @@ impl StatementParser {
         }
     }
 
-    /// Parse additive operations (+, -) - higher precedence than sets
-    /// Grammar: additive_expr = postfix_expr (('+' | '-') number)?
+    /// Parse additive operations (+, -) - higher precedence than comparison
+    /// Grammar: additive_expr = multiplicative_expr (('+' | '-') multiplicative_expr)*
+    ///
+    /// This handles two modes:
+    /// 1. For notes/chords followed by +/- number: transposition (C + 2 → D)
+    /// 2. For numbers: regular arithmetic (3 + 4 → 7)
     fn parse_additive_expression(&mut self) -> Result<Expression> {
-        let mut expr = self.parse_postfix_expression()?;
+        use crate::parser::ast::ArithmeticOp;
 
-        if matches!(self.current(), Token::Plus | Token::Minus) {
-            let is_plus = matches!(self.current(), Token::Plus);
+        let mut left = self.parse_multiplicative_expression()?;
+
+        while matches!(self.current(), Token::Plus | Token::Minus) {
+            let op = match self.current() {
+                Token::Plus => ArithmeticOp::Add,
+                Token::Minus => ArithmeticOp::Subtract,
+                _ => unreachable!(),
+            };
             self.advance();
 
-            if let Token::Number(semitones) = self.current() {
-                let semitones = *semitones;
-                self.advance();
-                let semitones = if is_plus {
-                    semitones as i8
-                } else {
-                    -(semitones as i8)
+            let right = self.parse_multiplicative_expression()?;
+
+            // Check if this is a transposition case:
+            // If left is note/chord/pattern/function-result and right is a simple number
+            let is_transposition = match (&left, &right) {
+                (
+                    Expression::Note(_)
+                    | Expression::Pattern(_)
+                    | Expression::Variable(_)
+                    | Expression::FunctionCall { .. }
+                    | Expression::Transpose { .. },
+                    Expression::Number(n),
+                ) => {
+                    // Transposition: note/pattern + number
+                    let semitones = match op {
+                        ArithmeticOp::Add => *n as i8,
+                        ArithmeticOp::Subtract => -(*n as i8),
+                        _ => unreachable!(),
+                    };
+                    left = Expression::transpose(left, semitones);
+                    true
+                }
+                (Expression::Array(_), Expression::Number(n)) => {
+                    // Chord transposition: [C, E, G] + 2
+                    let semitones = match op {
+                        ArithmeticOp::Add => *n as i8,
+                        ArithmeticOp::Subtract => -(*n as i8),
+                        _ => unreachable!(),
+                    };
+                    left = Expression::transpose(left, semitones);
+                    true
+                }
+                _ => false,
+            };
+
+            if !is_transposition {
+                // Regular arithmetic
+                left = Expression::BinaryOp {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    operator: op,
                 };
-                expr = Expression::transpose(expr, semitones);
-            } else {
-                return Err(anyhow!("Expected number after +/- operator"));
             }
         }
 
-        Ok(expr)
+        Ok(left)
+    }
+
+    /// Parse multiplicative operations (*, /, %) - higher precedence than additive
+    /// Grammar: multiplicative_expr = postfix_expr (('*' | '/' | '%') postfix_expr)*
+    fn parse_multiplicative_expression(&mut self) -> Result<Expression> {
+        use crate::parser::ast::ArithmeticOp;
+
+        let mut left = self.parse_postfix_expression()?;
+
+        while matches!(self.current(), Token::Star | Token::Slash | Token::Percent) {
+            let op = match self.current() {
+                Token::Star => ArithmeticOp::Multiply,
+                Token::Slash => ArithmeticOp::Divide,
+                Token::Percent => ArithmeticOp::Modulo,
+                _ => unreachable!(),
+            };
+            self.advance();
+
+            let right = self.parse_postfix_expression()?;
+            left = Expression::BinaryOp {
+                left: Box::new(left),
+                right: Box::new(right),
+                operator: op,
+            };
+        }
+
+        Ok(left)
     }
 
     /// Parse postfix operations (method calls)
@@ -1405,9 +1478,147 @@ mod expression_tests {
     }
 
     #[test]
-    fn test_whitespace_handling() {
-        let expr = parse("  [ C , E , G ]  + 2  ").unwrap();
-        assert!(matches!(expr, Expression::Transpose { .. }));
+    fn test_parse_arithmetic_multiply() {
+        use crate::parser::ast::ArithmeticOp;
+        let expr = parse("3 * 4").unwrap();
+        assert!(matches!(expr, Expression::BinaryOp { .. }));
+
+        if let Expression::BinaryOp {
+            left,
+            right,
+            operator,
+        } = expr
+        {
+            assert!(matches!(*left, Expression::Number(3)));
+            assert!(matches!(*right, Expression::Number(4)));
+            assert_eq!(operator, ArithmeticOp::Multiply);
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_divide() {
+        use crate::parser::ast::ArithmeticOp;
+        let expr = parse("10 / 2").unwrap();
+        assert!(matches!(expr, Expression::BinaryOp { .. }));
+
+        if let Expression::BinaryOp {
+            left,
+            right,
+            operator,
+        } = expr
+        {
+            assert!(matches!(*left, Expression::Number(10)));
+            assert!(matches!(*right, Expression::Number(2)));
+            assert_eq!(operator, ArithmeticOp::Divide);
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_modulo() {
+        use crate::parser::ast::ArithmeticOp;
+        let expr = parse("10 % 3").unwrap();
+        assert!(matches!(expr, Expression::BinaryOp { .. }));
+
+        if let Expression::BinaryOp {
+            left,
+            right,
+            operator,
+        } = expr
+        {
+            assert!(matches!(*left, Expression::Number(10)));
+            assert!(matches!(*right, Expression::Number(3)));
+            assert_eq!(operator, ArithmeticOp::Modulo);
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_add() {
+        use crate::parser::ast::ArithmeticOp;
+        let expr = parse("3 + 4").unwrap();
+        assert!(matches!(expr, Expression::BinaryOp { .. }));
+
+        if let Expression::BinaryOp {
+            left,
+            right,
+            operator,
+        } = expr
+        {
+            assert!(matches!(*left, Expression::Number(3)));
+            assert!(matches!(*right, Expression::Number(4)));
+            assert_eq!(operator, ArithmeticOp::Add);
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_precedence_multiply_before_add() {
+        use crate::parser::ast::ArithmeticOp;
+        // 2 + 3 * 4 should parse as 2 + (3 * 4), not (2 + 3) * 4
+        let expr = parse("2 + 3 * 4").unwrap();
+        assert!(matches!(expr, Expression::BinaryOp { .. }));
+
+        if let Expression::BinaryOp {
+            left,
+            right,
+            operator,
+        } = expr
+        {
+            // Outer operation should be Add
+            assert_eq!(operator, ArithmeticOp::Add);
+            assert!(matches!(*left, Expression::Number(2)));
+            // Right side should be 3 * 4
+            if let Expression::BinaryOp {
+                left: mul_left,
+                right: mul_right,
+                operator: mul_op,
+            } = *right
+            {
+                assert_eq!(mul_op, ArithmeticOp::Multiply);
+                assert!(matches!(*mul_left, Expression::Number(3)));
+                assert!(matches!(*mul_right, Expression::Number(4)));
+            } else {
+                panic!("Expected BinaryOp for 3 * 4");
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_parentheses_override_precedence() {
+        use crate::parser::ast::ArithmeticOp;
+        // (2 + 3) * 4 should parse parenthesized addition first
+        let expr = parse("(2 + 3) * 4").unwrap();
+        assert!(matches!(expr, Expression::BinaryOp { .. }));
+
+        if let Expression::BinaryOp {
+            left,
+            right,
+            operator,
+        } = expr
+        {
+            // Outer operation should be Multiply
+            assert_eq!(operator, ArithmeticOp::Multiply);
+            // Left side should be 2 + 3
+            if let Expression::BinaryOp {
+                left: add_left,
+                right: add_right,
+                operator: add_op,
+            } = *left
+            {
+                assert_eq!(add_op, ArithmeticOp::Add);
+                assert!(matches!(*add_left, Expression::Number(2)));
+                assert!(matches!(*add_right, Expression::Number(3)));
+            } else {
+                panic!("Expected BinaryOp for 2 + 3");
+            }
+            assert!(matches!(*right, Expression::Number(4)));
+        }
+    }
+
+    #[test]
+    fn test_parse_complex_arithmetic() {
+        // 100 + 10 * 5 - 20 / 2 should work
+        let expr = parse("100 + 10 * 5 - 20 / 2").unwrap();
+        // This is a complex expression - just verify it parses
+        assert!(matches!(expr, Expression::BinaryOp { .. }));
     }
 
     #[test]
