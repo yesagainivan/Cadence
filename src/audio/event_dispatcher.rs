@@ -26,6 +26,8 @@ pub struct PlaybackStep {
     pub drums: Vec<DrumSound>,
     pub envelope: Option<(f32, f32, f32, f32)>,
     pub waveform: Option<Waveform>,
+    /// Duration of this step in beats (for fast/slow support)
+    pub duration_beats: f32,
 }
 
 /// Unique identifier for a looping pattern
@@ -46,6 +48,10 @@ pub struct LoopingPattern {
     pub total_steps: usize,
     /// Current cycle number
     pub cycle: usize,
+    /// Accumulated beat time since last step
+    pub beat_accumulator: f32,
+    /// Duration of current step in beats (cached)
+    pub current_step_duration: f32,
 }
 
 impl LoopingPattern {
@@ -57,6 +63,29 @@ impl LoopingPattern {
             step_index: 0,
             total_steps: 1,
             cycle: 0,
+            // Start with 1.0 so first step triggers immediately on first tick
+            beat_accumulator: 1.0,
+            current_step_duration: 1.0, // Default: 1 beat per step
+        }
+    }
+
+    /// Check if it's time to advance to the next step
+    /// Returns true if enough beats have accumulated
+    pub fn should_advance(&self) -> bool {
+        self.beat_accumulator >= self.current_step_duration
+    }
+
+    /// Accumulate beat time (call this on each tick)
+    pub fn accumulate(&mut self, beats: f32) {
+        self.beat_accumulator += beats;
+    }
+
+    /// Reset accumulator after advancing
+    pub fn reset_accumulator(&mut self) {
+        // Keep fractional beats for accurate timing
+        self.beat_accumulator -= self.current_step_duration;
+        if self.beat_accumulator < 0.0 {
+            self.beat_accumulator = 0.0;
         }
     }
 
@@ -69,20 +98,24 @@ impl LoopingPattern {
         match value {
             Value::Note(note) => {
                 self.total_steps = 1;
+                self.current_step_duration = 1.0;
                 Ok(PlaybackStep {
                     frequencies: vec![note.frequency()],
                     drums: vec![],
                     envelope: None,
                     waveform: None,
+                    duration_beats: 1.0,
                 })
             }
             Value::Chord(chord) => {
                 self.total_steps = 1;
+                self.current_step_duration = 1.0;
                 Ok(PlaybackStep {
                     frequencies: chord.notes_vec().iter().map(|n| n.frequency()).collect(),
                     drums: vec![],
                     envelope: None,
                     waveform: None,
+                    duration_beats: 1.0,
                 })
             }
             Value::Pattern(pattern) => {
@@ -92,18 +125,24 @@ impl LoopingPattern {
                 if idx < events.len() {
                     let event = &events[idx];
                     let freqs: Vec<f32> = event.notes.iter().map(|n| n.frequency).collect();
+                    let duration = event.duration;
+                    self.current_step_duration = duration;
                     Ok(PlaybackStep {
                         frequencies: freqs,
                         drums: event.drums.clone(),
                         envelope: pattern.envelope,
                         waveform: pattern.waveform,
+                        duration_beats: duration,
                     })
                 } else {
+                    let step_duration = pattern.step_beats();
+                    self.current_step_duration = step_duration;
                     Ok(PlaybackStep {
                         frequencies: vec![],
                         drums: vec![],
                         envelope: pattern.envelope,
                         waveform: pattern.waveform,
+                        duration_beats: step_duration,
                     })
                 }
             }
@@ -116,18 +155,24 @@ impl LoopingPattern {
                     if idx < events.len() {
                         let event = &events[idx];
                         let freqs: Vec<f32> = event.notes.iter().map(|n| n.frequency).collect();
+                        let duration = event.duration;
+                        self.current_step_duration = duration;
                         Ok(PlaybackStep {
                             frequencies: freqs,
                             drums: event.drums.clone(),
                             envelope: pattern.envelope,
                             waveform: pattern.waveform,
+                            duration_beats: duration,
                         })
                     } else {
+                        let step_duration = pattern.step_beats();
+                        self.current_step_duration = step_duration;
                         Ok(PlaybackStep {
                             frequencies: vec![],
                             drums: vec![],
                             envelope: pattern.envelope,
                             waveform: pattern.waveform,
+                            duration_beats: step_duration,
                         })
                     }
                 } else {
@@ -439,21 +484,33 @@ impl EventDispatcher {
             }
         }
 
-        // 2. Step looping patterns on beat boundaries (once per beat)
+        // 2. Step looping patterns based on beat accumulation
+        // This supports fast() and slow() by tracking accumulated beat time
         if tick.beat_number != self.last_loop_beat && tick.is_beat_boundary() {
             self.last_loop_beat = tick.beat_number;
 
-            // Collect pattern updates to avoid borrow issues
+            // Accumulate 1 beat for all active loops
+            for pattern in self.active_loops.values_mut() {
+                pattern.accumulate(1.0);
+            }
+
+            // Collect pattern updates - may have multiple per pattern for fast() patterns
             let mut updates: Vec<(usize, PlaybackStep)> = Vec::new();
 
             for pattern in self.active_loops.values_mut() {
-                match pattern.get_current_step() {
-                    Ok(step) => {
-                        updates.push((pattern.track_id, step));
-                        pattern.advance();
-                    }
-                    Err(e) => {
-                        eprintln!("Loop evaluation error: {}", e);
+                // Process as many steps as needed (for fast patterns that have
+                // multiple steps per beat)
+                while pattern.should_advance() {
+                    match pattern.get_current_step() {
+                        Ok(step) => {
+                            updates.push((pattern.track_id, step));
+                            pattern.advance();
+                            pattern.reset_accumulator();
+                        }
+                        Err(e) => {
+                            eprintln!("Loop evaluation error: {}", e);
+                            break;
+                        }
                     }
                 }
             }
