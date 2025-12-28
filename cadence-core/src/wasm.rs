@@ -749,7 +749,12 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
         ),
         Statement::Play { target, .. } => ("play".to_string(), Some(target.clone()), None),
         Statement::Expression(e) => ("expression".to_string(), Some(e.clone()), None),
-        Statement::Tempo(bpm) => {
+        Statement::Tempo(expr) => {
+            // Extract tempo value from expression if it's a simple number
+            let tempo_val = match expr {
+                Expression::Number(n) => Some(*n as f32),
+                _ => None,
+            };
             // Direct tempo statement
             let context = CursorContextJS {
                 statement_type: "tempo".to_string(),
@@ -757,7 +762,7 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                 properties: Some(EditablePropertiesJS {
                     waveform: None,
                     envelope: None,
-                    tempo: Some(*bpm),
+                    tempo: tempo_val,
                     volume: None,
                     beats_per_cycle: None,
                 }),
@@ -771,7 +776,12 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
             };
             return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
         }
-        Statement::Volume(vol) => {
+        Statement::Volume(expr) => {
+            // Extract volume value from expression if it's a simple number
+            let vol_val = match expr {
+                Expression::Number(n) => Some(*n as f32 / 100.0),
+                _ => None,
+            };
             // Direct volume statement
             let context = CursorContextJS {
                 statement_type: "volume".to_string(),
@@ -780,7 +790,7 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                     waveform: None,
                     envelope: None,
                     tempo: None,
-                    volume: Some(*vol),
+                    volume: vol_val,
                     beats_per_cycle: None,
                 }),
                 span: SpanInfoJS {

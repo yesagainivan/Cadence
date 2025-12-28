@@ -163,11 +163,11 @@ pub enum Statement {
     /// Stop playback
     Stop,
 
-    /// Set tempo: tempo 120
-    Tempo(f32),
+    /// Set tempo: tempo 120 or tempo 100 + x
+    Tempo(Expression),
 
-    /// Set volume: volume 0.5
-    Volume(f32),
+    /// Set volume: volume 0.5 or volume x
+    Volume(Expression),
 
     /// Set waveform: waveform "sine"
     Waveform(String),

@@ -369,32 +369,18 @@ impl StatementParser {
         })
     }
 
-    /// Parse: tempo <number>
+    /// Parse: tempo <expression>
     fn parse_tempo_statement(&mut self) -> Result<Statement> {
         self.expect(&Token::Tempo)?;
-
-        let bpm = match self.current() {
-            Token::Float(f) => *f,
-            Token::Number(n) => *n as f32,
-            _ => return Err(anyhow!("Expected number after 'tempo'")),
-        };
-        self.advance();
-
-        Ok(Statement::Tempo(bpm))
+        let expr = self.parse_expression()?;
+        Ok(Statement::Tempo(expr))
     }
 
-    /// Parse: volume <number>
+    /// Parse: volume <expression>
     fn parse_volume_statement(&mut self) -> Result<Statement> {
         self.expect(&Token::Volume)?;
-
-        let vol = match self.current() {
-            Token::Float(f) => *f,
-            Token::Number(n) => *n as f32 / 100.0, // Assume 0-100 range
-            _ => return Err(anyhow!("Expected number after 'volume'")),
-        };
-        self.advance();
-
-        Ok(Statement::Volume(vol))
+        let expr = self.parse_expression()?;
+        Ok(Statement::Volume(expr))
     }
 
     /// Parse: waveform "sine" | "saw" | "square" | "triangle"
@@ -1062,9 +1048,10 @@ mod tests {
         assert_eq!(program.statements.len(), 1);
 
         match &program.statements[0] {
-            Statement::Tempo(bpm) => {
-                assert_eq!(*bpm, 120.0);
-            }
+            Statement::Tempo(expr) => match expr {
+                Expression::Number(n) => assert_eq!(*n, 120),
+                _ => panic!("Expected Number expression"),
+            },
             _ => panic!("Expected Tempo statement"),
         }
     }

@@ -141,14 +141,24 @@ impl Interpreter {
                 Ok(ControlFlow::Normal)
             }
 
-            Statement::Tempo(bpm) => {
-                self.tempo = *bpm;
-                self.actions.push(InterpreterAction::SetTempo(*bpm));
+            Statement::Tempo(expr) => {
+                let val = self.eval_expression(expr)?;
+                let bpm = match val {
+                    Value::Number(n) => n as f32,
+                    _ => return Err(anyhow!("Tempo requires a numeric value")),
+                };
+                self.tempo = bpm;
+                self.actions.push(InterpreterAction::SetTempo(bpm));
                 println!("Tempo set to {} BPM", bpm);
                 Ok(ControlFlow::Normal)
             }
 
-            Statement::Volume(vol) => {
+            Statement::Volume(expr) => {
+                let val = self.eval_expression(expr)?;
+                let vol = match val {
+                    Value::Number(n) => (n as f32) / 100.0,
+                    _ => return Err(anyhow!("Volume requires a numeric value")),
+                };
                 // Clamp volume to valid range (0.0 to 1.0)
                 let clamped = vol.clamp(0.0, 1.0);
                 self.volume = clamped;
@@ -618,13 +628,27 @@ impl Interpreter {
             Statement::Continue => Ok(ControlFlow::Continue),
 
             // Side-effect statements - still work, collect actions
-            Statement::Tempo(bpm) => {
-                self.tempo = *bpm;
-                self.actions.push(InterpreterAction::SetTempo(*bpm));
+            Statement::Tempo(expr) => {
+                let val = self
+                    .evaluator
+                    .eval_with_env(expr.clone(), Some(local_env))?;
+                let bpm = match val {
+                    Value::Number(n) => n as f32,
+                    _ => return Err(anyhow!("Tempo requires a numeric value")),
+                };
+                self.tempo = bpm;
+                self.actions.push(InterpreterAction::SetTempo(bpm));
                 Ok(ControlFlow::Normal)
             }
 
-            Statement::Volume(vol) => {
+            Statement::Volume(expr) => {
+                let val = self
+                    .evaluator
+                    .eval_with_env(expr.clone(), Some(local_env))?;
+                let vol = match val {
+                    Value::Number(n) => (n as f32) / 100.0,
+                    _ => return Err(anyhow!("Volume requires a numeric value")),
+                };
                 let clamped = vol.clamp(0.0, 1.0);
                 self.volume = clamped;
                 self.actions.push(InterpreterAction::SetVolume {
