@@ -8,7 +8,9 @@
 //! - `loop { ... }`
 //! - `repeat 4 { ... }`
 
-use crate::parser::ast::{Expression, Program, SpannedProgram, SpannedStatement, Statement};
+use crate::parser::ast::{
+    ComparisonOp, Expression, Program, SpannedProgram, SpannedStatement, Statement,
+};
 use crate::parser::lexer::{Lexer, Span, SpannedToken, Token};
 use anyhow::{anyhow, Result};
 
@@ -136,6 +138,8 @@ impl StatementParser {
             Token::Semicolon | Token::Newline => 1,
             Token::Boolean(_) => 5,                      // "true" or "false"
             Token::DoubleEquals | Token::NotEquals => 2, // == or !=
+            Token::Less | Token::Greater | Token::Not => 1, // <, >, !
+            Token::LessEqual | Token::GreaterEqual | Token::And | Token::Or => 2, // <=, >=, &&, ||
             Token::Eof => 0,
         }
     }
@@ -513,16 +517,26 @@ impl StatementParser {
         Ok(Statement::Repeat { count, body })
     }
 
-    /// Parse: if <condition> { statements } [else { statements }]
+    /// Parse: if <condition> { statements } [else if ... | else { statements }]
     fn parse_if_statement(&mut self) -> Result<Statement> {
         self.expect(&Token::If)?;
 
         let condition = self.parse_expression()?;
         let then_body = self.parse_block()?;
 
+        // Skip newlines/semicolons before checking for else
+        while self.is_skippable() {
+            self.advance();
+        }
+
         let else_body = if self.check(&Token::Else) {
             self.advance();
-            Some(self.parse_block()?)
+            if self.check(&Token::If) {
+                // else if → parse as nested if statement
+                Some(vec![self.parse_if_statement()?])
+            } else {
+                Some(self.parse_block()?)
+            }
         } else {
             None
         };
@@ -586,15 +600,49 @@ impl StatementParser {
     // =========================================================================
 
     /// Parse an expression (handles operator precedence)
-    /// Grammar: expression = set_expr
+    /// Grammar: expression = logical_or_expr
     fn parse_expression(&mut self) -> Result<Expression> {
-        self.parse_set_expression()
+        self.parse_logical_or_expression()
     }
 
-    /// Parse set operations (&, |, ^) - lowest precedence
-    /// Grammar: set_expr = additive_expr (('&' | '|' | '^') additive_expr)*
+    /// Parse logical OR (||) - lowest precedence
+    /// Grammar: logical_or_expr = logical_and_expr ('||' logical_and_expr)*
+    fn parse_logical_or_expression(&mut self) -> Result<Expression> {
+        let mut left = self.parse_logical_and_expression()?;
+
+        while matches!(self.current(), Token::Or) {
+            self.advance();
+            let right = self.parse_logical_and_expression()?;
+            left = Expression::LogicalOr {
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parse logical AND (&&)
+    /// Grammar: logical_and_expr = set_expr ('&&' set_expr)*
+    fn parse_logical_and_expression(&mut self) -> Result<Expression> {
+        let mut left = self.parse_set_expression()?;
+
+        while matches!(self.current(), Token::And) {
+            self.advance();
+            let right = self.parse_set_expression()?;
+            left = Expression::LogicalAnd {
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parse set operations (&, |, ^) - between logical AND and comparison
+    /// Grammar: set_expr = comparison_expr (('&' | '|' | '^') comparison_expr)*
     fn parse_set_expression(&mut self) -> Result<Expression> {
-        let mut left = self.parse_additive_expression()?;
+        let mut left = self.parse_comparison_expression()?;
 
         while matches!(
             self.current(),
@@ -602,7 +650,7 @@ impl StatementParser {
         ) {
             let op = self.current().clone();
             self.advance();
-            let right = self.parse_additive_expression()?;
+            let right = self.parse_comparison_expression()?;
 
             left = match op {
                 Token::Ampersand => Expression::intersection(left, right),
@@ -613,6 +661,42 @@ impl StatementParser {
         }
 
         Ok(left)
+    }
+
+    /// Parse comparison operations (==, !=, <, >, <=, >=)
+    /// Grammar: comparison_expr = additive_expr (('==' | '!=' | '<' | '>' | '<=' | '>=') additive_expr)?
+    fn parse_comparison_expression(&mut self) -> Result<Expression> {
+        let left = self.parse_additive_expression()?;
+
+        if matches!(
+            self.current(),
+            Token::DoubleEquals
+                | Token::NotEquals
+                | Token::Less
+                | Token::Greater
+                | Token::LessEqual
+                | Token::GreaterEqual
+        ) {
+            let op = match self.current() {
+                Token::DoubleEquals => ComparisonOp::Equal,
+                Token::NotEquals => ComparisonOp::NotEqual,
+                Token::Less => ComparisonOp::Less,
+                Token::Greater => ComparisonOp::Greater,
+                Token::LessEqual => ComparisonOp::LessEqual,
+                Token::GreaterEqual => ComparisonOp::GreaterEqual,
+                _ => unreachable!(),
+            };
+            self.advance();
+            let right = self.parse_additive_expression()?;
+
+            Ok(Expression::Comparison {
+                left: Box::new(left),
+                right: Box::new(right),
+                operator: op,
+            })
+        } else {
+            Ok(left)
+        }
     }
 
     /// Parse additive operations (+, -) - higher precedence than sets
@@ -686,6 +770,13 @@ impl StatementParser {
 
     /// Parse primary expressions (notes, chords, progressions, function calls, patterns)
     fn parse_primary_expression(&mut self) -> Result<Expression> {
+        // Handle unary NOT first
+        if matches!(self.current(), Token::Not) {
+            self.advance();
+            let expr = self.parse_primary_expression()?;
+            return Ok(Expression::LogicalNot(Box::new(expr)));
+        }
+
         match self.current().clone() {
             Token::Note(note_str) => {
                 let note: crate::types::Note = note_str
@@ -722,13 +813,9 @@ impl StatementParser {
                 // If followed by LeftParen, it's a function call (e.g., 251(C) for progressions)
                 if matches!(self.current(), Token::LeftParen) {
                     self.parse_function_call(name)
-                } else if val >= 0 && val <= 11 {
-                    // Small numbers (0-11) can be notes (for backward compat with fast(p, 2))
-                    let note = crate::types::Note::new(val as u8)
-                        .map_err(|e| anyhow!("Invalid note from number {}: {}", val, e))?;
-                    Ok(Expression::Note(note))
                 } else {
-                    // Larger numbers stay as numbers (for env(), etc.)
+                    // Keep numbers as numbers - don't auto-convert to notes
+                    // Notes should be written explicitly as note names (C, D, E, etc.)
                     Ok(Expression::Number(val))
                 }
             }
@@ -741,6 +828,11 @@ impl StatementParser {
                 } else {
                     Ok(Expression::Variable(name))
                 }
+            }
+
+            Token::Boolean(b) => {
+                self.advance();
+                Ok(Expression::Boolean(b))
             }
 
             Token::LeftParen => {
@@ -962,6 +1054,158 @@ mod tests {
                 assert_eq!(path, "song.cadence");
             }
             _ => panic!("Expected Load statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_if_with_comparison_equal() {
+        let program = parse_statements("if true == true { tempo 120 }").unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            Statement::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                assert!(matches!(condition, Expression::Comparison { .. }));
+                assert_eq!(then_body.len(), 1);
+                assert!(else_body.is_none());
+            }
+            _ => panic!("Expected If statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_if_with_comparison_not_equal() {
+        let program = parse_statements("if true != false { play C }").unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            Statement::If { condition, .. } => {
+                if let Expression::Comparison { operator, .. } = condition {
+                    assert!(matches!(operator, ComparisonOp::NotEqual));
+                } else {
+                    panic!("Expected Comparison expression");
+                }
+            }
+            _ => panic!("Expected If statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_else_if() {
+        let program = parse_statements("if true { tempo 120 } else if false { tempo 60 }").unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            Statement::If {
+                condition: _,
+                then_body,
+                else_body,
+            } => {
+                assert_eq!(then_body.len(), 1);
+                // else_body should contain a nested If statement
+                let else_stmts = else_body.as_ref().expect("Should have else body");
+                assert_eq!(else_stmts.len(), 1);
+                assert!(matches!(&else_stmts[0], Statement::If { .. }));
+            }
+            _ => panic!("Expected If statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_else_if_chain() {
+        let code = r#"
+            if true { tempo 120 }
+            else if false { tempo 100 }
+            else { tempo 60 }
+        "#;
+        let program = parse_statements(code).unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        // Navigate to first else-if
+        match &program.statements[0] {
+            Statement::If { else_body, .. } => {
+                let else_stmts = else_body.as_ref().expect("Should have first else");
+                assert_eq!(else_stmts.len(), 1);
+
+                // That else should be another If with its own else
+                match &else_stmts[0] {
+                    Statement::If { else_body, .. } => {
+                        let final_else = else_body.as_ref().expect("Should have final else");
+                        assert_eq!(final_else.len(), 1);
+                        assert!(matches!(&final_else[0], Statement::Tempo(_)));
+                    }
+                    _ => panic!("Expected nested If statement"),
+                }
+            }
+            _ => panic!("Expected If statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_comparison_less_than() {
+        let program = parse_statements("if 1 < 2 { tempo 120 }").unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            Statement::If { condition, .. } => {
+                if let Expression::Comparison { operator, .. } = condition {
+                    assert!(matches!(operator, ComparisonOp::Less));
+                } else {
+                    panic!("Expected Comparison expression");
+                }
+            }
+            _ => panic!("Expected If statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_comparison_greater_equal() {
+        let program = parse_statements("if 10 >= 5 { play C }").unwrap();
+        match &program.statements[0] {
+            Statement::If { condition, .. } => {
+                if let Expression::Comparison { operator, .. } = condition {
+                    assert!(matches!(operator, ComparisonOp::GreaterEqual));
+                } else {
+                    panic!("Expected Comparison expression");
+                }
+            }
+            _ => panic!("Expected If statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_logical_and() {
+        let program = parse_statements("if true && false { tempo 60 }").unwrap();
+        match &program.statements[0] {
+            Statement::If { condition, .. } => {
+                assert!(matches!(condition, Expression::LogicalAnd { .. }));
+            }
+            _ => panic!("Expected If statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_logical_or() {
+        let program = parse_statements("if true || false { tempo 60 }").unwrap();
+        match &program.statements[0] {
+            Statement::If { condition, .. } => {
+                assert!(matches!(condition, Expression::LogicalOr { .. }));
+            }
+            _ => panic!("Expected If statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_logical_not() {
+        let program = parse_statements("if !false { play C }").unwrap();
+        match &program.statements[0] {
+            Statement::If { condition, .. } => {
+                assert!(matches!(condition, Expression::LogicalNot(_)));
+            }
+            _ => panic!("Expected If statement"),
         }
     }
 }

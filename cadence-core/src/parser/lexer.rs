@@ -34,6 +34,13 @@ pub enum Token {
     Equals,       // =
     DoubleEquals, // ==
     NotEquals,    // !=
+    Less,         // <
+    Greater,      // >
+    LessEqual,    // <=
+    GreaterEqual, // >=
+    And,          // &&
+    Or,           // ||
+    Not,          // !
 
     // Keywords
     Let,      // let
@@ -93,6 +100,13 @@ impl fmt::Display for Token {
             Token::Equals => write!(f, "="),
             Token::DoubleEquals => write!(f, "=="),
             Token::NotEquals => write!(f, "!="),
+            Token::Less => write!(f, "<"),
+            Token::Greater => write!(f, ">"),
+            Token::LessEqual => write!(f, "<="),
+            Token::GreaterEqual => write!(f, ">="),
+            Token::And => write!(f, "&&"),
+            Token::Or => write!(f, "||"),
+            Token::Not => write!(f, "!"),
             Token::Let => write!(f, "let"),
             Token::Fn => write!(f, "fn"),
             Token::Loop => write!(f, "loop"),
@@ -548,11 +562,19 @@ impl Lexer {
 
                 Some('&') => {
                     self.advance();
+                    if self.current_char == Some('&') {
+                        self.advance();
+                        return Ok(Token::And);
+                    }
                     return Ok(Token::Ampersand);
                 }
 
                 Some('|') => {
                     self.advance();
+                    if self.current_char == Some('|') {
+                        self.advance();
+                        return Ok(Token::Or);
+                    }
                     return Ok(Token::Pipe);
                 }
 
@@ -591,7 +613,25 @@ impl Lexer {
                         self.advance();
                         return Ok(Token::NotEquals);
                     }
-                    return Err(anyhow!("Expected '=' after '!'"));
+                    return Ok(Token::Not);
+                }
+
+                Some('<') => {
+                    self.advance();
+                    if self.current_char == Some('=') {
+                        self.advance();
+                        return Ok(Token::LessEqual);
+                    }
+                    return Ok(Token::Less);
+                }
+
+                Some('>') => {
+                    self.advance();
+                    if self.current_char == Some('=') {
+                        self.advance();
+                        return Ok(Token::GreaterEqual);
+                    }
+                    return Ok(Token::Greater);
                 }
 
                 Some('"') => {

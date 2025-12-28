@@ -85,7 +85,15 @@ impl HighlightSpan {
             }
 
             // Comparison
-            Token::DoubleEquals | Token::NotEquals => "operator.comparison".to_string(),
+            Token::DoubleEquals
+            | Token::NotEquals
+            | Token::Less
+            | Token::Greater
+            | Token::LessEqual
+            | Token::GreaterEqual => "operator.comparison".to_string(),
+
+            // Logical operators
+            Token::And | Token::Or | Token::Not => "operator.logical".to_string(),
 
             // Assignment
             Token::Equals => "operator.assignment".to_string(),
@@ -165,6 +173,13 @@ impl HighlightSpan {
             Token::Equals => "=".to_string(),
             Token::DoubleEquals => "==".to_string(),
             Token::NotEquals => "!=".to_string(),
+            Token::Less => "<".to_string(),
+            Token::Greater => ">".to_string(),
+            Token::LessEqual => "<=".to_string(),
+            Token::GreaterEqual => ">=".to_string(),
+            Token::And => "&&".to_string(),
+            Token::Or => "||".to_string(),
+            Token::Not => "!".to_string(),
             Token::Newline => "\n".to_string(),
             Token::Comment(s) => format!("//{}\n", s), // Include // prefix
             Token::Eof => "".to_string(),

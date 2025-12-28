@@ -339,6 +339,21 @@ pub enum Expression {
     /// Array of expressions: [root, third, fifth] or [C4, E4, G4]
     /// Resolved to Chord at evaluation time if all elements are notes
     Array(Vec<Expression>),
+
+    /// Logical AND: expr && expr
+    LogicalAnd {
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
+
+    /// Logical OR: expr || expr
+    LogicalOr {
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
+
+    /// Logical NOT: !expr
+    LogicalNot(Box<Expression>),
 }
 
 /// Comparison operators
@@ -346,7 +361,10 @@ pub enum Expression {
 pub enum ComparisonOp {
     Equal,
     NotEqual,
-    // Future: Less, Greater, LessEqual, GreaterEqual
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
 }
 
 /// Represents the result of evaluating an expression
@@ -412,6 +430,10 @@ impl fmt::Display for Expression {
                 let op_str = match operator {
                     ComparisonOp::Equal => "==",
                     ComparisonOp::NotEqual => "!=",
+                    ComparisonOp::Less => "<",
+                    ComparisonOp::Greater => ">",
+                    ComparisonOp::LessEqual => "<=",
+                    ComparisonOp::GreaterEqual => ">=",
                 };
                 write!(f, "{} {} {}", left, op_str, right)
             }
@@ -428,6 +450,15 @@ impl fmt::Display for Expression {
                     write!(f, "{}", elem)?;
                 }
                 write!(f, "]")
+            }
+            Expression::LogicalAnd { left, right } => {
+                write!(f, "{} && {}", left, right)
+            }
+            Expression::LogicalOr { left, right } => {
+                write!(f, "{} || {}", left, right)
+            }
+            Expression::LogicalNot(expr) => {
+                write!(f, "!{}", expr)
             }
         }
     }

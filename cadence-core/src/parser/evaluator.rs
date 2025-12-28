@@ -133,12 +133,100 @@ impl Evaluator {
             } => {
                 let left_val = self.eval_with_env(*left, env)?;
                 let right_val = self.eval_with_env(*right, env)?;
+
+                // For numeric comparisons, extract numbers
                 let result = match operator {
                     crate::parser::ast::ComparisonOp::Equal => left_val == right_val,
                     crate::parser::ast::ComparisonOp::NotEqual => left_val != right_val,
+                    crate::parser::ast::ComparisonOp::Less
+                    | crate::parser::ast::ComparisonOp::Greater
+                    | crate::parser::ast::ComparisonOp::LessEqual
+                    | crate::parser::ast::ComparisonOp::GreaterEqual => {
+                        // Extract numeric values
+                        let left_num = match &left_val {
+                            Value::Number(n) => *n as f32,
+                            _ => {
+                                return Err(anyhow!(
+                                    "Comparison requires numeric values, got {:?}",
+                                    left_val
+                                ))
+                            }
+                        };
+                        let right_num = match &right_val {
+                            Value::Number(n) => *n as f32,
+                            _ => {
+                                return Err(anyhow!(
+                                    "Comparison requires numeric values, got {:?}",
+                                    right_val
+                                ))
+                            }
+                        };
+
+                        match operator {
+                            crate::parser::ast::ComparisonOp::Less => left_num < right_num,
+                            crate::parser::ast::ComparisonOp::Greater => left_num > right_num,
+                            crate::parser::ast::ComparisonOp::LessEqual => left_num <= right_num,
+                            crate::parser::ast::ComparisonOp::GreaterEqual => left_num >= right_num,
+                            _ => unreachable!(),
+                        }
+                    }
                 };
                 Ok(Value::Boolean(result))
             }
+
+            // Logical AND with short-circuit evaluation
+            Expression::LogicalAnd { left, right } => {
+                let left_val = self.eval_with_env(*left, env)?;
+                match left_val {
+                    Value::Boolean(false) => Ok(Value::Boolean(false)), // Short-circuit
+                    Value::Boolean(true) => {
+                        let right_val = self.eval_with_env(*right, env)?;
+                        match right_val {
+                            Value::Boolean(b) => Ok(Value::Boolean(b)),
+                            _ => Err(anyhow!(
+                                "Logical AND requires boolean values, got {:?}",
+                                right_val
+                            )),
+                        }
+                    }
+                    _ => Err(anyhow!(
+                        "Logical AND requires boolean values, got {:?}",
+                        left_val
+                    )),
+                }
+            }
+
+            // Logical OR with short-circuit evaluation
+            Expression::LogicalOr { left, right } => {
+                let left_val = self.eval_with_env(*left, env)?;
+                match left_val {
+                    Value::Boolean(true) => Ok(Value::Boolean(true)), // Short-circuit
+                    Value::Boolean(false) => {
+                        let right_val = self.eval_with_env(*right, env)?;
+                        match right_val {
+                            Value::Boolean(b) => Ok(Value::Boolean(b)),
+                            _ => Err(anyhow!(
+                                "Logical OR requires boolean values, got {:?}",
+                                right_val
+                            )),
+                        }
+                    }
+                    _ => Err(anyhow!(
+                        "Logical OR requires boolean values, got {:?}",
+                        left_val
+                    )),
+                }
+            }
+
+            // Logical NOT
+            Expression::LogicalNot(expr) => {
+                let val = self.eval_with_env(*expr, env)?;
+                match val {
+                    Value::Boolean(b) => Ok(Value::Boolean(!b)),
+                    _ => Err(anyhow!("Logical NOT requires boolean value, got {:?}", val)),
+                }
+            }
+
             // Pre-evaluated value - just unwrap it
             Expression::Value(v) => Ok(*v),
 
