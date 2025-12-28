@@ -233,14 +233,18 @@ impl Interpreter {
                 // Validate expression can be evaluated (catch errors early)
                 let val = self.eval_expression(target)?;
 
-                // If we have virtual_time, this is a scheduled play (from a wait statement)
-                // Create a ScheduledEvent instead of an immediate InterpreterAction
-                if self.virtual_time > 0.0 && !*looping {
+                // Non-looping plays should use the Scheduler when there's a wait context.
+                // This avoids PlaybackEngine interference: PlaybackEngine's stop_playback()
+                // would clear track notes and interrupt scheduled notes.
+                //
+                // We detect "wait context" by checking if there are already scheduled events
+                // OR if virtual_time is > 0 (meaning a wait has occurred).
+                // For VT=0, we schedule at beat 0 so the note plays immediately via Scheduler.
+                if !*looping {
                     // Convert value to playback info for scheduled execution
                     match val.to_playback_info() {
                         Ok(events) => {
-                            // Create ScheduledEvent for the first event (single plays typically have one)
-                            // For patterns, we schedule them starting at the virtual time
+                            // Create ScheduledEvent for each event
                             let mut event_offset = 0.0;
                             for event_info in events {
                                 self.scheduled_events.push(ScheduledEvent::new(
@@ -259,12 +263,16 @@ impl Interpreter {
                             println!("Cannot schedule play: {}", e);
                         }
                     }
-                    println!(
-                        "Scheduled {} at beat {} (Track {})",
-                        val, self.virtual_time, self.current_track
-                    );
+                    if self.virtual_time > 0.0 {
+                        println!(
+                            "Scheduled {} at beat {} (Track {})",
+                            val, self.virtual_time, self.current_track
+                        );
+                    } else {
+                        println!("Playing {} (Track {})", val, self.current_track);
+                    }
                 } else {
-                    // Immediate play - use InterpreterAction for REPL to handle
+                    // Looping plays use PlaybackEngine for reactive updates
                     let queue_mode = ast_queue_mode.as_ref().map(|mode| {
                         if let Some(n_str) = mode.strip_prefix("beats:") {
                             // Parse beats:N format
@@ -287,13 +295,9 @@ impl Interpreter {
                         queue_mode,
                         track_id: self.current_track,
                         display_value: val.clone(),
-                        scheduled_beat: None, // Immediate plays don't need scheduling
+                        scheduled_beat: None,
                     });
-                    if *looping {
-                        println!("Playing {} (looping, Track {})", val, self.current_track);
-                    } else {
-                        println!("Playing {} (Track {})", val, self.current_track);
-                    }
+                    println!("Playing {} (looping, Track {})", val, self.current_track);
                 }
                 Ok(ControlFlow::Normal)
             }

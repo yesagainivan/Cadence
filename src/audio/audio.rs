@@ -132,8 +132,6 @@ impl AudioPlayerInternal {
         let mut track_frequencies: HashMap<usize, Vec<f32>> = HashMap::new();
         // Track current waveforms per track to detect changes
         let mut track_waveforms: HashMap<usize, Waveform> = HashMap::new();
-        // Track which retrigger flags we've already processed (to prevent infinite retrigger)
-        let mut track_retrigger_seen: HashMap<usize, bool> = HashMap::new();
 
         let mut master_amplitude: f32 = 0.0;
         // Master fade rate should match or exceed ADSR release time (200ms default)
@@ -171,7 +169,7 @@ impl AudioPlayerInternal {
 
                     // 1. Sync oscillators with state
                     // Check for changes in each track
-                    for (track_id, track_state) in &state.tracks {
+                    for (track_id, track_state) in &mut state.tracks {
                         let current = track_frequencies.entry(*track_id).or_default();
                         let current_waveform = track_waveforms
                             .entry(*track_id)
@@ -185,10 +183,8 @@ impl AudioPlayerInternal {
                                 .any(|(a, b)| (a - b).abs() > 0.01);
                         let waveform_changed = *current_waveform != track_state.waveform;
 
-                        // Check if retrigger is requested and we haven't already processed it
-                        let last_seen_retrigger =
-                            *track_retrigger_seen.get(track_id).unwrap_or(&false);
-                        let needs_retrigger = track_state.retrigger && !last_seen_retrigger;
+                        // Check if retrigger is requested
+                        let needs_retrigger = track_state.retrigger;
 
                         if notes_changed || waveform_changed || needs_retrigger {
                             // Fade out old oscillators for this track
@@ -210,10 +206,11 @@ impl AudioPlayerInternal {
                             // Update cache
                             *current = track_state.notes.clone();
                             *current_waveform = track_state.waveform;
-                        }
 
-                        // Track the retrigger state we've seen
-                        track_retrigger_seen.insert(*track_id, track_state.retrigger);
+                            // Reset retrigger flag AFTER processing - this is the proper fix!
+                            // Now trigger_note() can set it to true again for the next note.
+                            track_state.retrigger = false;
+                        }
                     }
 
                     // 2. Generate audio with stereo panning
