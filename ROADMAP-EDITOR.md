@@ -165,16 +165,20 @@ A web-based editor for the Cadence music programming language with live syntax h
 13. **Live coding** — `updateScript()` preserves cycle position during edits
 14. **Statement span tracking** — `SpannedStatement`/`SpannedProgram` types with byte offset tracking
 15. **Cursor-aware piano roll** — `get_events_at_position()` WASM function shows statement at cursor
-    - *Note: Uses UX heuristic to show preceding statement when cursor is in trailing whitespace/newlines*
 
 ---
 
 ## Next Steps
 
-1. **Code Cleanup** — Refactor WASM API
+1. **Piano Roll Lock** — Allow user to lock piano roll on a specific pattern
+   - Lock icon in piano roll panel header
+   - Locked state: piano roll stays on locked pattern regardless of cursor
+   - Unlocked state: follows cursor (current behavior)
+2. **Code Cleanup** — Refactor WASM API
    - Unify `get_context_at_cursor()` and `get_events_at_position()` via shared `get_visualizable_expression()` helper
    - Remove unused imports in `evaluator.rs` and `wasm.rs`
    - Remove unused `take_note` function in `pattern.rs`
-2. **Pattern Editor** — Step sequencer view for pattern mini-notation *(stretch)*
-3. **AudioWorklet** — Lower latency audio scheduling *(stretch)*
-4. **Staff Notation** — VexFlow integration for traditional notation *(stretch)*
+3. **Pattern Editor** — Step sequencer view for pattern mini-notation *(stretch)*
+4. **AudioWorklet** — Lower latency audio scheduling *(stretch)*
+5. **Staff Notation** — VexFlow integration for traditional notation *(stretch)*
+
