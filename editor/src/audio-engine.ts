@@ -227,11 +227,13 @@ export class CadenceAudioEngine {
             osc.frequency.exponentialRampToValueAtTime(40, startTime + 0.1);
             osc.connect(gainNode);
 
+            // Smooth envelope to prevent clicks
             gainNode.gain.setValueAtTime(gain * 0.8, startTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.3);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.25);
+            gainNode.gain.linearRampToValueAtTime(0, startTime + 0.35); // Fade to zero
 
             osc.start(startTime);
-            osc.stop(startTime + 0.35);
+            osc.stop(startTime + 0.4);
         } else if (drumSound === 'snare' || drumSound === 's' || drumSound === 'sd') {
             // Snare: noise burst + tone
             const bufferSize = ctx.sampleRate * 0.1;

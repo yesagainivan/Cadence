@@ -1183,7 +1183,7 @@ impl WasmInterpreter {
             drop(env_read);
 
             // Convert to rich events (with full note identity)
-            let (events, envelope, waveform) = match value {
+            let (events, envelope, waveform, pan) = match value {
                 Value::Pattern(ref pattern) => {
                     let evs = pattern
                         .to_rich_events()
@@ -1203,7 +1203,8 @@ impl WasmInterpreter {
                         .collect();
                     let env = pattern.envelope;
                     let wav = pattern.waveform.as_ref().map(|w| w.name().to_string());
-                    (evs, env, wav)
+                    let pan = pattern.pan;
+                    (evs, env, wav, pan)
                 }
                 Value::Chord(chord) => {
                     let note_infos: Vec<NoteInfo> =
@@ -1219,6 +1220,7 @@ impl WasmInterpreter {
                         }],
                         None,
                         None,
+                        None,
                     )
                 }
                 Value::Note(note) => {
@@ -1232,6 +1234,7 @@ impl WasmInterpreter {
                             duration: 1.0,
                             is_rest: false,
                         }],
+                        None,
                         None,
                         None,
                     )
@@ -1283,7 +1286,7 @@ impl WasmInterpreter {
                     track_id: *track_id,
                     envelope,
                     waveform,
-                    pan: None, // TODO: Extract pan from pattern when available
+                    pan,
                 });
             }
         }
