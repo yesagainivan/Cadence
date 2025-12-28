@@ -80,14 +80,16 @@ impl SpannedStatement {
     }
 
     /// Check if a given position (byte offset) is within this statement
+    /// Uses inclusive end bound so cursor at last character still matches
     pub fn contains(&self, position: usize) -> bool {
-        position >= self.start && position < self.end
+        position >= self.start && position <= self.end
     }
 
     /// Check if a given UTF-16 position is within this statement
     /// Use this when position comes from JavaScript/CodeMirror
+    /// Uses inclusive end bound so cursor at last character still matches
     pub fn contains_utf16(&self, position: usize) -> bool {
-        position >= self.utf16_start && position < self.utf16_end
+        position >= self.utf16_start && position <= self.utf16_end
     }
 }
 
@@ -109,54 +111,14 @@ impl SpannedProgram {
     }
 
     /// Find the statement containing the given position (byte offset).
-    /// If position is in a gap between statements (trailing whitespace/newlines),
-    /// returns the preceding statement for better UX.
     pub fn statement_at(&self, position: usize) -> Option<&SpannedStatement> {
-        // First, try exact match within a statement's span
-        if let Some(stmt) = self.statements.iter().find(|s| s.contains(position)) {
-            return Some(stmt);
-        }
-
-        // UX heuristic: if cursor is in trailing whitespace after a statement,
-        // return that statement so the piano roll doesn't suddenly go blank.
-        // Find the statement with the highest `end` that is <= position.
-        let mut best: Option<&SpannedStatement> = None;
-        for stmt in &self.statements {
-            if stmt.end <= position {
-                match best {
-                    None => best = Some(stmt),
-                    Some(prev) if stmt.end > prev.end => best = Some(stmt),
-                    Some(_) => {}
-                }
-            }
-        }
-
-        // Return if we found one - position is in trailing whitespace/newlines
-        best
+        self.statements.iter().find(|s| s.contains(position))
     }
 
     /// Find the statement containing the given UTF-16 position.
     /// Use this when position comes from JavaScript/CodeMirror.
     pub fn statement_at_utf16(&self, position: usize) -> Option<&SpannedStatement> {
-        // First, try exact match within a statement's UTF-16 span
-        if let Some(stmt) = self.statements.iter().find(|s| s.contains_utf16(position)) {
-            return Some(stmt);
-        }
-
-        // UX heuristic: if cursor is in trailing whitespace after a statement,
-        // return that statement so the piano roll doesn't suddenly go blank.
-        let mut best: Option<&SpannedStatement> = None;
-        for stmt in &self.statements {
-            if stmt.utf16_end <= position {
-                match best {
-                    None => best = Some(stmt),
-                    Some(prev) if stmt.utf16_end > prev.utf16_end => best = Some(stmt),
-                    Some(_) => {}
-                }
-            }
-        }
-
-        best
+        self.statements.iter().find(|s| s.contains_utf16(position))
     }
 
     /// Convert to regular Program (strips span info)
