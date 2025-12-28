@@ -2,11 +2,10 @@
 
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::MasterClock;
+use crate::audio::event_dispatcher::{DispatcherHandle, EventDispatcher, PatternId};
 use crate::audio::midi::MidiOutputHandle;
-use crate::audio::playback_engine::PlaybackEngine;
-use crate::audio::scheduler::{Scheduler, SchedulerHandle};
 use crate::commands::{create_registry, CommandContext, CommandResult};
-use crate::parser::{parse_statements, Interpreter, InterpreterAction};
+use crate::parser::{parse_statements, Interpreter, InterpreterAction, Value};
 use crate::repl::watcher::FileWatcher;
 use anyhow::Result;
 use colored::*;
@@ -34,12 +33,12 @@ pub struct Repl {
     clock: Arc<MasterClock>,
     /// Shared BPM as atomic for playback engines
     bpm: Arc<AtomicU64>,
-    // Map of track ID to playback engine
-    playback_engines: HashMap<usize, Arc<PlaybackEngine>>,
+    /// Unified event dispatcher (handles both one-shot and looping playback)
+    dispatcher_handle: DispatcherHandle,
+    /// Track which pattern IDs are active per track (for stopping)
+    active_patterns: HashMap<usize, PatternId>,
     /// Interpreter for scripting constructs
     interpreter: Interpreter,
-    /// Scheduler for virtual time event dispatch
-    scheduler_handle: SchedulerHandle,
 
     // Event channels
     tx_input: Sender<ReplEvent>,
@@ -64,25 +63,12 @@ impl Repl {
         let clock = Arc::new(MasterClock::new(90.0)); // Default 90 BPM
         let bpm = Arc::new(AtomicU64::new(90.0_f32.to_bits() as u64));
 
-        // Initialize with default track 1 (with MIDI support)
-        let mut playback_engines = HashMap::new();
-        let default_track = 1;
-        let tick_rx = clock.subscribe();
-        let engine = Arc::new(PlaybackEngine::new_with_midi(
-            audio_handle.clone(),
-            tick_rx,
-            bpm.clone(),
-            default_track,
-            Some(midi_handle.clone()),
-        ));
-        playback_engines.insert(default_track, engine);
-
         let (tx_input, rx_input) = unbounded();
         let (tx_watcher, rx_watcher) = unbounded();
 
-        // Spawn the scheduler thread for virtual time event dispatch
-        let scheduler_tick_rx = clock.subscribe();
-        let scheduler_handle = Scheduler::spawn(audio_handle.clone(), scheduler_tick_rx);
+        // Spawn the unified event dispatcher (replaces Scheduler + PlaybackEngines)
+        let dispatcher_tick_rx = clock.subscribe();
+        let dispatcher_handle = EventDispatcher::spawn(audio_handle.clone(), dispatcher_tick_rx);
 
         Ok(Repl {
             editor: Some(editor),
@@ -90,9 +76,9 @@ impl Repl {
             midi_handle,
             clock,
             bpm,
-            playback_engines,
+            dispatcher_handle,
+            active_patterns: HashMap::new(),
             interpreter: Interpreter::new(),
-            scheduler_handle,
             tx_input,
             rx_input,
             tx_watcher,
@@ -104,42 +90,12 @@ impl Repl {
     /// Maximum number of tracks allowed
     const MAX_TRACKS: usize = 16;
 
-    /// Get or create a playback engine for a specific track
-    fn get_engine(&mut self, track_id: usize) -> Arc<PlaybackEngine> {
-        if let Some(engine) = self.playback_engines.get(&track_id) {
-            return engine.clone();
-        }
-
-        // Check track limit before creating new track
-        if self.playback_engines.len() >= Self::MAX_TRACKS {
-            println!(
-                "{}",
-                format!(
-                    "⚠️  Maximum {} tracks reached. Cannot create track {}.",
-                    Self::MAX_TRACKS,
-                    track_id
-                )
-                .bright_yellow()
-            );
-            // Return track 1 as fallback
-            return self.playback_engines.get(&1).unwrap().clone();
-        }
-
-        let tick_rx = self.clock.subscribe();
-        let engine = Arc::new(PlaybackEngine::new_with_midi(
-            self.audio_handle.clone(),
-            tick_rx,
-            self.bpm.clone(),
-            track_id,
-            Some(self.midi_handle.clone()),
-        ));
-        self.playback_engines.insert(track_id, engine.clone());
-        engine
-    }
-
     /// List all active tracks and their status
     pub fn list_tracks(&self) -> String {
-        let mut track_ids: Vec<_> = self.playback_engines.keys().collect();
+        if self.active_patterns.is_empty() {
+            return "No active tracks".to_string();
+        }
+        let mut track_ids: Vec<_> = self.active_patterns.keys().cloned().collect();
         track_ids.sort();
 
         let mut output = format!(
@@ -147,117 +103,79 @@ impl Repl {
             track_ids.len(),
             Self::MAX_TRACKS
         );
-        for &id in &track_ids {
-            if let Some(engine) = self.playback_engines.get(id) {
-                let status = if engine.is_playing() {
-                    "▶ playing".bright_green()
-                } else {
-                    "⏹ stopped".bright_black()
-                };
-                output.push_str(&format!("  Track {}: {}\n", id, status));
-            }
+        for id in track_ids {
+            output.push_str(&format!("  Track {}: ▶ playing\n", id));
         }
         output
     }
 
+    /// Convert a Value to frequencies for one-shot playback
+    fn value_to_frequencies(value: &Value) -> Option<(Vec<f32>, Vec<crate::types::DrumSound>)> {
+        match value {
+            Value::Note(note) => Some((vec![note.frequency()], vec![])),
+            Value::Chord(chord) => {
+                let freqs: Vec<f32> = chord.notes_vec().iter().map(|n| n.frequency()).collect();
+                Some((freqs, vec![]))
+            }
+            Value::Pattern(pattern) => {
+                // For immediate play, get the first event
+                let events = pattern.to_rich_events();
+                if let Some(first) = events.first() {
+                    let freqs: Vec<f32> = first.notes.iter().map(|n| n.frequency).collect();
+                    Some((freqs, first.drums.clone()))
+                } else {
+                    Some((vec![], vec![]))
+                }
+            }
+            Value::String(s) => {
+                if let Ok(pattern) = crate::types::Pattern::parse(s) {
+                    let events = pattern.to_rich_events();
+                    if let Some(first) = events.first() {
+                        let freqs: Vec<f32> = first.notes.iter().map(|n| n.frequency).collect();
+                        Some((freqs, first.drums.clone()))
+                    } else {
+                        Some((vec![], vec![]))
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Execute an interpreter action (triggers actual audio/state changes)
     fn execute_action(&mut self, action: InterpreterAction, _ctx: &mut CommandContext) {
-        use crate::audio::playback_engine::ProgressionConfig;
-
         match action {
             InterpreterAction::PlayExpression {
                 expression,
                 looping,
-                queue_mode,
+                queue_mode: _,
                 track_id,
                 display_value,
-                scheduled_beat,
+                scheduled_beat: _,
             } => {
-                let engine = self.get_engine(track_id);
-
-                // Choose playback mode based on looping:
-                // - Looping: Use reactive playback for live variable updates
-                // - Non-looping: Use static playback from pre-evaluated value
-                //   (avoids scope issues when loop variables go out of scope)
-                let mut config = if looping {
-                    let shared_env = self.interpreter.shared_environment();
-                    ProgressionConfig::new_reactive(expression, shared_env)
-                } else {
-                    // Use static playback from the pre-evaluated value
-                    match ProgressionConfig::new_from_value(&display_value) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            println!("{} {}", "Playback error:".red(), e);
-                            return;
-                        }
-                    }
-                };
-
-                // For patterns, set the note duration based on the pattern's step timing
-                // Each step gets an equal share of the cycle (default 4 beats)
-                if let crate::parser::Value::Pattern(ref pattern) = display_value {
-                    let step_beats = pattern.step_beats();
-                    if step_beats > 0.0 {
-                        config =
-                            config.with_duration(crate::audio::clock::Duration::Beats(step_beats));
-                    }
-                }
-
-                if looping {
-                    config = config.with_looping();
-                }
-
                 // Ensure the clock is running before starting playback
                 self.clock.start();
 
-                // Determine the effective queue mode based on scheduled_beat (virtual time)
-                // If scheduled_beat is set, use it to schedule the playback via queue
-                let effective_queue_mode = if let Some(beat_offset) = scheduled_beat {
-                    // Convert beat offset to a queue mode
-                    // We use Beats(N) where N is the ceiling of the beat offset
-                    // (queue at least 1 beat in the future for any non-zero offset)
-                    let beats = (beat_offset.ceil() as u32).max(1);
-                    Some(crate::types::QueueMode::Beats(beats))
+                if looping {
+                    // For looping plays, start a loop in the dispatcher
+                    let shared_env = self.interpreter.shared_environment();
+                    let pattern_id = self
+                        .dispatcher_handle
+                        .start_loop(expression, shared_env, track_id);
+                    self.active_patterns.insert(track_id, pattern_id);
+                    println!(
+                        "🔊 Playing {} (Track {}) - live reactive!",
+                        display_value, track_id
+                    );
                 } else {
-                    queue_mode
-                };
-
-                if let Some(mode) = effective_queue_mode {
-                    if let Err(e) = engine.queue_progression_with_mode(config, mode) {
-                        println!("{} {}", "Playback error:".red(), e);
+                    // For one-shot plays, trigger immediately
+                    if let Some((freqs, drums)) = Self::value_to_frequencies(&display_value) {
+                        self.dispatcher_handle
+                            .trigger_immediate(track_id, freqs, drums);
                     } else {
-                        let mode_str = match mode {
-                            crate::audio::playback_engine::QueueMode::Beat => "next beat",
-                            crate::audio::playback_engine::QueueMode::Bar => "next bar",
-                            crate::audio::playback_engine::QueueMode::Cycle => "next cycle",
-                            crate::audio::playback_engine::QueueMode::Beats(n) => {
-                                // Use a static str for common cases, format for others
-                                match n {
-                                    1 => "1 beat",
-                                    2 => "2 beats",
-                                    4 => "4 beats",
-                                    8 => "8 beats",
-                                    16 => "16 beats",
-                                    _ => "N beats",
-                                }
-                            }
-                        };
-                        // Only print for explicit queue_mode, not for scheduled beats
-                        if queue_mode.is_some() {
-                            println!(
-                                "🔁 Queued {} for {}... (Track {})",
-                                display_value, mode_str, track_id
-                            );
-                        }
-                    }
-                } else {
-                    if let Err(e) = engine.play_progression(config) {
-                        println!("{} {}", "Playback error:".red(), e);
-                    } else {
-                        println!(
-                            "🔊 Playing {} (Track {}) - live reactive!",
-                            display_value, track_id
-                        );
+                        println!("{} Cannot play this value", "Playback error:".red());
                     }
                 }
             }
@@ -270,19 +188,13 @@ impl Repl {
                 // Already printed by interpreter
             }
             InterpreterAction::SetVolume { volume, track_id } => {
-                let engine = self.get_engine(track_id);
-                if let Err(e) = engine.set_volume(volume) {
-                    println!("{} {} (Track {})", "Volume error:".red(), e, track_id);
-                }
+                self.dispatcher_handle.set_track_volume(track_id, volume);
             }
             InterpreterAction::SetWaveform { waveform, track_id } => {
                 // Parse waveform name and set it on the audio handle
                 use crate::types::Waveform;
                 if let Some(wf) = Waveform::from_str(&waveform) {
-                    if let Err(e) = self.audio_handle.set_track_waveform(track_id, wf) {
-                        println!("{} {} (Track {})", "Waveform error:".red(), e, track_id);
-                    }
-                    // Already printed by interpreter
+                    self.dispatcher_handle.set_track_waveform(track_id, wf);
                 } else {
                     println!(
                         "{} Unknown waveform: {} (Track {})",
@@ -295,18 +207,13 @@ impl Repl {
             InterpreterAction::Stop { track_id } => {
                 match track_id {
                     Some(id) => {
-                        let engine = self.get_engine(id);
-                        if let Err(e) = engine.stop() {
-                            println!("{} {} (Track {})", "Stop error:".red(), e, id);
-                        }
+                        self.dispatcher_handle.stop_track(id);
+                        self.active_patterns.remove(&id);
                     }
                     None => {
-                        // Stop all tracks
-                        for (id, engine) in &self.playback_engines {
-                            if let Err(e) = engine.stop() {
-                                println!("{} {} (Track {})", "Stop error:".red(), e, id);
-                            }
-                        }
+                        // Stop all playback
+                        self.dispatcher_handle.stop_all();
+                        self.active_patterns.clear();
                     }
                 }
             }
@@ -330,12 +237,10 @@ impl Repl {
                 display_value,
                 scheduled_beat,
             } => {
-                let engine = self.get_engine(track_id);
-
                 // KEY FIX: If this track is already playing, SKIP the play command!
                 // The reactive expression will automatically pick up variable changes
                 // on the next beat. This is what makes hot-reload feel like the REPL.
-                if engine.is_playing() {
+                if self.active_patterns.contains_key(&track_id) {
                     // Use the pre-evaluated display_value from when the action was created
                     println!(
                         "🔄 Track {} updated: {} (reactive, no restart needed)",
@@ -408,13 +313,10 @@ impl Repl {
         });
 
         // Create command registry and context
-        // Use track 1 engine for global context for now
-        let default_engine = self.get_engine(1);
         let registry = create_registry();
         let mut ctx = CommandContext::new_with_midi(
             self.audio_handle.clone(),
             self.clock.clone(),
-            default_engine,
             self.midi_handle.clone(),
         );
 
@@ -485,12 +387,12 @@ impl Repl {
                                                     self.execute_action(action, &mut ctx);
                                                 }
 
-                                                // Send scheduled events to the scheduler thread
+                                                // Send scheduled events to the dispatcher
                                                 let scheduled_events = self.interpreter.take_scheduled_events();
                                                 if !scheduled_events.is_empty() {
                                                     // Get current beat for scheduling relative to now
                                                     let base_beat = self.clock.current_beat();
-                                                    self.scheduler_handle.schedule(scheduled_events, base_beat);
+                                                    self.dispatcher_handle.schedule(scheduled_events, base_beat);
                                                     // Start the clock if not already running
                                                     self.clock.start();
                                                 }

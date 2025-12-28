@@ -9,8 +9,7 @@ pub mod midi;
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::MasterClock;
 use crate::audio::midi::MidiOutputHandle;
-use crate::audio::playback_engine::PlaybackEngine;
-use crate::parser::{Value, eval};
+use crate::parser::{eval, Value};
 use std::sync::Arc;
 
 /// Result of executing a command
@@ -34,20 +33,14 @@ pub enum CommandResult {
 pub struct CommandContext {
     pub audio_handle: Arc<AudioPlayerHandle>,
     pub clock: Arc<MasterClock>,
-    pub playback_engine: Arc<PlaybackEngine>,
     pub midi_handle: Option<Arc<MidiOutputHandle>>,
 }
 
 impl CommandContext {
-    pub fn new(
-        audio_handle: Arc<AudioPlayerHandle>,
-        clock: Arc<MasterClock>,
-        playback_engine: Arc<PlaybackEngine>,
-    ) -> Self {
+    pub fn new(audio_handle: Arc<AudioPlayerHandle>, clock: Arc<MasterClock>) -> Self {
         Self {
             audio_handle,
             clock,
-            playback_engine,
             midi_handle: None,
         }
     }
@@ -56,13 +49,11 @@ impl CommandContext {
     pub fn new_with_midi(
         audio_handle: Arc<AudioPlayerHandle>,
         clock: Arc<MasterClock>,
-        playback_engine: Arc<PlaybackEngine>,
         midi_handle: Arc<MidiOutputHandle>,
     ) -> Self {
         Self {
             audio_handle,
             clock,
-            playback_engine,
             midi_handle: Some(midi_handle),
         }
     }

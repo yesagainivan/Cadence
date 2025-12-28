@@ -1,42 +1,13 @@
 //! Audio-related commands
 
-use crate::audio::clock::Duration;
-use crate::audio::playback_engine::ProgressionConfig;
 use crate::commands::{CommandContext, CommandResult};
 use crate::parser::Value;
 use colored::*;
 
-/// Handle `audio play progression <expr> [loop] [queue] [duration <n>]`
+/// Handle `audio play progression <expr>` - simplified for new dispatcher architecture
+/// Now plays each chord immediately using trigger_note
 pub fn cmd_audio_play_progression(args: &str, ctx: &mut CommandContext) -> CommandResult {
-    let mut rest = args;
-
-    // Parse modifiers in any order from the end
-    let mut loop_enabled = false;
-    let mut queue_enabled = false;
-    let mut duration_beats = 1.0;
-
-    loop {
-        if rest.ends_with(" loop") {
-            loop_enabled = true;
-            rest = rest.trim_end_matches(" loop").trim();
-        } else if rest.ends_with(" queue") {
-            queue_enabled = true;
-            rest = rest.trim_end_matches(" queue").trim();
-        } else {
-            break;
-        }
-    }
-
-    // Check for 'duration <n>' at the end
-    if let Some(duration_pos) = rest.rfind(" duration ") {
-        let duration_str = &rest[duration_pos + 10..];
-        if let Ok(dur) = duration_str.trim().parse::<f32>() {
-            duration_beats = dur;
-            rest = &rest[..duration_pos];
-        }
-    }
-
-    let expr_str = rest.trim();
+    let expr_str = args.trim();
 
     if expr_str.is_empty() {
         return CommandResult::Error(
@@ -57,60 +28,26 @@ pub fn cmd_audio_play_progression(args: &str, ctx: &mut CommandContext) -> Comma
                 }
             };
 
-            let frequencies_vec: Vec<Vec<f32>> = chords
-                .iter()
-                .map(|chord| chord.notes().map(|n| n.frequency()).collect())
-                .collect();
-
             let chord_count = chords.len();
 
-            // Create progression config
-            let mut config = ProgressionConfig::new(frequencies_vec)
-                .with_duration(Duration::Beats(duration_beats));
-
-            if loop_enabled {
-                config = config.with_looping();
-            }
-
-            // Start playback
-            let result = if queue_enabled {
-                ctx.playback_engine.queue_progression(config)
-            } else {
-                ctx.playback_engine.play_progression(config)
-            };
-
-            match result {
-                Ok(_) => {
-                    let msg = if loop_enabled && queue_enabled {
-                        "🔁 Queued looping progression for next beat... (use 'audio stop' to stop)"
-                            .bright_green()
-                            .to_string()
-                    } else if loop_enabled {
-                        "🔁 Looping progression... (use 'audio stop' to stop)"
-                            .bright_green()
-                            .to_string()
-                    } else if queue_enabled {
-                        format!(
-                            "🎵 Queued progression ({} chords) for next beat...",
-                            chord_count
-                        )
-                        .bright_green()
-                        .to_string()
-                    } else {
-                        format!(
-                            "🎵 Playing progression ({} chords, {:.1} BPM)...",
-                            chord_count,
-                            ctx.clock.get_bpm()
-                        )
-                        .bright_green()
-                        .to_string()
-                    };
-                    CommandResult::Message(msg)
-                }
-                Err(e) => {
-                    CommandResult::Error(format!("Failed to start progression playback: {}", e))
+            // For immediate feedback, play the first chord
+            if let Some(first_chord) = chords.first() {
+                let frequencies: Vec<f32> = first_chord.notes().map(|n| n.frequency()).collect();
+                if !frequencies.is_empty() {
+                    if let Err(e) = ctx.audio_handle.trigger_note(1, frequencies) {
+                        return CommandResult::Error(format!("Failed to play: {}", e));
+                    }
                 }
             }
+
+            CommandResult::Message(
+                format!(
+                    "🎵 Triggered first chord of progression ({} chords). Use 'play X loop' for continuous playback.",
+                    chord_count
+                )
+                .bright_green()
+                .to_string(),
+            )
         }
         Ok(_) => CommandResult::Error("Expression is not a pattern/progression".to_string()),
         Err(e) => CommandResult::Error(e.to_string()),
@@ -126,12 +63,9 @@ pub fn cmd_audio_play(args: &str, ctx: &mut CommandContext) -> CommandResult {
     match ctx.eval(args) {
         Ok(value) => match get_frequencies_from_value(&value) {
             Ok(frequencies) => {
-                if let Err(e) = ctx.audio_handle.set_notes(frequencies) {
-                    return CommandResult::Error(format!("Failed to set notes: {}", e));
-                }
-
-                if let Err(e) = ctx.audio_handle.play() {
-                    return CommandResult::Error(format!("Failed to start playback: {}", e));
+                // Use trigger_note for proper envelope attack
+                if let Err(e) = ctx.audio_handle.trigger_note(1, frequencies) {
+                    return CommandResult::Error(format!("Failed to play: {}", e));
                 }
 
                 CommandResult::Message("🔊 Audio playback started.".bright_green().to_string())
@@ -144,12 +78,9 @@ pub fn cmd_audio_play(args: &str, ctx: &mut CommandContext) -> CommandResult {
 
 /// Handle `audio stop`
 pub fn cmd_audio_stop(_args: &str, ctx: &mut CommandContext) -> CommandResult {
-    let _ = ctx.playback_engine.stop();
-    if let Err(e) = ctx.audio_handle.pause() {
-        CommandResult::Error(format!("Failed to stop audio playback: {}", e))
-    } else {
-        CommandResult::Message("🔇 Audio playback stopped.".bright_green().to_string())
-    }
+    // Clear notes on default track
+    let _ = ctx.audio_handle.set_track_notes(1, vec![]);
+    CommandResult::Message("🔇 Audio playback stopped.".bright_green().to_string())
 }
 
 /// Handle `audio volume [level]`
