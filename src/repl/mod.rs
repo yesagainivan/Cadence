@@ -158,6 +158,18 @@ impl Repl {
                 // Ensure the clock is running before starting playback
                 self.clock.start();
 
+                // Extract envelope and waveform from the pattern if present
+                if let Value::Pattern(ref pattern) = display_value {
+                    if let Some(envelope) = pattern.envelope {
+                        self.dispatcher_handle
+                            .set_track_envelope(track_id, Some(envelope));
+                    }
+                    if let Some(waveform) = pattern.waveform {
+                        self.dispatcher_handle
+                            .set_track_waveform(track_id, waveform);
+                    }
+                }
+
                 if looping {
                     // For looping plays, start a loop in the dispatcher
                     let shared_env = self.interpreter.shared_environment();

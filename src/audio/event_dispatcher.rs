@@ -19,6 +19,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
+/// Result from evaluating a pattern step - includes audio properties
+#[derive(Clone, Debug)]
+pub struct PlaybackStep {
+    pub frequencies: Vec<f32>,
+    pub drums: Vec<DrumSound>,
+    pub envelope: Option<(f32, f32, f32, f32)>,
+    pub waveform: Option<Waveform>,
+}
+
 /// Unique identifier for a looping pattern
 pub type PatternId = u64;
 
@@ -51,8 +60,8 @@ impl LoopingPattern {
         }
     }
 
-    /// Evaluate the pattern and get the current step's frequencies
-    pub fn get_current_step(&mut self) -> Result<(Vec<f32>, Vec<DrumSound>), anyhow::Error> {
+    /// Evaluate the pattern and get the current step's audio data
+    pub fn get_current_step(&mut self) -> Result<PlaybackStep, anyhow::Error> {
         let evaluator = Evaluator::new();
         let env_guard = self.env.read().map_err(|e| anyhow::anyhow!("{}", e))?;
         let value = evaluator.eval_with_env(self.expression.clone(), Some(&env_guard))?;
@@ -60,14 +69,21 @@ impl LoopingPattern {
         match value {
             Value::Note(note) => {
                 self.total_steps = 1;
-                Ok((vec![note.frequency()], vec![]))
+                Ok(PlaybackStep {
+                    frequencies: vec![note.frequency()],
+                    drums: vec![],
+                    envelope: None,
+                    waveform: None,
+                })
             }
             Value::Chord(chord) => {
                 self.total_steps = 1;
-                Ok((
-                    chord.notes_vec().iter().map(|n| n.frequency()).collect(),
-                    vec![],
-                ))
+                Ok(PlaybackStep {
+                    frequencies: chord.notes_vec().iter().map(|n| n.frequency()).collect(),
+                    drums: vec![],
+                    envelope: None,
+                    waveform: None,
+                })
             }
             Value::Pattern(pattern) => {
                 let events = pattern.to_rich_events();
@@ -76,9 +92,19 @@ impl LoopingPattern {
                 if idx < events.len() {
                     let event = &events[idx];
                     let freqs: Vec<f32> = event.notes.iter().map(|n| n.frequency).collect();
-                    Ok((freqs, event.drums.clone()))
+                    Ok(PlaybackStep {
+                        frequencies: freqs,
+                        drums: event.drums.clone(),
+                        envelope: pattern.envelope,
+                        waveform: pattern.waveform,
+                    })
                 } else {
-                    Ok((vec![], vec![]))
+                    Ok(PlaybackStep {
+                        frequencies: vec![],
+                        drums: vec![],
+                        envelope: pattern.envelope,
+                        waveform: pattern.waveform,
+                    })
                 }
             }
             Value::String(s) => {
@@ -90,9 +116,19 @@ impl LoopingPattern {
                     if idx < events.len() {
                         let event = &events[idx];
                         let freqs: Vec<f32> = event.notes.iter().map(|n| n.frequency).collect();
-                        Ok((freqs, event.drums.clone()))
+                        Ok(PlaybackStep {
+                            frequencies: freqs,
+                            drums: event.drums.clone(),
+                            envelope: pattern.envelope,
+                            waveform: pattern.waveform,
+                        })
                     } else {
-                        Ok((vec![], vec![]))
+                        Ok(PlaybackStep {
+                            frequencies: vec![],
+                            drums: vec![],
+                            envelope: pattern.envelope,
+                            waveform: pattern.waveform,
+                        })
                     }
                 } else {
                     Err(anyhow::anyhow!("Cannot play string"))
@@ -134,6 +170,8 @@ pub enum DispatcherCommand {
     SetTrackVolume(usize, f32),
     /// Set track waveform
     SetTrackWaveform(usize, Waveform),
+    /// Set track envelope (ADSR)
+    SetTrackEnvelope(usize, Option<(f32, f32, f32, f32)>),
     /// Play a one-shot note immediately (no scheduling)
     TriggerImmediate {
         track_id: usize,
@@ -213,6 +251,13 @@ impl DispatcherHandle {
         let _ = self
             .command_tx
             .send(DispatcherCommand::SetTrackWaveform(track_id, waveform));
+    }
+
+    /// Set track envelope (ADSR)
+    pub fn set_track_envelope(&self, track_id: usize, envelope: Option<(f32, f32, f32, f32)>) {
+        let _ = self
+            .command_tx
+            .send(DispatcherCommand::SetTrackEnvelope(track_id, envelope));
     }
 
     /// Shutdown the dispatcher
@@ -355,6 +400,9 @@ impl EventDispatcher {
             DispatcherCommand::SetTrackWaveform(track_id, waveform) => {
                 let _ = self.audio_handle.set_track_waveform(track_id, waveform);
             }
+            DispatcherCommand::SetTrackEnvelope(track_id, envelope) => {
+                let _ = self.audio_handle.set_track_envelope(track_id, envelope);
+            }
             DispatcherCommand::TriggerImmediate {
                 track_id,
                 frequencies,
@@ -396,12 +444,12 @@ impl EventDispatcher {
             self.last_loop_beat = tick.beat_number;
 
             // Collect pattern updates to avoid borrow issues
-            let mut updates: Vec<(usize, Vec<f32>, Vec<DrumSound>)> = Vec::new();
+            let mut updates: Vec<(usize, PlaybackStep)> = Vec::new();
 
             for pattern in self.active_loops.values_mut() {
                 match pattern.get_current_step() {
-                    Ok((frequencies, drums)) => {
-                        updates.push((pattern.track_id, frequencies, drums));
+                    Ok(step) => {
+                        updates.push((pattern.track_id, step));
                         pattern.advance();
                     }
                     Err(e) => {
@@ -411,13 +459,23 @@ impl EventDispatcher {
             }
 
             // Apply updates
-            for (track_id, frequencies, drums) in updates {
+            for (track_id, step) in updates {
+                // Apply envelope if present (enables reactive envelope updates)
+                if let Some(envelope) = step.envelope {
+                    let _ = self
+                        .audio_handle
+                        .set_track_envelope(track_id, Some(envelope));
+                }
+                // Apply waveform if present (enables reactive waveform updates)
+                if let Some(waveform) = step.waveform {
+                    let _ = self.audio_handle.set_track_waveform(track_id, waveform);
+                }
                 // Ensure audio is playing
                 let _ = self.audio_handle.play();
-                if !frequencies.is_empty() {
-                    let _ = self.audio_handle.trigger_note(track_id, frequencies);
+                if !step.frequencies.is_empty() {
+                    let _ = self.audio_handle.trigger_note(track_id, step.frequencies);
                 }
-                for drum in drums {
+                for drum in step.drums {
                     let _ = self.audio_handle.play_drum(track_id, drum);
                 }
             }
