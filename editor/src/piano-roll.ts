@@ -30,6 +30,10 @@ export class PianoRoll {
     private playheadBeat: number = 0;
     private animationFrameId: number | null = null;
 
+    // Lock state
+    private locked: boolean = false;
+    private lockedEvents: PatternEvents | null = null;
+
     constructor(canvasId: string) {
         const canvas = document.getElementById(canvasId) as HTMLCanvasElement;
         if (!canvas) {
@@ -49,6 +53,58 @@ export class PianoRoll {
 
         // Re-render on theme change
         onThemeChange(() => this.render(this.events));
+
+        // Set up lock button
+        this.setupLockButton();
+    }
+
+    /**
+     * Set up the lock button event listener
+     */
+    private setupLockButton(): void {
+        const lockBtn = document.getElementById('piano-roll-lock');
+        if (lockBtn) {
+            lockBtn.addEventListener('click', () => this.toggleLock());
+        }
+    }
+
+    /**
+     * Toggle lock state
+     */
+    public toggleLock(): void {
+        const lockBtn = document.getElementById('piano-roll-lock');
+        const unlockedIcon = lockBtn?.querySelector('.icon-unlocked') as HTMLElement;
+        const lockedIcon = lockBtn?.querySelector('.icon-locked') as HTMLElement;
+
+        if (!this.locked && this.events.length > 0) {
+            // Lock: save current state
+            this.lockedEvents = {
+                events: [...this.events],
+                beats_per_cycle: this.beatsPerCycle
+            };
+            this.locked = true;
+
+            // Update icons
+            if (unlockedIcon) unlockedIcon.style.display = 'none';
+            if (lockedIcon) lockedIcon.style.display = 'block';
+            if (lockBtn) lockBtn.classList.add('active');
+        } else {
+            // Unlock: resume following cursor
+            this.locked = false;
+            this.lockedEvents = null;
+
+            // Update icons
+            if (unlockedIcon) unlockedIcon.style.display = 'block';
+            if (lockedIcon) lockedIcon.style.display = 'none';
+            if (lockBtn) lockBtn.classList.remove('active');
+        }
+    }
+
+    /**
+     * Check if piano roll is locked
+     */
+    public isLocked(): boolean {
+        return this.locked;
     }
 
     /**
@@ -75,6 +131,9 @@ export class PianoRoll {
      * @param patternEvents - Pattern events with cycle timing info
      */
     update(patternEvents: PatternEvents): void {
+        // If locked, ignore updates
+        if (this.locked) return;
+
         this.events = patternEvents.events;
         this.beatsPerCycle = patternEvents.beats_per_cycle;
         this.calculateRange();
