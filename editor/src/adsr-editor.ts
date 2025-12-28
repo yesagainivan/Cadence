@@ -24,14 +24,14 @@ const RANGES = {
 
 /** Colors matching the editor theme */
 const COLORS = {
-    background: '#1a1a2e',
-    grid: 'rgba(255, 255, 255, 0.05)',
-    curve: '#4ecca3',
-    curveFill: 'rgba(78, 204, 163, 0.2)',
-    controlPoint: '#e94560',
-    controlPointHover: '#ff6b7a',
-    text: '#a0a0a0',
-    label: '#e94560',
+    background: '#21242b',         // --color-bg-inset
+    grid: 'rgba(255, 255, 255, 0.04)',
+    curve: '#7fb069',              // earthy green (success)
+    curveFill: 'rgba(127, 176, 105, 0.15)',
+    controlPoint: '#7099aa',       // --color-accent
+    controlPointHover: '#5a7d8d',  // --color-accent-hover
+    text: '#6b6560',               // --color-fg-subtle
+    label: '#7099aa',              // --color-accent
 };
 
 /**

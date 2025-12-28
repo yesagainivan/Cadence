@@ -7,20 +7,20 @@
 
 import type { PlayEvent, PatternEvents } from './cadence-wasm';
 
-// Note colors by pitch class (chromatic circle)
+// Note colors by pitch class - muted, earthy palette
 const PITCH_COLORS: Record<number, string> = {
-    0: '#e94560',   // C  - red
-    1: '#d63e54',   // C# - dark red
-    2: '#ff9a3c',   // D  - orange
-    3: '#e88a35',   // D# - dark orange
-    4: '#ffd166',   // E  - yellow
-    5: '#4ecca3',   // F  - teal
-    6: '#3fb892',   // F# - dark teal
-    7: '#73d0ff',   // G  - blue
-    8: '#5fb8e8',   // G# - dark blue
-    9: '#a78bfa',   // A  - purple
-    10: '#8b6ce0',  // A# - dark purple
-    11: '#f472b6',  // B  - pink
+    0: '#c9736f',   // C  - muted red
+    1: '#b86662',   // C# - dark red
+    2: '#d4a656',   // D  - warm gold
+    3: '#c49a4e',   // D# - dark gold
+    4: '#d9bf6a',   // E  - light gold
+    5: '#7fb069',   // F  - earthy green
+    6: '#6e9d5c',   // F# - dark green
+    7: '#7099aa',   // G  - blue-grey (accent)
+    8: '#5d8495',   // G# - dark blue-grey
+    9: '#9a8fbd',   // A  - muted purple
+    10: '#877baa',  // A# - dark purple
+    11: '#bf8fa3',  // B  - dusty rose
 };
 
 // Piano key properties
@@ -129,8 +129,8 @@ export class PianoRoll {
         const width = canvas.width / (window.devicePixelRatio || 1);
         const height = canvas.height / (window.devicePixelRatio || 1);
 
-        // Clear
-        ctx.fillStyle = '#1a1a2e';
+        // Clear with theme background
+        ctx.fillStyle = '#21242b';  // --color-bg-inset
         ctx.fillRect(0, 0, width, height);
 
         // Draw components
@@ -149,7 +149,7 @@ export class PianoRoll {
         const gridWidth = width - KEY_LABEL_WIDTH;
         const beatWidth = gridWidth / this.totalBeats;
 
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
         ctx.lineWidth = 1;
 
         // Vertical beat lines
@@ -170,9 +170,9 @@ export class PianoRoll {
 
             // Highlight C notes
             if (midi % 12 === 0) {
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
             } else {
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
             }
 
             ctx.beginPath();
@@ -203,10 +203,10 @@ export class PianoRoll {
 
             // Only label C notes and every few others
             if (pitchClass === 0) {
-                ctx.fillStyle = '#e8e8e8';
+                ctx.fillStyle = '#e0dcd4';  // --color-fg
                 ctx.fillText(`C${octave}`, KEY_LABEL_WIDTH - 6, y);
             } else if (pitchClass === 4 || pitchClass === 7) {
-                ctx.fillStyle = '#888';
+                ctx.fillStyle = '#6b6560';  // --color-fg-subtle
                 ctx.fillText(NOTE_NAMES[pitchClass], KEY_LABEL_WIDTH - 6, y);
             }
         }
@@ -221,13 +221,13 @@ export class PianoRoll {
         const beatWidth = gridWidth / this.totalBeats;
 
         // Header background
-        ctx.fillStyle = '#16213e';
+        ctx.fillStyle = '#282c34';  // --color-bg
         ctx.fillRect(KEY_LABEL_WIDTH, 0, width - KEY_LABEL_WIDTH, HEADER_HEIGHT);
 
         ctx.font = '11px Inter, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#888';
+        ctx.fillStyle = '#6b6560';  // --color-fg-subtle
 
         for (let beat = 0; beat < this.totalBeats; beat++) {
             const x = KEY_LABEL_WIDTH + (beat + 0.5) * beatWidth;
@@ -354,7 +354,7 @@ export class PianoRoll {
         const x = KEY_LABEL_WIDTH + wrappedBeat * beatWidth;
 
         // Draw playhead line
-        ctx.strokeStyle = '#e94560';
+        ctx.strokeStyle = '#7099aa';  // --color-accent
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(x, HEADER_HEIGHT);
@@ -362,7 +362,7 @@ export class PianoRoll {
         ctx.stroke();
 
         // Draw playhead triangle at top
-        ctx.fillStyle = '#e94560';
+        ctx.fillStyle = '#7099aa';  // --color-accent
         ctx.beginPath();
         ctx.moveTo(x, HEADER_HEIGHT);
         ctx.lineTo(x - 6, HEADER_HEIGHT - 8);

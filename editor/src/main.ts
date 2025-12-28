@@ -49,28 +49,30 @@ play cmaj
 // play invert(cmaj) // first inversion
 `;
 
-// Dark theme for CodeMirror
+// Dark theme for CodeMirror (matches style.css theme tokens)
 const darkTheme = EditorView.theme({
   '&': {
-    backgroundColor: '#1a1a2e',
-    color: '#e8e8e8',
+    backgroundColor: '#282c34',  // --color-bg
+    color: '#e0dcd4',            // --color-fg
   },
   '.cm-content': {
-    caretColor: '#e94560',
+    caretColor: '#7099aa',       // --color-accent
   },
   '.cm-cursor': {
-    borderLeftColor: '#e94560',
+    borderLeftColor: '#7099aa',  // --color-accent
+    borderLeftWidth: '2px',
   },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
-    backgroundColor: 'rgba(233, 69, 96, 0.3)',
+    backgroundColor: 'rgba(112, 153, 170, 0.25)',  // accent with opacity
   },
   '.cm-gutters': {
-    backgroundColor: '#16213e',
-    color: '#5c6370',
+    backgroundColor: '#282c34',  // --color-bg
+    color: '#6b6560',            // --color-fg-subtle
     border: 'none',
   },
   '.cm-activeLineGutter': {
-    backgroundColor: '#0f3460',
+    backgroundColor: '#32363e',  // --color-bg-elevated
+    color: '#9a958e',            // --color-fg-muted
   },
   '.cm-activeLine': {
     backgroundColor: 'rgba(255, 255, 255, 0.03)',
@@ -215,12 +217,19 @@ function validateCode(view: EditorView): ReturnType<typeof parseCode> | null {
   const result = parseCode(code);
 
   if (statusEl) {
+    // Update status dot color based on result
+    const statusDot = statusEl.querySelector('.status-dot') as HTMLElement | null;
+
     if (result.success) {
-      statusEl.textContent = '✓ Valid';
-      statusEl.style.color = '#4ecca3';
+      statusEl.innerHTML = '<span class="status-dot"></span>Valid';
+      if (statusDot || statusEl.querySelector('.status-dot')) {
+        (statusEl.querySelector('.status-dot') as HTMLElement).style.backgroundColor = '#7fb069'; // --color-success
+      }
     } else {
-      statusEl.textContent = `✗ ${result.error || 'Parse error'}`;
-      statusEl.style.color = '#e94560';
+      statusEl.innerHTML = `<span class="status-dot"></span>${result.error || 'Parse error'}`;
+      if (statusEl.querySelector('.status-dot')) {
+        (statusEl.querySelector('.status-dot') as HTMLElement).style.backgroundColor = '#c9736f'; // --color-error
+      }
     }
   }
 
@@ -258,9 +267,9 @@ async function init(): Promise<void> {
   log('Loading WASM...');
   try {
     await initWasm();
-    log('✓ WASM loaded successfully');
+    log('WASM loaded');
   } catch (e) {
-    log(`✗ WASM failed to load: ${e}`);
+    log(`WASM failed: ${e}`);
     console.error('WASM init error:', e);
   }
 
@@ -269,9 +278,9 @@ async function init(): Promise<void> {
   // Initialize piano roll
   try {
     pianoRoll = new PianoRoll('piano-roll');
-    log('✓ Piano roll initialized');
+    log('Piano roll initialized');
   } catch (e) {
-    log(`⚠ Piano roll failed: ${e}`);
+    log(`Piano roll failed: ${e}`);
   }
 
   // Initialize properties panel
@@ -384,9 +393,9 @@ async function init(): Promise<void> {
 
 
 
-    log('✓ Properties panel initialized');
+    log('Properties panel initialized');
   } catch (e) {
-    log(`⚠ Properties panel failed: ${e}`);
+    log(`Properties panel failed: ${e}`);
   }
 
   // Validate initial code and update piano roll
@@ -399,7 +408,7 @@ async function init(): Promise<void> {
     const code = editor.state.doc.toString();
 
     // Play script reactively
-    log('▶ Playing...');
+    log('Playing...');
     audioEngine.playScript(code);
 
     // Start playhead animation
@@ -415,7 +424,7 @@ async function init(): Promise<void> {
   const stopBtn = document.getElementById('stop-btn');
   stopBtn?.addEventListener('click', () => {
     audioEngine.stop();
-    log('■ Stopped');
+    log('Stopped');
 
     // Stop playhead animation
     if (pianoRoll) {
@@ -434,8 +443,29 @@ async function init(): Promise<void> {
     audioEngine.setTempo(bpm);
   });
 
+  // Theme toggle
+  const themeToggle = document.getElementById('theme-toggle');
+  const savedTheme = localStorage.getItem('cadence-theme');
+  if (savedTheme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+
+  themeToggle?.addEventListener('click', () => {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+
+    if (newTheme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+
+    localStorage.setItem('cadence-theme', newTheme);
+    log(`Theme: ${newTheme}`);
+  });
+
   // Initial log
-  log('🎵 Cadence Editor initialized');
+  log('Cadence Editor initialized');
   log('Ready to make music!');
 
   // Focus editor

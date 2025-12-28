@@ -203,7 +203,7 @@ let wide_lead = "G5 E5 C5".env("pluck").pan(75)  // Right-ish lead
 // 📚 SECTION 12: PLAYBACK CONTROLS
 // ═══════════════════════════════════════════════════════════════════════════
 
-tempo 60  // BPM
+tempo 90  // BPM
 
 // play <pattern> - plays once
 // play <pattern> loop - infinite loop
@@ -246,7 +246,7 @@ let pads = slow(progression, 2).env(11, 20, 80, 50).wave("sine")
 // Bass following root notes
 let bass_pattern = "C2 A1 F1 G1"
 let bass_pattern = "C2 D1 B1 F1"
-let bass = bass_pattern.slow(2).wave("triangle")
+let bass = bass_pattern.slow(2).wave("sine")
 
 // Arpeggiated shimmer layer
 let arp_notes = "C4 E4 G4 C5 G4 E4 D D"
@@ -261,17 +261,17 @@ let lead = "G5 _ E5 _ C5 _ D5 _".fast(2).env("pluck").rotate(0).pan(10)
 let ping = "C5 _ D5 _ E _ C".fast(1).env(80, 61, 0, 15);
 
 // Rhythmic pulse with rests
-let pulse = "C3 _ _ C3 _ C3 _ _".wave("square").env(5, 20, 0, 50).pan(60)
+let pulse = "C4 _ _ C4 _ C4 _ _".wave("sine").env(5, 20, 0, 50).pan(60)
 
 // --- The Arrangement ---
 
 // Layer 1: Foundation (Pads)
 track 1 play pads loop
-track 1 volume 30
+track 1 volume 1
 
 // Layer 2: Low End (Bass)  
 track 2 play bass loop
-track 2 volume 30
+track 2 volume 10
 
 // Layer 3: Texture (Shimmer)
 // track 3 play shimmer + 12 loop
@@ -282,12 +282,22 @@ track 4 play lead loop
 track 4 volume 4
 
 // Layer 5: Rhythm (Pulse)
-track 5 play pulse.wave("triangle") loop
-track 5 volume 10
+track 5 play pulse loop
+track 5 volume 6
 
-on 6 {play "C5".env(70, 100, 59, 30) loop volume 6}
+// on 6 {play "C5".env(70, 100, 59, 30) loop volume 1}
 
-on 7 {play ping loop volume 4}
+// on 7 play ping loop volume 2
+// on 7 {play ping loop volume 4}
+
+on 8 {play "k _ k _".env(1,1,1,1) loop volume 20}
+on 9 {play "_ c _ c".env(1,1,1,1).pan(45) loop volume 60}
+// on 9 {play "_ s _ s".env(1,1,1,1).pan(40) loop volume 10}
+// on 10 {play "[hh hh]".pan(70) loop volume 5}
+on 11 {play "[hh*8]".pan(42) loop volume 10}
+// on 11 {play "[[hh _ hh]*8]".pan(70) loop volume 5}
+
+on 10 stop
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 🧪 EXPERIMENTS - Try these while it's playing!

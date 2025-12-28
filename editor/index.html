@@ -3,22 +3,47 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cadence Editor</title>
+  <title>Cadence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
 </head>
 
 <body>
   <div id="app">
     <header class="editor-header">
-      <h1>🎵 Cadence</h1>
+      <div class="logo">
+        <img src="/logo.svg" alt="Cadence" class="logo-icon" width="24" height="24" />
+        <span class="logo-text">Cadence</span>
+      </div>
       <div class="controls">
-        <button id="play-btn" class="btn btn-primary">▶ Play</button>
-        <button id="stop-btn" class="btn btn-secondary">■ Stop</button>
+        <button id="theme-toggle" class="btn btn-icon" title="Toggle theme">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5" />
+            <path
+              d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+          </svg>
+        </button>
+        <button id="play-btn" class="btn btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5,3 19,12 5,21" />
+          </svg>
+          Play
+        </button>
+        <button id="stop-btn" class="btn btn-secondary">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="4" y="4" width="16" height="16" rx="2" />
+          </svg>
+          Stop
+        </button>
         <label class="tempo-control">
-          <span>Tempo:</span>
+          <span>BPM</span>
           <input type="range" id="tempo" min="60" max="200" value="120" />
-          <span id="tempo-value">120</span> BPM
+          <span id="tempo-value">120</span>
         </label>
       </div>
     </header>
@@ -36,12 +61,15 @@
         </div>
         <div class="panel" id="properties-panel">
           <h3>Properties</h3>
-          <p class="placeholder">Select an element to edit its properties</p>
+          <p class="placeholder">Select an element to edit</p>
         </div>
       </aside>
     </main>
     <footer class="editor-footer">
-      <span id="status">Ready</span>
+      <span id="status">
+        <span class="status-dot"></span>
+        Ready
+      </span>
       <span id="cursor-pos">Ln 1, Col 1</span>
     </footer>
   </div>
