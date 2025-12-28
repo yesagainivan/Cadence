@@ -33,7 +33,7 @@ pub struct PlaybackStep {
 /// Unique identifier for a looping pattern
 pub type PatternId = u64;
 
-/// Configuration for a looping pattern
+/// Configuration for a looping pattern (TidalCycles-style cycle tracking)
 #[derive(Clone, Debug)]
 pub struct LoopingPattern {
     /// Expression to evaluate each step (for reactive updates)
@@ -42,153 +42,169 @@ pub struct LoopingPattern {
     pub env: SharedEnvironment,
     /// Track ID
     pub track_id: usize,
-    /// Current step index within the pattern
-    pub step_index: usize,
-    /// Total number of steps (cached from last evaluation)
-    pub total_steps: usize,
-    /// Current cycle number
-    pub cycle: usize,
-    /// Accumulated beat time since last step
-    pub beat_accumulator: f32,
-    /// Duration of current step in beats (cached)
-    pub current_step_duration: f32,
+    /// Beat when this pattern started (for calculating cycle position)
+    pub start_beat: f64,
+    /// Last step index we triggered (to detect transitions)
+    pub last_triggered_step: Option<usize>,
+    /// Cached pattern data: (total_steps, beats_per_cycle, envelope, waveform)
+    pub cached_pattern_info: Option<(usize, f32, Option<(f32, f32, f32, f32)>, Option<Waveform>)>,
 }
 
 impl LoopingPattern {
-    pub fn new(expression: Expression, env: SharedEnvironment, track_id: usize) -> Self {
+    pub fn new(
+        expression: Expression,
+        env: SharedEnvironment,
+        track_id: usize,
+        start_beat: f64,
+    ) -> Self {
         Self {
             expression,
             env,
             track_id,
-            step_index: 0,
-            total_steps: 1,
-            cycle: 0,
-            // Start with 1.0 so first step triggers immediately on first tick
-            beat_accumulator: 1.0,
-            current_step_duration: 1.0, // Default: 1 beat per step
+            start_beat,
+            last_triggered_step: None,
+            cached_pattern_info: None,
         }
     }
 
-    /// Check if it's time to advance to the next step
-    /// Returns true if enough beats have accumulated
-    pub fn should_advance(&self) -> bool {
-        self.beat_accumulator >= self.current_step_duration
-    }
-
-    /// Accumulate beat time (call this on each tick)
-    pub fn accumulate(&mut self, beats: f32) {
-        self.beat_accumulator += beats;
-    }
-
-    /// Reset accumulator after advancing
-    pub fn reset_accumulator(&mut self) {
-        // Keep fractional beats for accurate timing
-        self.beat_accumulator -= self.current_step_duration;
-        if self.beat_accumulator < 0.0 {
-            self.beat_accumulator = 0.0;
-        }
-    }
-
-    /// Evaluate the pattern and get the current step's audio data
-    pub fn get_current_step(&mut self) -> Result<PlaybackStep, anyhow::Error> {
+    /// Calculate the current step index based on beat position
+    /// Returns (step_index, is_new_step, playback_data) if we should trigger
+    pub fn get_step_at_beat(
+        &mut self,
+        current_beat: f64,
+    ) -> Result<Option<PlaybackStep>, anyhow::Error> {
         let evaluator = Evaluator::new();
         let env_guard = self.env.read().map_err(|e| anyhow::anyhow!("{}", e))?;
         let value = evaluator.eval_with_env(self.expression.clone(), Some(&env_guard))?;
 
         match value {
             Value::Note(note) => {
-                self.total_steps = 1;
-                self.current_step_duration = 1.0;
-                Ok(PlaybackStep {
-                    frequencies: vec![note.frequency()],
-                    drums: vec![],
-                    envelope: None,
-                    waveform: None,
-                    duration_beats: 1.0,
-                })
+                // Single note: trigger once per beat
+                let beats_elapsed = current_beat - self.start_beat;
+                let current_step = beats_elapsed.floor() as usize;
+
+                if self.last_triggered_step != Some(current_step) {
+                    self.last_triggered_step = Some(current_step);
+                    Ok(Some(PlaybackStep {
+                        frequencies: vec![note.frequency()],
+                        drums: vec![],
+                        envelope: None,
+                        waveform: None,
+                        duration_beats: 1.0,
+                    }))
+                } else {
+                    Ok(None)
+                }
             }
             Value::Chord(chord) => {
-                self.total_steps = 1;
-                self.current_step_duration = 1.0;
-                Ok(PlaybackStep {
-                    frequencies: chord.notes_vec().iter().map(|n| n.frequency()).collect(),
-                    drums: vec![],
-                    envelope: None,
-                    waveform: None,
-                    duration_beats: 1.0,
-                })
+                // Single chord: trigger once per beat
+                let beats_elapsed = current_beat - self.start_beat;
+                let current_step = beats_elapsed.floor() as usize;
+
+                if self.last_triggered_step != Some(current_step) {
+                    self.last_triggered_step = Some(current_step);
+                    Ok(Some(PlaybackStep {
+                        frequencies: chord.notes_vec().iter().map(|n| n.frequency()).collect(),
+                        drums: vec![],
+                        envelope: None,
+                        waveform: None,
+                        duration_beats: 1.0,
+                    }))
+                } else {
+                    Ok(None)
+                }
             }
             Value::Pattern(pattern) => {
                 let events = pattern.to_rich_events();
-                self.total_steps = events.len().max(1);
-                let idx = self.step_index % self.total_steps;
-                if idx < events.len() {
-                    let event = &events[idx];
-                    let freqs: Vec<f32> = event.notes.iter().map(|n| n.frequency).collect();
-                    let duration = event.duration;
-                    self.current_step_duration = duration;
-                    Ok(PlaybackStep {
-                        frequencies: freqs,
-                        drums: event.drums.clone(),
-                        envelope: pattern.envelope,
-                        waveform: pattern.waveform,
-                        duration_beats: duration,
-                    })
-                } else {
-                    let step_duration = pattern.step_beats();
-                    self.current_step_duration = step_duration;
-                    Ok(PlaybackStep {
-                        frequencies: vec![],
-                        drums: vec![],
-                        envelope: pattern.envelope,
-                        waveform: pattern.waveform,
-                        duration_beats: step_duration,
-                    })
+                let beats_per_cycle = pattern.beats_per_cycle;
+
+                // Calculate position within the cycle
+                let beats_elapsed = (current_beat - self.start_beat) as f32;
+                let cycle_position = beats_elapsed % beats_per_cycle;
+
+                // Find which step we're currently in
+                let mut accumulated = 0.0f32;
+                let mut current_step = 0;
+                for (i, event) in events.iter().enumerate() {
+                    if cycle_position >= accumulated
+                        && cycle_position < accumulated + event.duration
+                    {
+                        current_step = i;
+                        break;
+                    }
+                    accumulated += event.duration;
+                    // If we've gone past all events, we're in the last one
+                    if i == events.len() - 1 {
+                        current_step = i;
+                    }
                 }
-            }
-            Value::String(s) => {
-                // Try parsing as pattern
-                if let Ok(pattern) = crate::types::Pattern::parse(&s) {
-                    let events = pattern.to_rich_events();
-                    self.total_steps = events.len().max(1);
-                    let idx = self.step_index % self.total_steps;
-                    if idx < events.len() {
-                        let event = &events[idx];
-                        let freqs: Vec<f32> = event.notes.iter().map(|n| n.frequency).collect();
-                        let duration = event.duration;
-                        self.current_step_duration = duration;
-                        Ok(PlaybackStep {
-                            frequencies: freqs,
+
+                // Only trigger if this is a new step
+                if self.last_triggered_step != Some(current_step) {
+                    self.last_triggered_step = Some(current_step);
+
+                    if current_step < events.len() {
+                        let event = &events[current_step];
+                        Ok(Some(PlaybackStep {
+                            frequencies: event.notes.iter().map(|n| n.frequency).collect(),
                             drums: event.drums.clone(),
                             envelope: pattern.envelope,
                             waveform: pattern.waveform,
-                            duration_beats: duration,
-                        })
+                            duration_beats: event.duration,
+                        }))
                     } else {
-                        let step_duration = pattern.step_beats();
-                        self.current_step_duration = step_duration;
-                        Ok(PlaybackStep {
-                            frequencies: vec![],
-                            drums: vec![],
-                            envelope: pattern.envelope,
-                            waveform: pattern.waveform,
-                            duration_beats: step_duration,
-                        })
+                        Ok(None)
+                    }
+                } else {
+                    Ok(None) // Same step, don't re-trigger
+                }
+            }
+            Value::String(s) => {
+                if let Ok(pattern) = crate::types::Pattern::parse(&s) {
+                    let events = pattern.to_rich_events();
+                    let beats_per_cycle = pattern.beats_per_cycle;
+
+                    let beats_elapsed = (current_beat - self.start_beat) as f32;
+                    let cycle_position = beats_elapsed % beats_per_cycle;
+
+                    let mut accumulated = 0.0f32;
+                    let mut current_step = 0;
+                    for (i, event) in events.iter().enumerate() {
+                        if cycle_position >= accumulated
+                            && cycle_position < accumulated + event.duration
+                        {
+                            current_step = i;
+                            break;
+                        }
+                        accumulated += event.duration;
+                        if i == events.len() - 1 {
+                            current_step = i;
+                        }
+                    }
+
+                    if self.last_triggered_step != Some(current_step) {
+                        self.last_triggered_step = Some(current_step);
+
+                        if current_step < events.len() {
+                            let event = &events[current_step];
+                            Ok(Some(PlaybackStep {
+                                frequencies: event.notes.iter().map(|n| n.frequency).collect(),
+                                drums: event.drums.clone(),
+                                envelope: pattern.envelope,
+                                waveform: pattern.waveform,
+                                duration_beats: event.duration,
+                            }))
+                        } else {
+                            Ok(None)
+                        }
+                    } else {
+                        Ok(None)
                     }
                 } else {
                     Err(anyhow::anyhow!("Cannot play string"))
                 }
             }
             _ => Err(anyhow::anyhow!("Cannot play this type")),
-        }
-    }
-
-    /// Advance to the next step
-    pub fn advance(&mut self) {
-        self.step_index += 1;
-        if self.step_index >= self.total_steps && self.total_steps > 0 {
-            self.step_index = 0;
-            self.cycle += 1;
         }
     }
 }
@@ -332,8 +348,6 @@ pub struct EventDispatcher {
     current_beat: f64,
     /// Is running flag
     is_running: Arc<AtomicBool>,
-    /// Last beat when loops were stepped (to avoid double-stepping)
-    last_loop_beat: u64,
 }
 
 impl EventDispatcher {
@@ -354,7 +368,6 @@ impl EventDispatcher {
             tick_rx,
             current_beat: 0.0,
             is_running: is_running_clone,
-            last_loop_beat: u64::MAX, // Start with MAX so first beat triggers
         };
 
         thread::spawn(move || dispatcher.run_loop());
@@ -407,8 +420,11 @@ impl EventDispatcher {
             } => {
                 // Stop any existing loops on this track first
                 self.active_loops.retain(|_, p| p.track_id != track_id);
-                self.active_loops
-                    .insert(id, LoopingPattern::new(expression, env, track_id));
+                // Start new loop at current beat position
+                self.active_loops.insert(
+                    id,
+                    LoopingPattern::new(expression, env, track_id, self.current_beat),
+                );
             }
             DispatcherCommand::StopLoop(id) => {
                 if let Some(pattern) = self.active_loops.remove(&id) {
@@ -484,57 +500,45 @@ impl EventDispatcher {
             }
         }
 
-        // 2. Step looping patterns based on beat accumulation
-        // This supports fast() and slow() by tracking accumulated beat time
-        if tick.beat_number != self.last_loop_beat && tick.is_beat_boundary() {
-            self.last_loop_beat = tick.beat_number;
+        // 2. Check looping patterns on EVERY tick (not just beat boundaries)
+        // This enables fast() patterns to trigger at sub-beat intervals
+        // The pattern tracks which step was last triggered and only fires when
+        // the cycle position crosses into a new step.
+        let mut updates: Vec<(usize, PlaybackStep)> = Vec::new();
 
-            // Accumulate 1 beat for all active loops
-            for pattern in self.active_loops.values_mut() {
-                pattern.accumulate(1.0);
-            }
-
-            // Collect pattern updates - may have multiple per pattern for fast() patterns
-            let mut updates: Vec<(usize, PlaybackStep)> = Vec::new();
-
-            for pattern in self.active_loops.values_mut() {
-                // Process as many steps as needed (for fast patterns that have
-                // multiple steps per beat)
-                while pattern.should_advance() {
-                    match pattern.get_current_step() {
-                        Ok(step) => {
-                            updates.push((pattern.track_id, step));
-                            pattern.advance();
-                            pattern.reset_accumulator();
-                        }
-                        Err(e) => {
-                            eprintln!("Loop evaluation error: {}", e);
-                            break;
-                        }
-                    }
+        for pattern in self.active_loops.values_mut() {
+            match pattern.get_step_at_beat(tick.beat) {
+                Ok(Some(step)) => {
+                    updates.push((pattern.track_id, step));
+                }
+                Ok(None) => {
+                    // No new step to trigger (still in same step)
+                }
+                Err(e) => {
+                    eprintln!("Loop evaluation error: {}", e);
                 }
             }
+        }
 
-            // Apply updates
-            for (track_id, step) in updates {
-                // Apply envelope if present (enables reactive envelope updates)
-                if let Some(envelope) = step.envelope {
-                    let _ = self
-                        .audio_handle
-                        .set_track_envelope(track_id, Some(envelope));
-                }
-                // Apply waveform if present (enables reactive waveform updates)
-                if let Some(waveform) = step.waveform {
-                    let _ = self.audio_handle.set_track_waveform(track_id, waveform);
-                }
-                // Ensure audio is playing
-                let _ = self.audio_handle.play();
-                if !step.frequencies.is_empty() {
-                    let _ = self.audio_handle.trigger_note(track_id, step.frequencies);
-                }
-                for drum in step.drums {
-                    let _ = self.audio_handle.play_drum(track_id, drum);
-                }
+        // Apply updates
+        for (track_id, step) in updates {
+            // Apply envelope if present (enables reactive envelope updates)
+            if let Some(envelope) = step.envelope {
+                let _ = self
+                    .audio_handle
+                    .set_track_envelope(track_id, Some(envelope));
+            }
+            // Apply waveform if present (enables reactive waveform updates)
+            if let Some(waveform) = step.waveform {
+                let _ = self.audio_handle.set_track_waveform(track_id, waveform);
+            }
+            // Ensure audio is playing
+            let _ = self.audio_handle.play();
+            if !step.frequencies.is_empty() {
+                let _ = self.audio_handle.trigger_note(track_id, step.frequencies);
+            }
+            for drum in step.drums {
+                let _ = self.audio_handle.play_drum(track_id, drum);
             }
         }
     }
