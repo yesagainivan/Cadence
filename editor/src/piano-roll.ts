@@ -6,22 +6,7 @@
  */
 
 import type { PlayEvent, PatternEvents } from './cadence-wasm';
-
-// Note colors by pitch class - muted, earthy palette
-const PITCH_COLORS: Record<number, string> = {
-    0: '#c9736f',   // C  - muted red
-    1: '#b86662',   // C# - dark red
-    2: '#d4a656',   // D  - warm gold
-    3: '#c49a4e',   // D# - dark gold
-    4: '#d9bf6a',   // E  - light gold
-    5: '#7fb069',   // F  - earthy green
-    6: '#6e9d5c',   // F# - dark green
-    7: '#7099aa',   // G  - blue-grey (accent)
-    8: '#5d8495',   // G# - dark blue-grey
-    9: '#9a8fbd',   // A  - muted purple
-    10: '#877baa',  // A# - dark purple
-    11: '#bf8fa3',  // B  - dusty rose
-};
+import { getTheme, onThemeChange } from './theme';
 
 // Piano key properties
 const KEY_LABEL_WIDTH = 40;
@@ -61,6 +46,9 @@ export class PianoRoll {
         // Handle resize
         this.resize();
         window.addEventListener('resize', () => this.resize());
+
+        // Re-render on theme change
+        onThemeChange(() => this.render(this.events));
     }
 
     /**
@@ -130,7 +118,8 @@ export class PianoRoll {
         const height = canvas.height / (window.devicePixelRatio || 1);
 
         // Clear with theme background
-        ctx.fillStyle = '#21242b';  // --color-bg-inset
+        const colors = getTheme().colors;
+        ctx.fillStyle = colors.bgInset;
         ctx.fillRect(0, 0, width, height);
 
         // Draw components
@@ -149,7 +138,8 @@ export class PianoRoll {
         const gridWidth = width - KEY_LABEL_WIDTH;
         const beatWidth = gridWidth / this.totalBeats;
 
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        const colors = getTheme().colors;
+        ctx.strokeStyle = colors.border;
         ctx.lineWidth = 1;
 
         // Vertical beat lines
@@ -170,9 +160,9 @@ export class PianoRoll {
 
             // Highlight C notes
             if (midi % 12 === 0) {
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.strokeStyle = colors.borderSubtle;
             } else {
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+                ctx.strokeStyle = colors.bgHover;
             }
 
             ctx.beginPath();
@@ -196,6 +186,7 @@ export class PianoRoll {
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
 
+        const colors = getTheme().colors;
         for (let midi = this.minNote; midi < this.maxNote; midi++) {
             const pitchClass = midi % 12;
             const octave = Math.floor(midi / 12) - 1;
@@ -203,10 +194,10 @@ export class PianoRoll {
 
             // Only label C notes and every few others
             if (pitchClass === 0) {
-                ctx.fillStyle = '#e0dcd4';  // --color-fg
+                ctx.fillStyle = colors.fg;
                 ctx.fillText(`C${octave}`, KEY_LABEL_WIDTH - 6, y);
             } else if (pitchClass === 4 || pitchClass === 7) {
-                ctx.fillStyle = '#6b6560';  // --color-fg-subtle
+                ctx.fillStyle = colors.fgSubtle;
                 ctx.fillText(NOTE_NAMES[pitchClass], KEY_LABEL_WIDTH - 6, y);
             }
         }
@@ -221,13 +212,14 @@ export class PianoRoll {
         const beatWidth = gridWidth / this.totalBeats;
 
         // Header background
-        ctx.fillStyle = '#282c34';  // --color-bg
+        const colors = getTheme().colors;
+        ctx.fillStyle = colors.bg;
         ctx.fillRect(KEY_LABEL_WIDTH, 0, width - KEY_LABEL_WIDTH, HEADER_HEIGHT);
 
         ctx.font = '11px Inter, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#6b6560';  // --color-fg-subtle
+        ctx.fillStyle = colors.fgSubtle;
 
         for (let beat = 0; beat < this.totalBeats; beat++) {
             const x = KEY_LABEL_WIDTH + (beat + 0.5) * beatWidth;
@@ -258,8 +250,9 @@ export class PianoRoll {
                 const y = HEADER_HEIGHT + (this.maxNote - note.midi - 1) * noteHeight;
                 const h = noteHeight - 2;
 
-                // Note color based on pitch class
-                const color = PITCH_COLORS[note.pitch_class] || '#888';
+                // Note color based on pitch class from theme
+                const noteColors = getTheme().colors.noteColors;
+                const color = noteColors[note.pitch_class] || getTheme().colors.fgMuted;
 
                 // Draw note rectangle with rounded corners
                 ctx.fillStyle = color;
@@ -354,7 +347,8 @@ export class PianoRoll {
         const x = KEY_LABEL_WIDTH + wrappedBeat * beatWidth;
 
         // Draw playhead line
-        ctx.strokeStyle = '#7099aa';  // --color-accent
+        const colors = getTheme().colors;
+        ctx.strokeStyle = colors.accent;
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(x, HEADER_HEIGHT);
@@ -362,7 +356,7 @@ export class PianoRoll {
         ctx.stroke();
 
         // Draw playhead triangle at top
-        ctx.fillStyle = '#7099aa';  // --color-accent
+        ctx.fillStyle = colors.accent;
         ctx.beginPath();
         ctx.moveTo(x, HEADER_HEIGHT);
         ctx.lineTo(x - 6, HEADER_HEIGHT - 8);

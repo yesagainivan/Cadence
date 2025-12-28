@@ -22,17 +22,7 @@ const RANGES = {
     release: { min: 1, max: 1000, unit: 'ms' },
 };
 
-/** Colors matching the editor theme */
-const COLORS = {
-    background: '#21242b',         // --color-bg-inset
-    grid: 'rgba(255, 255, 255, 0.04)',
-    curve: '#7fb069',              // earthy green (success)
-    curveFill: 'rgba(127, 176, 105, 0.15)',
-    controlPoint: '#7099aa',       // --color-accent
-    controlPointHover: '#5a7d8d',  // --color-accent-hover
-    text: '#6b6560',               // --color-fg-subtle
-    label: '#7099aa',              // --color-accent
-};
+import { getTheme, onThemeChange } from './theme';
 
 /**
  * Interactive ADSR Envelope Editor
@@ -84,6 +74,9 @@ export class ADSREditor {
         // Handle resize
         const resizeObserver = new ResizeObserver(() => this.resize());
         resizeObserver.observe(container);
+
+        // Re-render on theme change
+        onThemeChange(() => this.render());
     }
 
     /**
@@ -262,14 +255,15 @@ export class ADSREditor {
      */
     private render(): void {
         const ctx = this.ctx;
+        const colors = getTheme().colors;
         const plotHeight = this.height - this.padding.top - this.padding.bottom;
 
         // Clear
-        ctx.fillStyle = COLORS.background;
+        ctx.fillStyle = colors.bgInset;
         ctx.fillRect(0, 0, this.width, this.height);
 
         // Grid lines
-        ctx.strokeStyle = COLORS.grid;
+        ctx.strokeStyle = colors.border;
         ctx.lineWidth = 1;
         for (let i = 0; i <= 4; i++) {
             const y = this.padding.top + (plotHeight * i) / 4;
@@ -284,8 +278,11 @@ export class ADSREditor {
         const startX = this.padding.left;
         const startY = this.padding.top + plotHeight;
 
+        // Compute curve fill color with transparency
+        const curveFillColor = colors.success + '26'; // hex alpha ~15%
+
         // Draw filled area
-        ctx.fillStyle = COLORS.curveFill;
+        ctx.fillStyle = curveFillColor;
         ctx.beginPath();
         ctx.moveTo(startX, startY);
         ctx.lineTo(points.attack.x, points.attack.y);
@@ -297,7 +294,7 @@ export class ADSREditor {
         ctx.fill();
 
         // Draw curve line
-        ctx.strokeStyle = COLORS.curve;
+        ctx.strokeStyle = colors.success;
         ctx.lineWidth = 2;
         ctx.lineJoin = 'round';
         ctx.beginPath();
@@ -312,14 +309,14 @@ export class ADSREditor {
         const controlRadius = 5;
         for (const [name, point] of Object.entries(points)) {
             const isActive = this.dragging === name || this.hovered === name;
-            ctx.fillStyle = isActive ? COLORS.controlPointHover : COLORS.controlPoint;
+            ctx.fillStyle = isActive ? colors.accentHover : colors.accent;
             ctx.beginPath();
             ctx.arc(point.x, point.y, isActive ? controlRadius + 2 : controlRadius, 0, Math.PI * 2);
             ctx.fill();
         }
 
         // Labels
-        ctx.fillStyle = COLORS.text;
+        ctx.fillStyle = colors.fgSubtle;
         ctx.font = '10px Inter, sans-serif';
         ctx.textAlign = 'center';
 

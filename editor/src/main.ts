@@ -6,7 +6,7 @@
  */
 
 import './style.css';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightActiveLine } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
@@ -17,10 +17,14 @@ import { initWasm, parseCode, isWasmReady, getEventsAtPosition, getContextAtCurs
 import { audioEngine } from './audio-engine';
 import { PianoRoll } from './piano-roll';
 import { PropertiesPanel } from './properties-panel';
+import { initTheme, getTheme, toggleTheme, onThemeChange, buildCMTheme } from './theme';
 
 // Global instances
 let pianoRoll: PianoRoll | null = null;
 let propertiesPanel: PropertiesPanel | null = null;
+
+// CodeMirror theme compartment for dynamic theme switching
+const themeCompartment = new Compartment();
 
 // Sample Cadence code
 const SAMPLE_CODE = `// Welcome to Cadence!
@@ -49,35 +53,7 @@ play cmaj
 // play invert(cmaj) // first inversion
 `;
 
-// Dark theme for CodeMirror (matches style.css theme tokens)
-const darkTheme = EditorView.theme({
-  '&': {
-    backgroundColor: '#282c34',  // --color-bg
-    color: '#e0dcd4',            // --color-fg
-  },
-  '.cm-content': {
-    caretColor: '#7099aa',       // --color-accent
-  },
-  '.cm-cursor': {
-    borderLeftColor: '#7099aa',  // --color-accent
-    borderLeftWidth: '2px',
-  },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
-    backgroundColor: 'rgba(112, 153, 170, 0.25)',  // accent with opacity
-  },
-  '.cm-gutters': {
-    backgroundColor: '#282c34',  // --color-bg
-    color: '#6b6560',            // --color-fg-subtle
-    border: 'none',
-  },
-  '.cm-activeLineGutter': {
-    backgroundColor: '#32363e',  // --color-bg-elevated
-    color: '#9a958e',            // --color-fg-muted
-  },
-  '.cm-activeLine': {
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-  },
-}, { dark: true });
+
 
 /**
  * Create the CodeMirror editor
@@ -109,8 +85,8 @@ function createEditor(container: HTMLElement): EditorView {
       // Cadence language support (WASM-powered highlighting)
       cadenceWasm(),
 
-      // Theme
-      darkTheme,
+      // Theme (via Compartment for dynamic switching)
+      themeCompartment.of(buildCMTheme(getTheme())),
 
       // Update listener for cursor position and validation
       EditorView.updateListener.of((update) => {
@@ -257,6 +233,9 @@ function log(message: string): void {
  * Initialize the editor and UI
  */
 async function init(): Promise<void> {
+  // Initialize theme from localStorage FIRST (before any rendering)
+  initTheme();
+
   const editorContainer = document.getElementById('editor');
   if (!editorContainer) {
     console.error('Editor container not found');
@@ -443,25 +422,19 @@ async function init(): Promise<void> {
     audioEngine.setTempo(bpm);
   });
 
-  // Theme toggle
+  // Theme toggle - use centralized theme system
   const themeToggle = document.getElementById('theme-toggle');
-  const savedTheme = localStorage.getItem('cadence-theme');
-  if (savedTheme === 'light') {
-    document.documentElement.setAttribute('data-theme', 'light');
-  }
-
   themeToggle?.addEventListener('click', () => {
-    const currentTheme = document.documentElement.getAttribute('data-theme');
-    const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+    toggleTheme();
+    log(`Theme: ${getTheme().name}`);
+  });
 
-    if (newTheme === 'light') {
-      document.documentElement.setAttribute('data-theme', 'light');
-    } else {
-      document.documentElement.removeAttribute('data-theme');
-    }
-
-    localStorage.setItem('cadence-theme', newTheme);
-    log(`Theme: ${newTheme}`);
+  // Subscribe to theme changes to update CodeMirror
+  onThemeChange((theme) => {
+    editor.dispatch({
+      effects: themeCompartment.reconfigure(buildCMTheme(theme))
+    });
+    // Piano roll and ADSR will subscribe separately
   });
 
   // Initial log

@@ -64,45 +64,7 @@
   --radius-md: 5px;
 }
 
-/* === LIGHT THEME === */
-[data-theme="light"] {
-  /* --- Colors: Background --- */
-  --color-bg: #f5f2ec;
-  --color-bg-elevated: #ebe7df;
-  --color-bg-inset: #e2ddd5;
-  --color-bg-hover: rgba(0, 0, 0, 0.03);
-
-  /* --- Colors: Foreground --- */
-  --color-fg: #3c4245;
-  --color-fg-muted: #6b6863;
-  --color-fg-subtle: #9a958e;
-
-  /* --- Colors: Border --- */
-  --color-border: #d5d0c8;
-  --color-border-subtle: #e2ddd5;
-
-  /* --- Colors: Accent --- */
-  --color-accent: #4d7686;
-  --color-accent-hover: #3a5c69;
-  --color-accent-active: #2d4a54;
-
-  /* --- Colors: Syntax Highlighting (slightly darker for light bg) --- */
-  --color-syn-keyword: #a85450;
-  --color-syn-keyword-control: #b86662;
-  --color-syn-note: #5a8a48;
-  --color-syn-number: #b08530;
-  --color-syn-string: #5a8a48;
-  --color-syn-variable: #4d7686;
-  --color-syn-operator: #a08540;
-  --color-syn-punctuation: #6b6560;
-  --color-syn-comment: #9a958e;
-
-  /* --- Colors: Status --- */
-  --color-error: #a85450;
-  --color-warning: #b08530;
-  --color-success: #5a8a48;
-  --color-info: #4d7686;
-}
+/* Light theme colors are synced by theme.ts via applyCSSVariables() */
 
 /* === RESET & BASE === */
 *,

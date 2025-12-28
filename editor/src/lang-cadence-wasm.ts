@@ -119,15 +119,15 @@ export function cadenceWasm(): Extension {
         cadenceHover,
         // Base theme for token colors (dark theme)
         EditorView.baseTheme({
-            '.cm-cadence-keyword': { color: '#e94560', fontWeight: '600' },
-            '.cm-cadence-keyword-control': { color: '#ff7b9c' },
-            '.cm-cadence-note': { color: '#4ecca3', fontWeight: '500' },
-            '.cm-cadence-number': { color: '#ffd166' },
-            '.cm-cadence-string': { color: '#06d6a0' },
-            '.cm-cadence-variable': { color: '#73d0ff' },
+            '.cm-cadence-keyword': { color: '#c76074ff', fontWeight: '700' },
+            '.cm-cadence-keyword-control': { color: '#d28598ff', fontWeight: '600', fontStyle: 'italic' },
+            '.cm-cadence-note': { color: '#8e68acff', fontWeight: '600' },
+            '.cm-cadence-number': { color: '#d5b772ff' },
+            '.cm-cadence-string': { color: '#36b385ff' },
+            '.cm-cadence-variable': { color: '#67a8c8ff' },
             '.cm-cadence-operator': { color: '#f4a261' },
             '.cm-cadence-punctuation': { color: '#888' },
-            '.cm-cadence-comment': { color: '#5c6370', fontStyle: 'italic' },
+            '.cm-cadence-comment': { color: '#5c6370bf', fontStyle: 'italic' },
         }),
     ];
 }
