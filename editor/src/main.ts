@@ -133,11 +133,20 @@ function updateCursorPosition(view: EditorView): void {
 /**
  * Update piano roll based on statement at cursor position
  */
+let currentCursorContext: { variable_name: string | null; span: { utf16_start: number } } | null = null;
+
 function updatePianoRollAtCursor(view: EditorView): void {
   if (!pianoRoll || !isWasmReady()) return;
 
   const code = view.state.doc.toString();
   const cursorPos = view.state.selection.main.head;
+
+  // Get context for lock target info
+  const context = getContextAtCursor(code, cursorPos);
+  currentCursorContext = context ? {
+    variable_name: context.variable_name,
+    span: { utf16_start: context.span.utf16_start }
+  } : null;
 
   // Get pattern events with cycle timing for the statement at cursor position
   const patternEvents = getEventsAtPosition(code, cursorPos);
@@ -151,6 +160,29 @@ function updatePianoRollAtCursor(view: EditorView): void {
     // Clear piano roll if no events
     pianoRoll.update({ events: [], beats_per_cycle: 4 });
   }
+}
+
+/**
+ * Refresh piano roll if locked (called on code changes)
+ */
+function refreshPianoRollIfLocked(code: string): void {
+  if (!pianoRoll || !pianoRoll.isLocked()) return;
+
+  // Helper to find a variable's position in the code
+  const findVariablePosition = (code: string, varName: string): number | null => {
+    // Look for `let varName = ` or `varName = `
+    const letMatch = code.match(new RegExp(`\\blet\\s+${varName}\\s*=`));
+    if (letMatch && letMatch.index !== undefined) {
+      return letMatch.index;
+    }
+    const assignMatch = code.match(new RegExp(`\\b${varName}\\s*=`));
+    if (assignMatch && assignMatch.index !== undefined) {
+      return assignMatch.index;
+    }
+    return null;
+  };
+
+  pianoRoll.refreshLocked(code, findVariablePosition);
 }
 
 // Validation debounce timer
@@ -168,7 +200,10 @@ function scheduleValidation(view: EditorView): void {
     const result = validateCode(view);
     const code = view.state.doc.toString();
 
-    // Update piano roll with statement at cursor position
+    // Refresh locked piano roll with new code (live updates)
+    refreshPianoRollIfLocked(code);
+
+    // Update piano roll with statement at cursor position (if not locked)
     updatePianoRollAtCursor(view);
 
     // Live update audio if valid and playing
@@ -257,6 +292,23 @@ async function init(): Promise<void> {
   // Initialize piano roll
   try {
     pianoRoll = new PianoRoll('piano-roll');
+
+    // Set up events callback for locked refresh
+    pianoRoll.setEventsCallback((code, position) => {
+      return getEventsAtPosition(code, position);
+    });
+
+    // Wire up lock button to pass current context
+    const lockBtn = document.getElementById('piano-roll-lock');
+    if (lockBtn) {
+      // Remove the piano roll's own listener and add ours with context
+      lockBtn.replaceWith(lockBtn.cloneNode(true));
+      const newLockBtn = document.getElementById('piano-roll-lock');
+      newLockBtn?.addEventListener('click', () => {
+        pianoRoll?.toggleLock(currentCursorContext);
+      });
+    }
+
     log('Piano roll initialized');
   } catch (e) {
     log(`Piano roll failed: ${e}`);

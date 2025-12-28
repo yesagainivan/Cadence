@@ -12,6 +12,11 @@ import { getTheme, onThemeChange } from './theme';
 const KEY_LABEL_WIDTH = 40;
 const HEADER_HEIGHT = 24;
 
+/** Lock target: what the piano roll is locked on */
+type LockTarget =
+    | { type: 'variable'; name: string }
+    | { type: 'position'; position: number };
+
 /**
  * Piano Roll visualization component
  */
@@ -32,7 +37,8 @@ export class PianoRoll {
 
     // Lock state
     private locked: boolean = false;
-    private lockedEvents: PatternEvents | null = null;
+    private lockTarget: LockTarget | null = null;
+    private getEventsCallback: ((code: string, position: number) => PatternEvents | null) | null = null;
 
     constructor(canvasId: string) {
         const canvas = document.getElementById(canvasId) as HTMLCanvasElement;
@@ -59,6 +65,14 @@ export class PianoRoll {
     }
 
     /**
+     * Set the callback for fetching events at a position
+     * This allows the piano roll to refresh locked content on code changes
+     */
+    public setEventsCallback(callback: (code: string, position: number) => PatternEvents | null): void {
+        this.getEventsCallback = callback;
+    }
+
+    /**
      * Set up the lock button event listener
      */
     private setupLockButton(): void {
@@ -69,34 +83,89 @@ export class PianoRoll {
     }
 
     /**
-     * Toggle lock state
+     * Lock on the current pattern with the given context
      */
-    public toggleLock(): void {
+    public lockOn(context: { variable_name: string | null; span: { utf16_start: number } } | null): void {
+        if (!context || this.events.length === 0) return;
+
+        // Determine what to lock on
+        if (context.variable_name) {
+            // Lock on variable name
+            this.lockTarget = { type: 'variable', name: context.variable_name };
+        } else {
+            // Lock on position (for anonymous patterns like `play "C E D"`)
+            this.lockTarget = { type: 'position', position: context.span.utf16_start };
+        }
+
+        this.locked = true;
+        this.updateLockUI(true);
+    }
+
+    /**
+     * Toggle lock state - needs context to know what to lock on
+     */
+    public toggleLock(context?: { variable_name: string | null; span: { utf16_start: number } } | null): void {
+        if (!this.locked && this.events.length > 0) {
+            // Lock: need context to know what to lock on
+            if (context) {
+                this.lockOn(context);
+            } else {
+                // Fallback: lock on current position (will be set by updateWithContext)
+                this.locked = true;
+                this.updateLockUI(true);
+            }
+        } else {
+            // Unlock
+            this.locked = false;
+            this.lockTarget = null;
+            this.updateLockUI(false);
+        }
+    }
+
+    /**
+     * Update lock button UI
+     */
+    private updateLockUI(locked: boolean): void {
         const lockBtn = document.getElementById('piano-roll-lock');
         const unlockedIcon = lockBtn?.querySelector('.icon-unlocked') as HTMLElement;
         const lockedIcon = lockBtn?.querySelector('.icon-locked') as HTMLElement;
 
-        if (!this.locked && this.events.length > 0) {
-            // Lock: save current state
-            this.lockedEvents = {
-                events: [...this.events],
-                beats_per_cycle: this.beatsPerCycle
-            };
-            this.locked = true;
-
-            // Update icons
+        if (locked) {
             if (unlockedIcon) unlockedIcon.style.display = 'none';
             if (lockedIcon) lockedIcon.style.display = 'block';
             if (lockBtn) lockBtn.classList.add('active');
         } else {
-            // Unlock: resume following cursor
-            this.locked = false;
-            this.lockedEvents = null;
-
-            // Update icons
             if (unlockedIcon) unlockedIcon.style.display = 'block';
             if (lockedIcon) lockedIcon.style.display = 'none';
             if (lockBtn) lockBtn.classList.remove('active');
+        }
+    }
+
+    /**
+     * Refresh the locked pattern with new code
+     * Called when code changes to re-evaluate the locked statement
+     */
+    public refreshLocked(code: string, findVariablePosition?: (code: string, varName: string) => number | null): void {
+        if (!this.locked || !this.lockTarget || !this.getEventsCallback) return;
+
+        let position: number | null = null;
+
+        if (this.lockTarget.type === 'variable' && findVariablePosition) {
+            // Find the variable's current position in the code
+            position = findVariablePosition(code, this.lockTarget.name);
+        } else if (this.lockTarget.type === 'position') {
+            // Use the stored position (may drift if code before it changes)
+            position = this.lockTarget.position;
+        }
+
+        if (position !== null) {
+            const events = this.getEventsCallback(code, position);
+            if (events && events.events.length > 0) {
+                this.events = events.events;
+                this.beatsPerCycle = events.beats_per_cycle;
+                this.calculateRange();
+                this.render(this.events);
+            }
         }
     }
 
@@ -105,6 +174,13 @@ export class PianoRoll {
      */
     public isLocked(): boolean {
         return this.locked;
+    }
+
+    /**
+     * Get what we're locked on (for debugging/display)
+     */
+    public getLockTarget(): LockTarget | null {
+        return this.lockTarget;
     }
 
     /**
