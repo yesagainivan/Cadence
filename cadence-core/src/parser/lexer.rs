@@ -61,6 +61,9 @@ pub enum Token {
     Load,     // load
     Track,    // track
     On,       // on (alias for track)
+    For,      // for
+    In,       // in
+    DotDot,   // ..
 
     // Identifiers (for function names and variables)
     Identifier(String), // invert, transpose, prog, etc.
@@ -125,6 +128,9 @@ impl fmt::Display for Token {
             Token::Load => write!(f, "load"),
             Token::Track => write!(f, "track"),
             Token::On => write!(f, "on"),
+            Token::For => write!(f, "for"),
+            Token::In => write!(f, "in"),
+            Token::DotDot => write!(f, ".."),
             Token::Identifier(name) => write!(f, "{}", name),
             Token::Comment(text) => write!(f, "//{}", text),
             Token::Eof => write!(f, "EOF"),
@@ -520,6 +526,11 @@ impl Lexer {
 
                 Some('.') => {
                     self.advance();
+                    // Check for .. (range operator)
+                    if self.current_char == Some('.') {
+                        self.advance();
+                        return Ok(Token::DotDot);
+                    }
                     return Ok(Token::Dot);
                 }
 
@@ -706,6 +717,8 @@ impl Lexer {
                         "load" => Token::Load,
                         "track" => Token::Track,
                         "on" => Token::On,
+                        "for" => Token::For,
+                        "in" => Token::In,
                         "true" => Token::Boolean(true),
                         "false" => Token::Boolean(false),
                         _ => {

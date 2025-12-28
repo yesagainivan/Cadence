@@ -276,3 +276,14 @@ transpose(p, 5)
 concat("C D", "E F")
 
 //
+
+| Construct	| Syntax	| Status|
+| ---	| ---	| --- |
+| Infinite loop	| loop { ... }	| ✅ Implemented (lines 175-176) |
+| Repeat N times	| repeat 4 { ... }	| ✅ Implemented (lines 178-179) |
+| break	| break	| ✅ Implemented |
+| continue	| continue	| ✅ Implemented |
+| For loop	| for i in 0..10 { ... }	| ❌ Not implemented |
+| While loop	| while condition { ... }	| ❌ Not implemented |
+
+//

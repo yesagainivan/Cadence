@@ -49,7 +49,6 @@ impl HighlightSpan {
 
     fn classify_token(token: &Token) -> String {
         match token {
-            // Keywords
             Token::Let
             | Token::Play
             | Token::Stop
@@ -63,7 +62,9 @@ impl HighlightSpan {
             | Token::Track
             | Token::Load
             | Token::Fn
-            | Token::On => "keyword".to_string(),
+            | Token::On
+            | Token::For
+            | Token::In => "keyword".to_string(),
 
             // Control keywords
             Token::Tempo | Token::Volume | Token::Waveform | Token::Queue => {
@@ -109,7 +110,8 @@ impl HighlightSpan {
             | Token::RightBrace
             | Token::Comma
             | Token::Semicolon
-            | Token::Dot => "punctuation".to_string(),
+            | Token::Dot
+            | Token::DotDot => "punctuation".to_string(),
 
             // Identifiers (function names, variables)
             Token::Identifier(_) => "variable".to_string(),
@@ -150,6 +152,8 @@ impl HighlightSpan {
             Token::Load => "load".to_string(),
             Token::Fn => "fn".to_string(),
             Token::On => "on".to_string(),
+            Token::For => "for".to_string(),
+            Token::In => "in".to_string(),
             Token::Tempo => "tempo".to_string(),
             Token::Volume => "volume".to_string(),
             Token::Waveform => "waveform".to_string(),
@@ -170,6 +174,7 @@ impl HighlightSpan {
             Token::Comma => ",".to_string(),
             Token::Semicolon => ";".to_string(),
             Token::Dot => ".".to_string(),
+            Token::DotDot => "..".to_string(),
             Token::Equals => "=".to_string(),
             Token::DoubleEquals => "==".to_string(),
             Token::NotEquals => "!=".to_string(),

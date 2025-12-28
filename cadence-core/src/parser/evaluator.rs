@@ -69,7 +69,10 @@ impl Evaluator {
                         Ok(Value::Pattern(transposed))
                     }
                     Value::Boolean(_) => Err(anyhow!("Cannot transpose a boolean value")),
-                    Value::Number(_) => Err(anyhow!("Cannot transpose a number")),
+                    Value::Number(n) => {
+                        // Numeric addition: n + semitones
+                        Ok(Value::Number(n + semitones as i32))
+                    }
                     Value::String(_) => Err(anyhow!("Cannot transpose a string")),
                     Value::Function { .. } => Err(anyhow!("Cannot transpose a function")),
                     Value::Unit => Err(anyhow!("Cannot transpose unit")),
@@ -470,6 +473,28 @@ impl Evaluator {
                             Ok(Value::Unit) => continue,
                             Ok(v) => return Ok(v), // Return from function
                             Err(e) => return Err(e),
+                        }
+                    }
+                }
+
+                Statement::For {
+                    var,
+                    start,
+                    end,
+                    body,
+                } => {
+                    for i in *start..*end {
+                        local_env.push_scope();
+                        local_env.define(var.clone(), Value::Number(i));
+                        let result = self.run_statements_in_local_env(body, local_env);
+                        local_env.pop_scope();
+                        if let Err(e) = result {
+                            return Err(e);
+                        }
+                        if let Ok(Value::Unit) = result {
+                            continue;
+                        } else if let Ok(v) = result {
+                            return Ok(v);
                         }
                     }
                 }

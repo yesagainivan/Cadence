@@ -266,20 +266,70 @@ impl Interpreter {
                 }
             }
 
-            Statement::Loop { body } => loop {
-                for stmt in body {
-                    match self.run_statement(stmt)? {
-                        ControlFlow::Normal => {}
-                        ControlFlow::Break => return Ok(ControlFlow::Normal),
-                        ControlFlow::Continue => break,
-                        ControlFlow::Return(val) => return Ok(ControlFlow::Return(val)),
+            Statement::Loop { body } => {
+                // In WASM, limit loop iterations to prevent browser freeze
+                #[cfg(target_arch = "wasm32")]
+                const MAX_ITERATIONS: u32 = 10_000;
+                #[cfg(target_arch = "wasm32")]
+                let mut iterations = 0u32;
+
+                loop {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        iterations += 1;
+                        if iterations > MAX_ITERATIONS {
+                            return Err(anyhow!(
+                                "Loop exceeded maximum iterations ({}) - possible infinite loop",
+                                MAX_ITERATIONS
+                            ));
+                        }
+                    }
+
+                    for stmt in body {
+                        match self.run_statement(stmt)? {
+                            ControlFlow::Normal => {}
+                            ControlFlow::Break => return Ok(ControlFlow::Normal),
+                            ControlFlow::Continue => break,
+                            ControlFlow::Return(val) => return Ok(ControlFlow::Return(val)),
+                        }
                     }
                 }
-            },
+            }
 
             Statement::Repeat { count, body } => {
                 for _ in 0..*count {
                     self.environment.write().unwrap().push_scope();
+                    for stmt in body {
+                        match self.run_statement(stmt)? {
+                            ControlFlow::Normal => {}
+                            ControlFlow::Break => {
+                                self.environment.write().unwrap().pop_scope();
+                                return Ok(ControlFlow::Normal);
+                            }
+                            ControlFlow::Continue => break,
+                            ControlFlow::Return(val) => {
+                                self.environment.write().unwrap().pop_scope();
+                                return Ok(ControlFlow::Return(val));
+                            }
+                        }
+                    }
+                    self.environment.write().unwrap().pop_scope();
+                }
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::For {
+                var,
+                start,
+                end,
+                body,
+            } => {
+                for i in *start..*end {
+                    self.environment.write().unwrap().push_scope();
+                    self.environment
+                        .write()
+                        .unwrap()
+                        .define(var.clone(), Value::Number(i));
                     for stmt in body {
                         match self.run_statement(stmt)? {
                             ControlFlow::Normal => {}
@@ -502,6 +552,34 @@ impl Interpreter {
                             cf @ ControlFlow::Return(_) => {
                                 local_env.pop_scope();
                                 return Ok(cf);
+                            }
+                        }
+                    }
+                    local_env.pop_scope();
+                }
+                Ok(ControlFlow::Normal)
+            }
+
+            Statement::For {
+                var,
+                start,
+                end,
+                body,
+            } => {
+                for i in *start..*end {
+                    local_env.push_scope();
+                    local_env.define(var.clone(), Value::Number(i));
+                    for stmt in body {
+                        match self.run_statement_with_local_env(stmt, local_env)? {
+                            ControlFlow::Normal => {}
+                            ControlFlow::Break => {
+                                local_env.pop_scope();
+                                return Ok(ControlFlow::Normal);
+                            }
+                            ControlFlow::Continue => break,
+                            ControlFlow::Return(val) => {
+                                local_env.pop_scope();
+                                return Ok(ControlFlow::Return(val));
                             }
                         }
                     }

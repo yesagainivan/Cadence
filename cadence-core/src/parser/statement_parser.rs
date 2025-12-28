@@ -139,7 +139,13 @@ impl StatementParser {
             Token::Boolean(_) => 5,                      // "true" or "false"
             Token::DoubleEquals | Token::NotEquals => 2, // == or !=
             Token::Less | Token::Greater | Token::Not => 1, // <, >, !
-            Token::LessEqual | Token::GreaterEqual | Token::And | Token::Or => 2, // <=, >=, &&, ||
+            Token::LessEqual
+            | Token::GreaterEqual
+            | Token::And
+            | Token::Or
+            | Token::DotDot
+            | Token::In => 2, // <=, >=, &&, ||, .., in
+            Token::For => 3,
             Token::Eof => 0,
         }
     }
@@ -242,6 +248,7 @@ impl StatementParser {
             Token::On => self.parse_track_statement(), // 'on N' is alias for 'track N'
             Token::Loop => self.parse_loop_statement(),
             Token::Repeat => self.parse_repeat_statement(),
+            Token::For => self.parse_for_statement(),
             Token::If => self.parse_if_statement(),
             Token::Break => {
                 self.advance();
@@ -515,6 +522,45 @@ impl StatementParser {
         let body = self.parse_block()?;
 
         Ok(Statement::Repeat { count, body })
+    }
+
+    /// Parse: for <var> in <start>..<end> { statements }
+    fn parse_for_statement(&mut self) -> Result<Statement> {
+        self.expect(&Token::For)?;
+
+        // Get iteration variable name
+        let var = match self.current() {
+            Token::Identifier(name) => name.clone(),
+            _ => return Err(anyhow!("Expected identifier after 'for'")),
+        };
+        self.advance();
+
+        self.expect(&Token::In)?;
+
+        // Parse start value
+        let start = match self.current() {
+            Token::Number(n) => *n,
+            _ => return Err(anyhow!("Expected number in range expression")),
+        };
+        self.advance();
+
+        self.expect(&Token::DotDot)?;
+
+        // Parse end value
+        let end = match self.current() {
+            Token::Number(n) => *n,
+            _ => return Err(anyhow!("Expected number after '..' in range expression")),
+        };
+        self.advance();
+
+        let body = self.parse_block()?;
+
+        Ok(Statement::For {
+            var,
+            start,
+            end,
+            body,
+        })
     }
 
     /// Parse: if <condition> { statements } [else if ... | else { statements }]

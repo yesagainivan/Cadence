@@ -178,6 +178,14 @@ pub enum Statement {
     /// Repeat n times: repeat 4 { ... }
     Repeat { count: u32, body: Vec<Statement> },
 
+    /// For loop: for i in 0..10 { ... }
+    For {
+        var: String,
+        start: i32,
+        end: i32,
+        body: Vec<Statement>,
+    },
+
     /// Conditional: if condition { ... } else { ... }
     If {
         condition: Expression,
@@ -244,6 +252,9 @@ impl fmt::Display for Statement {
             Statement::Waveform(name) => write!(f, "waveform \"{}\"", name),
             Statement::Loop { .. } => write!(f, "loop {{ ... }}"),
             Statement::Repeat { count, .. } => write!(f, "repeat {} {{ ... }}", count),
+            Statement::For {
+                var, start, end, ..
+            } => write!(f, "for {} in {}..{} {{ ... }}", var, start, end),
             Statement::If { .. } => write!(f, "if ... {{ ... }}"),
             Statement::Break => write!(f, "break"),
             Statement::Continue => write!(f, "continue"),
