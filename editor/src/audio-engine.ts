@@ -130,6 +130,7 @@ export class CadenceAudioEngine {
      * @param noteGain Gain for this note (0-1), used to normalize chords
      * @param waveform Waveform type for this note
      * @param adsr ADSR envelope for this note
+     * @param pan Optional stereo pan (0.0 = left, 0.5 = center, 1.0 = right)
      */
     private scheduleNote(
         freq: number,
@@ -138,6 +139,7 @@ export class CadenceAudioEngine {
         noteGain: number,
         waveform: WaveformType,
         adsr: AdsrParams,
+        pan?: number,
     ): void {
         const ctx = this.ensureContext();
 
@@ -148,7 +150,17 @@ export class CadenceAudioEngine {
         oscillator.frequency.setValueAtTime(freq, startTime);
 
         oscillator.connect(gainNode);
-        gainNode.connect(ctx.destination);
+
+        // Add stereo panning if specified
+        if (pan !== undefined && pan !== null) {
+            const panner = ctx.createStereoPanner();
+            // Convert 0-1 range to -1 to +1 range
+            panner.pan.setValueAtTime((pan - 0.5) * 2, startTime);
+            gainNode.connect(panner);
+            panner.connect(ctx.destination);
+        } else {
+            gainNode.connect(ctx.destination);
+        }
 
         const { attack, decay, sustain, release } = adsr;
 
@@ -180,6 +192,174 @@ export class CadenceAudioEngine {
                 this.activeOscillators.splice(idx, 1);
             }
         };
+    }
+
+    /**
+     * Schedule a synthesized drum sound
+     * Uses simple synthesis techniques for kicks, snares, and hi-hats
+     */
+    private scheduleDrum(
+        drumType: string,
+        startTime: number,
+        gain: number,
+        pan?: number,
+    ): void {
+        const ctx = this.ensureContext();
+        const gainNode = ctx.createGain();
+
+        // Add panning if specified
+        if (pan !== undefined && pan !== null) {
+            const panner = ctx.createStereoPanner();
+            panner.pan.setValueAtTime((pan - 0.5) * 2, startTime);
+            gainNode.connect(panner);
+            panner.connect(ctx.destination);
+        } else {
+            gainNode.connect(ctx.destination);
+        }
+
+        const drumSound = drumType.toLowerCase();
+
+        if (drumSound === 'kick' || drumSound === 'k' || drumSound === 'bd') {
+            // Kick: sine wave with pitch drop
+            const osc = ctx.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(150, startTime);
+            osc.frequency.exponentialRampToValueAtTime(40, startTime + 0.1);
+            osc.connect(gainNode);
+
+            gainNode.gain.setValueAtTime(gain * 0.8, startTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.3);
+
+            osc.start(startTime);
+            osc.stop(startTime + 0.35);
+        } else if (drumSound === 'snare' || drumSound === 's' || drumSound === 'sd') {
+            // Snare: noise burst + tone
+            const bufferSize = ctx.sampleRate * 0.1;
+            const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+            const noise = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                noise[i] = Math.random() * 2 - 1;
+            }
+
+            const noiseSource = ctx.createBufferSource();
+            noiseSource.buffer = buffer;
+
+            const noiseGain = ctx.createGain();
+            noiseSource.connect(noiseGain);
+            noiseGain.connect(gainNode);
+
+            noiseGain.gain.setValueAtTime(gain * 0.5, startTime);
+            noiseGain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.15);
+
+            // Add a tone component
+            const osc = ctx.createOscillator();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(180, startTime);
+            osc.connect(gainNode);
+
+            gainNode.gain.setValueAtTime(gain * 0.4, startTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.1);
+
+            noiseSource.start(startTime);
+            noiseSource.stop(startTime + 0.2);
+            osc.start(startTime);
+            osc.stop(startTime + 0.15);
+        } else if (drumSound === 'hh' || drumSound === 'h' || drumSound === 'hihat') {
+            // Hi-hat: filtered noise
+            const bufferSize = ctx.sampleRate * 0.05;
+            const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+            const noise = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                noise[i] = Math.random() * 2 - 1;
+            }
+
+            const noiseSource = ctx.createBufferSource();
+            noiseSource.buffer = buffer;
+
+            const filter = ctx.createBiquadFilter();
+            filter.type = 'highpass';
+            filter.frequency.setValueAtTime(8000, startTime);
+
+            noiseSource.connect(filter);
+            filter.connect(gainNode);
+
+            gainNode.gain.setValueAtTime(gain * 0.3, startTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.05);
+
+            noiseSource.start(startTime);
+            noiseSource.stop(startTime + 0.08);
+        } else if (drumSound === 'oh' || drumSound === 'openhat') {
+            // Open hi-hat: longer filtered noise
+            const bufferSize = ctx.sampleRate * 0.2;
+            const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+            const noise = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                noise[i] = Math.random() * 2 - 1;
+            }
+
+            const noiseSource = ctx.createBufferSource();
+            noiseSource.buffer = buffer;
+
+            const filter = ctx.createBiquadFilter();
+            filter.type = 'highpass';
+            filter.frequency.setValueAtTime(7000, startTime);
+
+            noiseSource.connect(filter);
+            filter.connect(gainNode);
+
+            gainNode.gain.setValueAtTime(gain * 0.25, startTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.2);
+
+            noiseSource.start(startTime);
+            noiseSource.stop(startTime + 0.25);
+        } else if (drumSound === 'clap' || drumSound === 'cp') {
+            // Clap: multiple noise bursts
+            for (let i = 0; i < 3; i++) {
+                const bufferSize = ctx.sampleRate * 0.02;
+                const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+                const noise = buffer.getChannelData(0);
+                for (let j = 0; j < bufferSize; j++) {
+                    noise[j] = Math.random() * 2 - 1;
+                }
+
+                const noiseSource = ctx.createBufferSource();
+                noiseSource.buffer = buffer;
+
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.setValueAtTime(1200, startTime + i * 0.01);
+
+                const burstGain = ctx.createGain();
+                noiseSource.connect(filter);
+                filter.connect(burstGain);
+                burstGain.connect(gainNode);
+
+                burstGain.gain.setValueAtTime(gain * 0.4, startTime + i * 0.01);
+                burstGain.gain.exponentialRampToValueAtTime(0.01, startTime + i * 0.01 + 0.05);
+
+                noiseSource.start(startTime + i * 0.01);
+                noiseSource.stop(startTime + i * 0.01 + 0.08);
+            }
+            gainNode.gain.setValueAtTime(1, startTime);
+        } else {
+            // Default: short noise burst for unknown drums
+            const bufferSize = ctx.sampleRate * 0.05;
+            const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+            const noise = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                noise[i] = Math.random() * 2 - 1;
+            }
+
+            const noiseSource = ctx.createBufferSource();
+            noiseSource.buffer = buffer;
+            noiseSource.connect(gainNode);
+
+            gainNode.gain.setValueAtTime(gain * 0.3, startTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.05);
+
+            noiseSource.start(startTime);
+            noiseSource.stop(startTime + 0.08);
+        }
     }
 
     /**
@@ -296,19 +476,32 @@ export class CadenceAudioEngine {
                 // Get volume for this track
                 const trackVolume = this.getTrackVolume(action.track_id);
 
+                // Get pan for this action (convert undefined to null for type safety)
+                const actionPan = action.pan ?? undefined;
+
                 // Schedule events relative to beat start time
                 let time = startTime;
                 for (const event of action.events) {
                     const durationSec = this.beatsToSeconds(event.duration);
+
+                    // Play melodic notes
                     if (!event.is_rest && event.frequencies.length > 0) {
                         // Normalize gain by number of notes to prevent saturation
                         const noteCount = event.frequencies.length;
                         const normalizedGain = trackVolume / Math.sqrt(noteCount);
 
                         for (const freq of event.frequencies) {
-                            this.scheduleNote(freq, time, durationSec, normalizedGain, actionWaveform, actionAdsr);
+                            this.scheduleNote(freq, time, durationSec, normalizedGain, actionWaveform, actionAdsr, actionPan);
                         }
                     }
+
+                    // Play drum sounds
+                    if (event.drums && event.drums.length > 0) {
+                        for (const drumType of event.drums) {
+                            this.scheduleDrum(drumType, time, trackVolume, actionPan);
+                        }
+                    }
+
                     time += durationSec;
                 }
                 break;

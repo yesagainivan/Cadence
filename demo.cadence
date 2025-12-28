@@ -170,7 +170,37 @@ let soft_tone = "C4 D4 E4".wave("sine")
 let full_sound = "C4 E4 G4".env(50, 100, 80, 300).wave("saw")
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 📚 SECTION 10: PLAYBACK CONTROLS
+// 📚 SECTION 10: DRUMS (TidalCycles-style percussion)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Drum sounds use short names in patterns:
+// kick/k/bd = bass drum, snare/s/sd = snare, hh/h = hi-hat
+// oh = open hi-hat, clap/cp = clap, tom/t = tom
+
+// Basic beat pattern
+let basic_beat = "kick _ snare _"
+
+// Four-on-the-floor with hi-hats  
+let house_beat = "kick hh snare hh"
+
+// Complex drum pattern using groups
+let complex_drums = "[kick hh] [hh snare] [kick kick] [hh oh]"
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 11: STEREO PANNING
+// ═══════════════════════════════════════════════════════════════════════════
+
+// .pan(position) - 0 = left, 50 = center, 100 = right
+let left_arp = "C4 E4 G4 C5".pan(10)   // Panned left
+let right_arp = "G4 B4 D5 G5".pan(90)  // Panned right
+let center_bass = "C2 _ G2 _".pan(50)  // Center
+
+// Combine pan with other effects
+let wide_pad = "C4 E4 G4".env("pad").pan(25)  // Left-ish pad
+let wide_lead = "G5 E5 C5".env("pluck").pan(75)  // Right-ish lead
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 12: PLAYBACK CONTROLS
 // ═══════════════════════════════════════════════════════════════════════════
 
 tempo 60  // BPM

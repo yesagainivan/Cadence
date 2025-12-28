@@ -5,6 +5,7 @@
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;
 
+// Why are we not using the evaluator and interpreter?
 use crate::parser::ast::{Expression, Value};
 use crate::parser::evaluator::Evaluator;
 use crate::parser::interpreter::{Interpreter, InterpreterAction};
@@ -294,6 +295,8 @@ pub struct PlayEventJS {
     pub notes: Vec<NoteInfoJS>,
     /// Frequencies to play (for backward compatibility with audio engine)
     pub frequencies: Vec<f32>,
+    /// Drum sounds to play (for percussion)
+    pub drums: Vec<String>,
     /// Start time in beats relative to pattern start
     pub start_beat: f32,
     /// Duration in beats
@@ -326,6 +329,8 @@ pub enum ActionJS {
         envelope: Option<(f32, f32, f32, f32)>,
         /// Custom waveform name
         waveform: Option<String>,
+        /// Stereo pan position (0.0 = left, 0.5 = center, 1.0 = right)
+        pan: Option<f32>,
     },
     /// Set the global tempo
     SetTempo { bpm: f32 },
@@ -371,8 +376,8 @@ fn convert_action(
                 .eval_with_env(expression.clone(), Some(env))
                 .ok()?;
 
-            // Extract events, envelope, and waveform based on value type
-            let (events, envelope, waveform) = match value {
+            // Extract events, envelope, waveform, and pan based on value type
+            let (events, envelope, waveform, pan) = match value {
                 Value::Pattern(ref pattern) => {
                     // Use to_rich_events() for full note identity
                     let events = pattern
@@ -381,6 +386,11 @@ fn convert_action(
                         .map(|event| PlayEventJS {
                             notes: event.notes.iter().map(NoteInfoJS::from).collect(),
                             frequencies: event.notes.iter().map(|n| n.frequency).collect(),
+                            drums: event
+                                .drums
+                                .iter()
+                                .map(|d| d.short_name().to_string())
+                                .collect(),
                             start_beat: event.start_beat,
                             duration: event.duration,
                             is_rest: event.is_rest,
@@ -388,7 +398,8 @@ fn convert_action(
                         .collect();
                     let envelope = pattern.envelope;
                     let waveform = pattern.waveform.as_ref().map(|w| w.name().to_string());
-                    (events, envelope, waveform)
+                    let pan = pattern.pan;
+                    (events, envelope, waveform, pan)
                 }
                 Value::Chord(chord) => {
                     // Create a rich event for a single chord
@@ -397,11 +408,12 @@ fn convert_action(
                     let events = vec![PlayEventJS {
                         notes: note_infos.iter().map(NoteInfoJS::from).collect(),
                         frequencies: note_infos.iter().map(|n| n.frequency).collect(),
+                        drums: vec![],
                         start_beat: 0.0,
                         duration: 1.0, // Default 1 beat for single chord
                         is_rest: false,
                     }];
-                    (events, None, None)
+                    (events, None, None, None)
                 }
                 Value::Note(note) => {
                     // Create a rich event for a single note
@@ -409,11 +421,12 @@ fn convert_action(
                     let events = vec![PlayEventJS {
                         notes: vec![NoteInfoJS::from(&note_info)],
                         frequencies: vec![note_info.frequency],
+                        drums: vec![],
                         start_beat: 0.0,
                         duration: 1.0,
                         is_rest: false,
                     }];
-                    (events, None, None)
+                    (events, None, None, None)
                 }
                 _ => return None,
             };
@@ -424,6 +437,7 @@ fn convert_action(
                 track_id: *track_id,
                 envelope,
                 waveform,
+                pan,
             })
         }
         InterpreterAction::SetTempo(bpm) => Some(ActionJS::SetTempo { bpm: *bpm }),
@@ -566,6 +580,7 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
                         })
                         .collect(),
                     frequencies: e.notes.iter().map(|n| n.frequency).collect(),
+                    drums: e.drums.iter().map(|d| d.short_name().to_string()).collect(),
                     start_beat: e.start_beat,
                     duration: e.duration,
                     is_rest: e.is_rest,
@@ -593,6 +608,7 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
                 events: vec![PlayEventJS {
                     notes,
                     frequencies,
+                    drums: vec![],
                     start_beat: 0.0,
                     duration: 1.0,
                     is_rest: false,
@@ -610,6 +626,7 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
                     octave: n.octave(),
                 }],
                 frequencies: vec![n.frequency()],
+                drums: vec![],
                 start_beat: 0.0,
                 duration: 1.0,
                 is_rest: false,
@@ -1174,6 +1191,11 @@ impl WasmInterpreter {
                         .map(|event| PlayEventJS {
                             notes: event.notes.iter().map(NoteInfoJS::from).collect(),
                             frequencies: event.notes.iter().map(|n| n.frequency).collect(),
+                            drums: event
+                                .drums
+                                .iter()
+                                .map(|d| d.short_name().to_string())
+                                .collect(),
                             start_beat: event.start_beat,
                             duration: event.duration,
                             is_rest: event.is_rest,
@@ -1190,6 +1212,7 @@ impl WasmInterpreter {
                         vec![PlayEventJS {
                             notes: note_infos.iter().map(NoteInfoJS::from).collect(),
                             frequencies: note_infos.iter().map(|n| n.frequency).collect(),
+                            drums: vec![],
                             start_beat: 0.0,
                             duration: 1.0,
                             is_rest: false,
@@ -1204,6 +1227,7 @@ impl WasmInterpreter {
                         vec![PlayEventJS {
                             notes: vec![NoteInfoJS::from(&note_info)],
                             frequencies: vec![note_info.frequency],
+                            drums: vec![],
                             start_beat: 0.0,
                             duration: 1.0,
                             is_rest: false,
@@ -1259,6 +1283,7 @@ impl WasmInterpreter {
                     track_id: *track_id,
                     envelope,
                     waveform,
+                    pan: None, // TODO: Extract pan from pattern when available
                 });
             }
         }

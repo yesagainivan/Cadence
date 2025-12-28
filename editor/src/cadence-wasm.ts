@@ -57,6 +57,8 @@ export interface PlayEvent {
     notes: NoteInfo[];
     /** Frequencies to play (for backward compatibility) */
     frequencies: number[];
+    /** Drum sounds to play (for percussion) */
+    drums: string[];
     /** Start time in beats relative to pattern start */
     start_beat: number;
     /** Duration in beats */
@@ -83,6 +85,8 @@ export interface PlayAction {
     envelope: [number, number, number, number] | null;
     /** Custom waveform name */
     waveform: string | null;
+    /** Stereo pan position (0.0 = left, 0.5 = center, 1.0 = right) */
+    pan: number | null;
 }
 
 /** Set tempo action */
