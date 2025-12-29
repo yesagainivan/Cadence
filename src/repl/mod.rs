@@ -160,7 +160,7 @@ impl Repl {
             InterpreterAction::PlayExpression {
                 expression,
                 looping,
-                queue_mode: _,
+                queue_mode,
                 track_id,
                 display_value,
                 scheduled_beat: _,
@@ -189,16 +189,31 @@ impl Repl {
                 }
 
                 if looping {
-                    // For looping plays, start a loop in the dispatcher
                     let shared_env = self.interpreter.shared_environment();
-                    let pattern_id = self
-                        .dispatcher_handle
-                        .start_loop(expression, shared_env, track_id);
-                    self.active_patterns.insert(track_id, pattern_id);
-                    println!(
-                        "🔊 Playing {} (Track {}) - live reactive!",
-                        display_value, track_id
-                    );
+
+                    if let Some(mode) = queue_mode {
+                        // Queue the pattern for activation at the next musical boundary
+                        let pattern_id = self
+                            .dispatcher_handle
+                            .queue_loop(expression, shared_env, track_id, mode);
+                        // Note: Don't add to active_patterns yet - will be added when activated
+                        println!(
+                            "🎵 Queued {} (Track {}) - will start on {:?}",
+                            display_value, track_id, mode
+                        );
+                        // Still track it for stopping purposes
+                        self.active_patterns.insert(track_id, pattern_id);
+                    } else {
+                        // Immediate start (no queue mode)
+                        let pattern_id = self
+                            .dispatcher_handle
+                            .start_loop(expression, shared_env, track_id);
+                        self.active_patterns.insert(track_id, pattern_id);
+                        println!(
+                            "🔊 Playing {} (Track {}) - live reactive!",
+                            display_value, track_id
+                        );
+                    }
                 } else {
                     // For one-shot plays, trigger immediately
                     if let Some((freqs, drums)) = Self::value_to_frequencies(&display_value) {

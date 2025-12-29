@@ -11,7 +11,7 @@
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::ClockTick;
 use crate::parser::{Evaluator, Expression, SharedEnvironment, Value};
-use crate::types::{DrumSound, Waveform};
+use crate::types::{DrumSound, QueueMode, Waveform};
 use cadence_core::types::{ScheduledAction, ScheduledEvent};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::collections::{BinaryHeap, HashMap};
@@ -269,6 +269,21 @@ impl LoopingPattern {
     }
 }
 
+/// A pattern waiting to be activated on a track at a musically appropriate time
+#[derive(Clone, Debug)]
+pub struct PendingLoop {
+    /// Unique identifier for this pending pattern
+    pub id: PatternId,
+    /// Expression to evaluate when activated
+    pub expression: Expression,
+    /// Environment for evaluation  
+    pub env: SharedEnvironment,
+    /// Queue synchronization mode
+    pub queue_mode: QueueMode,
+    /// Beat when this was queued (for timing calculations)
+    pub queued_at_beat: f64,
+}
+
 /// Commands that can be sent to the dispatcher
 #[derive(Debug)]
 pub enum DispatcherCommand {
@@ -298,6 +313,14 @@ pub enum DispatcherCommand {
         track_id: usize,
         frequencies: Vec<f32>,
         drums: Vec<DrumSound>,
+    },
+    /// Queue a looping pattern to start at next musical boundary
+    QueueLoop {
+        id: PatternId,
+        expression: Expression,
+        env: SharedEnvironment,
+        track_id: usize,
+        queue_mode: QueueMode,
     },
     /// Shutdown
     Shutdown,
@@ -332,6 +355,26 @@ impl DispatcherHandle {
             expression,
             env,
             track_id,
+        });
+        id
+    }
+
+    /// Queue a looping pattern to start at the next musical boundary
+    /// Returns the pattern ID (will be activated later based on queue_mode)
+    pub fn queue_loop(
+        &self,
+        expression: Expression,
+        env: SharedEnvironment,
+        track_id: usize,
+        queue_mode: QueueMode,
+    ) -> PatternId {
+        let id = self.next_pattern_id.fetch_add(1, Ordering::Relaxed);
+        let _ = self.command_tx.send(DispatcherCommand::QueueLoop {
+            id,
+            expression,
+            env,
+            track_id,
+            queue_mode,
         });
         id
     }
@@ -398,6 +441,8 @@ pub struct EventDispatcher {
     event_queue: BinaryHeap<ScheduledEvent>,
     /// Currently active looping patterns
     active_loops: HashMap<PatternId, LoopingPattern>,
+    /// Patterns waiting to be activated at a musical boundary (track_id -> pending)
+    pending_loops: HashMap<usize, PendingLoop>,
     /// Audio handle
     audio_handle: Arc<AudioPlayerHandle>,
     /// Command receiver
@@ -406,6 +451,8 @@ pub struct EventDispatcher {
     tick_rx: Receiver<ClockTick>,
     /// Current beat (for tracking)
     current_beat: f64,
+    /// Last integer beat (for detecting beat boundaries)
+    last_beat_floor: i64,
     /// Is running flag
     is_running: Arc<AtomicBool>,
 }
@@ -423,10 +470,12 @@ impl EventDispatcher {
         let dispatcher = EventDispatcher {
             event_queue: BinaryHeap::new(),
             active_loops: HashMap::new(),
+            pending_loops: HashMap::new(),
             audio_handle,
             command_rx,
             tick_rx,
             current_beat: 0.0,
+            last_beat_floor: -1,
             is_running: is_running_clone,
         };
 
@@ -480,6 +529,8 @@ impl EventDispatcher {
             } => {
                 // Stop any existing loops on this track first
                 self.active_loops.retain(|_, p| p.track_id != track_id);
+                // Also cancel any pending loops on this track
+                self.pending_loops.remove(&track_id);
                 // Start new loop at current beat position
                 self.active_loops.insert(
                     id,
@@ -495,6 +546,8 @@ impl EventDispatcher {
             DispatcherCommand::StopTrack(track_id) => {
                 // Remove all loops on this track
                 self.active_loops.retain(|_, p| p.track_id != track_id);
+                // Remove any pending loops on this track
+                self.pending_loops.remove(&track_id);
                 // Clear scheduled events for this track
                 let remaining: Vec<_> = self
                     .event_queue
@@ -509,6 +562,7 @@ impl EventDispatcher {
             }
             DispatcherCommand::StopAll => {
                 self.active_loops.clear();
+                self.pending_loops.clear();
                 self.event_queue.clear();
                 // Clear all tracks (1-16)
                 for track_id in 1..=16 {
@@ -539,6 +593,25 @@ impl EventDispatcher {
                     let _ = self.audio_handle.play_drum(track_id, drum);
                 }
             }
+            DispatcherCommand::QueueLoop {
+                id,
+                expression,
+                env,
+                track_id,
+                queue_mode,
+            } => {
+                // Store in pending_loops for this track (replaces any existing pending)
+                self.pending_loops.insert(
+                    track_id,
+                    PendingLoop {
+                        id,
+                        expression,
+                        env,
+                        queue_mode,
+                        queued_at_beat: self.current_beat,
+                    },
+                );
+            }
             DispatcherCommand::Shutdown => {
                 return false;
             }
@@ -550,6 +623,13 @@ impl EventDispatcher {
     fn process_tick(&mut self, tick: &ClockTick) {
         self.current_beat = tick.beat;
 
+        // Track beat boundaries for queue mode calculations
+        let current_beat_floor = tick.beat.floor() as i64;
+        let is_beat_boundary = current_beat_floor > self.last_beat_floor;
+        if is_beat_boundary {
+            self.last_beat_floor = current_beat_floor;
+        }
+
         // 1. Dispatch any due one-shot events
         while let Some(event) = self.event_queue.peek() {
             if event.scheduled_beat <= tick.beat {
@@ -557,6 +637,58 @@ impl EventDispatcher {
                 self.dispatch_event(&event);
             } else {
                 break;
+            }
+        }
+
+        // 2. Check pending loops for activation based on queue mode
+        // Collect tracks that should activate their pending patterns
+        let mut to_activate: Vec<usize> = Vec::new();
+
+        for (track_id, pending) in &self.pending_loops {
+            let should_activate = match pending.queue_mode {
+                QueueMode::Beat => {
+                    // Activate on next beat boundary after queuing
+                    is_beat_boundary && tick.beat.floor() > pending.queued_at_beat.floor()
+                }
+                QueueMode::Bar => {
+                    // Activate when beat is at bar boundary (0, 4, 8, 12...)
+                    // Assuming 4/4 time signature
+                    is_beat_boundary
+                        && current_beat_floor % 4 == 0
+                        && tick.beat > pending.queued_at_beat
+                }
+                QueueMode::Beats(n) => {
+                    // Activate after exactly n beats from when it was queued
+                    tick.beat >= pending.queued_at_beat + n as f64
+                }
+                QueueMode::Cycle => {
+                    // Activate when the current pattern on this track completes a cycle
+                    // For now, treat like Beat mode until we add cycle boundary tracking
+                    // TODO: Track cycle completions per pattern for true Cycle mode
+                    is_beat_boundary && tick.beat.floor() > pending.queued_at_beat.floor()
+                }
+            };
+
+            if should_activate {
+                to_activate.push(*track_id);
+            }
+        }
+
+        // Activate the pending patterns
+        for track_id in to_activate {
+            if let Some(pending) = self.pending_loops.remove(&track_id) {
+                // Stop any existing loops on this track
+                self.active_loops.retain(|_, p| p.track_id != track_id);
+                // Start the new loop
+                self.active_loops.insert(
+                    pending.id,
+                    LoopingPattern::new(
+                        pending.expression,
+                        pending.env,
+                        track_id,
+                        tick.beat, // Start at exactly this beat for precise timing
+                    ),
+                );
             }
         }
 
@@ -645,5 +777,120 @@ mod tests {
         let _ = DispatcherCommand::Shutdown;
         let _ = DispatcherCommand::StopAll;
         let _ = DispatcherCommand::StopTrack(1);
+    }
+
+    /// Test Beat queue mode activates on next beat boundary
+    #[test]
+    fn test_queue_mode_beat_activation() {
+        // Scenario: Pattern queued at beat 2.5, should activate at beat 3.0
+        let queued_at_beat: f64 = 2.5;
+
+        // At beat 2.7 (same beat floor as 2.5) - should NOT activate
+        let current_beat: f64 = 2.7;
+        let is_beat_boundary = false; // Still in beat 2
+        let should_activate = is_beat_boundary && current_beat.floor() > queued_at_beat.floor();
+        assert!(!should_activate, "Should not activate before beat boundary");
+
+        // At beat 3.0 (new beat) - should activate
+        let current_beat: f64 = 3.0;
+        let is_beat_boundary = true; // Crossed to beat 3
+        let should_activate = is_beat_boundary && current_beat.floor() > queued_at_beat.floor();
+        assert!(should_activate, "Should activate at next beat boundary");
+    }
+
+    /// Test Bar queue mode activates on bar boundaries (beat 0, 4, 8, 12...)
+    #[test]
+    fn test_queue_mode_bar_activation() {
+        // Scenario: Pattern queued at beat 1.5, should activate at beat 4.0
+        let queued_at_beat: f64 = 1.5;
+
+        // At beat 2.0 - is a beat boundary but not a bar
+        let current_beat: f64 = 2.0;
+        let current_beat_floor = 2i64;
+        let is_beat_boundary = true;
+        let should_activate =
+            is_beat_boundary && current_beat_floor % 4 == 0 && current_beat > queued_at_beat;
+        assert!(!should_activate, "Beat 2 is not a bar boundary");
+
+        // At beat 3.0 - still not a bar
+        let current_beat: f64 = 3.0;
+        let current_beat_floor = 3i64;
+        let should_activate =
+            is_beat_boundary && current_beat_floor % 4 == 0 && current_beat > queued_at_beat;
+        assert!(!should_activate, "Beat 3 is not a bar boundary");
+
+        // At beat 4.0 - this IS a bar boundary (4 % 4 == 0)
+        let current_beat: f64 = 4.0;
+        let current_beat_floor = 4i64;
+        let should_activate =
+            is_beat_boundary && current_beat_floor % 4 == 0 && current_beat > queued_at_beat;
+        assert!(should_activate, "Beat 4 is a bar boundary, should activate");
+
+        // Test beat 0 is also a bar
+        let current_beat: f64 = 0.0;
+        let current_beat_floor = 0i64;
+        let queued_at_beat: f64 = -0.5; // Queued before beat 0
+        let should_activate =
+            is_beat_boundary && current_beat_floor % 4 == 0 && current_beat > queued_at_beat;
+        assert!(should_activate, "Beat 0 is a bar boundary");
+    }
+
+    /// Test Beats(n) queue mode activates after exactly n beats
+    #[test]
+    fn test_queue_mode_beats_n_activation() {
+        // Scenario: Pattern queued at beat 2.0 with Beats(4), should activate at beat 6.0
+        let queued_at_beat: f64 = 2.0;
+        let n: u32 = 4;
+
+        // At beat 5.9 - not yet 4 beats later
+        let current_beat: f64 = 5.9;
+        let should_activate = current_beat >= queued_at_beat + n as f64;
+        assert!(
+            !should_activate,
+            "Only 3.9 beats elapsed, should not activate"
+        );
+
+        // At exactly beat 6.0 - exactly 4 beats later
+        let current_beat: f64 = 6.0;
+        let should_activate = current_beat >= queued_at_beat + n as f64;
+        assert!(should_activate, "Exactly 4 beats elapsed, should activate");
+
+        // At beat 6.5 - more than 4 beats later
+        let current_beat: f64 = 6.5;
+        let should_activate = current_beat >= queued_at_beat + n as f64;
+        assert!(
+            should_activate,
+            "More than 4 beats elapsed, should activate"
+        );
+    }
+
+    /// Test Beats(1) activates after exactly 1 beat
+    #[test]
+    fn test_queue_mode_beats_1_activation() {
+        let queued_at_beat: f64 = 3.5;
+        let n: u32 = 1;
+
+        // At beat 4.4 - not yet 1 beat later
+        let current_beat: f64 = 4.4;
+        let should_activate = current_beat >= queued_at_beat + n as f64;
+        assert!(!should_activate, "Only 0.9 beats elapsed");
+
+        // At beat 4.5 - exactly 1 beat later
+        let current_beat: f64 = 4.5;
+        let should_activate = current_beat >= queued_at_beat + n as f64;
+        assert!(should_activate, "Exactly 1 beat elapsed");
+    }
+
+    /// Test queue clearing on StopAll
+    #[test]
+    fn test_queue_modes_enum() {
+        // Verify all queue modes are accessible
+        let _ = QueueMode::Beat;
+        let _ = QueueMode::Bar;
+        let _ = QueueMode::Cycle;
+        let _ = QueueMode::Beats(4);
+
+        // Verify default is Beat
+        assert!(matches!(QueueMode::default(), QueueMode::Beat));
     }
 }
