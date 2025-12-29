@@ -91,6 +91,8 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] TidalCycles-style pattern functions: `rotate`, `take`, `drop`, `palindrome`, `stutter`, `concat`, `len`, `transpose`, `chunk`
 - [x] Mini-notation parser (string -> pattern)
 - [x] Pattern variable resolution: `"cmaj fmaj"` resolves variables at evaluation time
+- [x] Pattern modifiers with EventDispatcher: `env()`, `wave()` apply to playback
+- [x] Sub-beat timing for `fast()` and `slow()` (TidalCycles-style cycle tracking)
 
 ### 3.4 Multiple Voices ✅
 - [x] Named tracks/voices (`track N { ... }`)
@@ -216,4 +218,5 @@ A production-ready music programming language for chord progressions and harmoni
 13. **modularize statement parser** - break down into smaller modules if needed
 14. **Web Editor** - See [ROADMAP-EDITOR.md](ROADMAP-EDITOR.md) for detailed phases
 15. **Queue N countdown** - Full N-beat countdown for `queue N` syntax
+16. **TidalCycles-style `every()`** - Pattern combinator that alternates by cycle. See [docs/handoff.md](docs/handoff.md)
 

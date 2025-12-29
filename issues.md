@@ -18,6 +18,47 @@
 
 **Impact**: Property edits now insert at correct positions even with emoji in code.
 
+---
+
+## Pattern Modifiers Not Affecting Playback ✅ Fixed
+
+**Status**: Resolved via EventDispatcher integration
+
+**Problem**: `.env("pluck")` and `.wave("triangle")` modifiers on patterns were parsed correctly but not affecting audio output.
+
+**Root cause**:
+- The `EventDispatcher` (introduced in the audio refactor) wasn't extracting `envelope` and `waveform` properties from `Value::Pattern`
+- The REPL wasn't calling `set_track_envelope()` or `set_track_waveform()` before starting playback
+
+**Fix Applied**:
+- Added `SetTrackEnvelope` command to `DispatcherCommand` enum
+- Added `set_track_envelope()` method to `DispatcherHandle`
+- Updated REPL's `execute_action()` to extract and apply envelope/waveform from patterns
+- Updated `process_tick()` to apply envelope/waveform on each step for reactive updates
+
+**Impact**: `"C E G".env("pluck").wave("saw")` now correctly affects sound output.
+
+---
+
+## `fast()` and `slow()` Not Working ✅ Fixed
+
+**Status**: Resolved via TidalCycles-style cycle position tracking
+
+**Problem**: `"C E G B".fast(2)` would only play one note instead of doubling the speed.
+
+**Root cause**:
+- EventDispatcher only processed on beat boundaries (once per beat)
+- With `fast(2)`, each step has 0.5 beat duration, so multiple steps should trigger per beat
+- Attempting to trigger all at once resulted in only one note playing
+
+**Fix Applied**:
+- Rewrote `LoopingPattern` with `start_beat` and `last_triggered_step` tracking
+- Added `get_step_at_beat()` method that calculates cycle position like TidalCycles
+- Changed `process_tick()` to check on EVERY clock tick (24 per beat), not just beat boundaries
+- Steps now trigger precisely when cycle position crosses step boundaries
+
+**Impact**: `fast()` and `slow()` now work correctly for any factor.
+
 ___
 The challenge is that the Evaluator is calling the Interpreter, but currently Evaluator doesn't have a reference to an Interpreter. I need to think about this differently.
 
