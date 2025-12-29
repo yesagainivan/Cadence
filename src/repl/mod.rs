@@ -82,7 +82,11 @@ impl Repl {
 
         // Spawn the unified event dispatcher (replaces Scheduler + PlaybackEngines)
         let dispatcher_tick_rx = clock.subscribe();
-        let dispatcher_handle = EventDispatcher::spawn(audio_handle.clone(), dispatcher_tick_rx);
+        let dispatcher_handle = EventDispatcher::spawn(
+            audio_handle.clone(),
+            dispatcher_tick_rx,
+            Some(midi_handle.clone()),
+        );
 
         Ok(Repl {
             editor: Some(editor),

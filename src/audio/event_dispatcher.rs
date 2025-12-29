@@ -10,6 +10,7 @@
 
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::ClockTick;
+use crate::audio::midi::{frequency_to_midi, MidiOutputHandle};
 use crate::parser::{Evaluator, Expression, SharedEnvironment, Value};
 use crate::types::{DrumSound, QueueMode, Waveform};
 use cadence_core::types::{ScheduledAction, ScheduledEvent};
@@ -461,6 +462,11 @@ pub struct EventDispatcher {
     last_beat_floor: i64,
     /// Is running flag
     is_running: Arc<AtomicBool>,
+    /// MIDI output handle (optional - for output mode checking and MIDI note sending)
+    midi_handle: Option<Arc<MidiOutputHandle>>,
+    /// Track active MIDI notes per track: track_id -> set of active note numbers
+    /// Used to send note_off before note_on to prevent note stacking
+    active_midi_notes: HashMap<usize, Vec<u8>>,
 }
 
 impl EventDispatcher {
@@ -468,6 +474,7 @@ impl EventDispatcher {
     pub fn spawn(
         audio_handle: Arc<AudioPlayerHandle>,
         tick_rx: Receiver<ClockTick>,
+        midi_handle: Option<Arc<MidiOutputHandle>>,
     ) -> DispatcherHandle {
         let (command_tx, command_rx) = unbounded();
         let is_running = Arc::new(AtomicBool::new(true));
@@ -483,6 +490,8 @@ impl EventDispatcher {
             current_beat: 0.0,
             last_beat_floor: -1,
             is_running: is_running_clone,
+            midi_handle,
+            active_midi_notes: HashMap::new(),
         };
 
         thread::spawn(move || dispatcher.run_loop());
@@ -561,8 +570,16 @@ impl EventDispatcher {
             }
             DispatcherCommand::StopLoop(id) => {
                 if let Some(pattern) = self.active_loops.remove(&id) {
-                    // Clear the track's notes
+                    // Clear the track's audio notes
                     let _ = self.audio_handle.set_track_notes(pattern.track_id, vec![]);
+                    // Send MIDI note_off for any active notes on this track
+                    if let Some(midi) = &self.midi_handle {
+                        if let Some(notes) = self.active_midi_notes.remove(&pattern.track_id) {
+                            for note in notes {
+                                let _ = midi.note_off(pattern.track_id, note);
+                            }
+                        }
+                    }
                 }
             }
             DispatcherCommand::StopTrack(track_id) => {
@@ -579,14 +596,30 @@ impl EventDispatcher {
                 for event in remaining {
                     self.event_queue.push(event);
                 }
-                // Clear the track's notes
+                // Clear the track's audio notes
                 let _ = self.audio_handle.set_track_notes(track_id, vec![]);
+                // Send MIDI note_off for any active notes on this track
+                if let Some(midi) = &self.midi_handle {
+                    if let Some(notes) = self.active_midi_notes.remove(&track_id) {
+                        for note in notes {
+                            let _ = midi.note_off(track_id, note);
+                        }
+                    }
+                }
             }
             DispatcherCommand::StopAll => {
                 self.active_loops.clear();
                 self.pending_loops.clear();
                 self.event_queue.clear();
-                // Clear all tracks (1-16)
+                // Send MIDI note_off for all active notes
+                if let Some(midi) = &self.midi_handle {
+                    for (track_id, notes) in self.active_midi_notes.drain() {
+                        for note in notes {
+                            let _ = midi.note_off(track_id, note);
+                        }
+                    }
+                }
+                // Clear all audio tracks (1-16)
                 for track_id in 1..=16 {
                     let _ = self.audio_handle.set_track_notes(track_id, vec![]);
                 }
@@ -605,14 +638,37 @@ impl EventDispatcher {
                 frequencies,
                 drums,
             } => {
-                // Trigger immediately without scheduling
-                // Ensure audio is playing
-                let _ = self.audio_handle.play();
-                if !frequencies.is_empty() {
-                    let _ = self.audio_handle.trigger_note(track_id, frequencies);
+                // Check output mode - only play internal audio if enabled
+                let audio_enabled = self
+                    .midi_handle
+                    .as_ref()
+                    .map_or(true, |h| h.audio_enabled());
+                let midi_enabled = self
+                    .midi_handle
+                    .as_ref()
+                    .map_or(false, |h| h.midi_enabled() && h.is_connected());
+
+                if audio_enabled {
+                    // Trigger internal synth
+                    let _ = self.audio_handle.play();
+                    if !frequencies.is_empty() {
+                        let _ = self
+                            .audio_handle
+                            .trigger_note(track_id, frequencies.clone());
+                    }
+                    for drum in &drums {
+                        let _ = self.audio_handle.play_drum(track_id, *drum);
+                    }
                 }
-                for drum in drums {
-                    let _ = self.audio_handle.play_drum(track_id, drum);
+
+                if midi_enabled {
+                    // Send MIDI notes
+                    if let Some(midi) = &self.midi_handle {
+                        for freq in &frequencies {
+                            let midi_note = frequency_to_midi(*freq);
+                            let _ = midi.note_on(track_id, midi_note, 100);
+                        }
+                    }
                 }
             }
             DispatcherCommand::QueueLoop {
@@ -739,6 +795,16 @@ impl EventDispatcher {
 
         // Apply updates
         for (track_id, step) in updates {
+            // Check output mode - only play internal audio if enabled
+            let audio_enabled = self
+                .midi_handle
+                .as_ref()
+                .map_or(true, |h| h.audio_enabled());
+            let midi_enabled = self
+                .midi_handle
+                .as_ref()
+                .map_or(false, |h| h.midi_enabled() && h.is_connected());
+
             // Apply envelope if present (enables reactive envelope updates)
             if let Some(envelope) = step.envelope {
                 let _ = self
@@ -749,13 +815,45 @@ impl EventDispatcher {
             if let Some(waveform) = step.waveform {
                 let _ = self.audio_handle.set_track_waveform(track_id, waveform);
             }
-            // Ensure audio is playing
-            let _ = self.audio_handle.play();
-            if !step.frequencies.is_empty() {
-                let _ = self.audio_handle.trigger_note(track_id, step.frequencies);
+
+            if audio_enabled {
+                // Play internal synth
+                let _ = self.audio_handle.play();
+                if !step.frequencies.is_empty() {
+                    let _ = self
+                        .audio_handle
+                        .trigger_note(track_id, step.frequencies.clone());
+                }
+                for drum in &step.drums {
+                    let _ = self.audio_handle.play_drum(track_id, *drum);
+                }
             }
-            for drum in step.drums {
-                let _ = self.audio_handle.play_drum(track_id, drum);
+
+            if midi_enabled {
+                // Send note_off for previous notes on this track, then note_on for new notes
+                if let Some(midi) = &self.midi_handle {
+                    // First, send note_off for any previously active notes on this track
+                    if let Some(prev_notes) = self.active_midi_notes.get(&track_id) {
+                        for &note in prev_notes {
+                            let _ = midi.note_off(track_id, note);
+                        }
+                    }
+
+                    // Convert new frequencies to MIDI notes
+                    let new_notes: Vec<u8> = step
+                        .frequencies
+                        .iter()
+                        .map(|f| frequency_to_midi(*f))
+                        .collect();
+
+                    // Send note_on for new notes
+                    for &note in &new_notes {
+                        let _ = midi.note_on(track_id, note, 100);
+                    }
+
+                    // Store the new active notes
+                    self.active_midi_notes.insert(track_id, new_notes);
+                }
             }
         }
     }
@@ -766,16 +864,36 @@ impl EventDispatcher {
             ScheduledAction::PlayNotes {
                 frequencies, drums, ..
             } => {
-                // Ensure audio is playing
-                let _ = self.audio_handle.play();
-                if !frequencies.is_empty() {
-                    let _ = self
-                        .audio_handle
-                        .trigger_note(event.track_id, frequencies.clone());
+                // Check output mode
+                let audio_enabled = self
+                    .midi_handle
+                    .as_ref()
+                    .map_or(true, |h| h.audio_enabled());
+                let midi_enabled = self
+                    .midi_handle
+                    .as_ref()
+                    .map_or(false, |h| h.midi_enabled() && h.is_connected());
+
+                if audio_enabled {
+                    let _ = self.audio_handle.play();
+                    if !frequencies.is_empty() {
+                        let _ = self
+                            .audio_handle
+                            .trigger_note(event.track_id, frequencies.clone());
+                    }
+                    for drum in drums {
+                        if let Err(e) = self.audio_handle.play_drum(event.track_id, *drum) {
+                            eprintln!("Drum error: {}", e);
+                        }
+                    }
                 }
-                for drum in drums {
-                    if let Err(e) = self.audio_handle.play_drum(event.track_id, *drum) {
-                        eprintln!("Drum error: {}", e);
+
+                if midi_enabled {
+                    if let Some(midi) = &self.midi_handle {
+                        for freq in frequencies {
+                            let midi_note = frequency_to_midi(*freq);
+                            let _ = midi.note_on(event.track_id, midi_note, 100);
+                        }
                     }
                 }
             }
