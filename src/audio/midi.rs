@@ -3,9 +3,9 @@
 //! Provides thread-safe MIDI output using midir, with a channel-based
 //! architecture that mirrors AudioPlayerHandle.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use midir::{MidiOutput, MidiOutputConnection};
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::{Mutex, RwLock};
 use std::thread::{self, JoinHandle};
 
@@ -152,6 +152,14 @@ impl MidiOutputInternal {
                     }
                 }
                 MidiCommand::Disconnect => {
+                    // Graceful disconnect: send All Notes Off on all channels first
+                    if let Some(conn) = &mut self.connection {
+                        for ch in 0..16u8 {
+                            let _ = conn.send(&[0xB0 | ch, 123, 0]);
+                        }
+                        // Give CoreMIDI time to process the messages before closing
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
                     self.connection = None;
                 }
                 MidiCommand::Shutdown => {
@@ -172,7 +180,8 @@ impl MidiOutputInternal {
 /// Uses internal channels to communicate with the MIDI thread
 pub struct MidiOutputHandle {
     command_tx: Sender<MidiCommand>,
-    _thread: JoinHandle<()>,
+    /// Thread handle wrapped in Option so we can take() it in Drop
+    thread: Option<JoinHandle<()>>,
     /// Current channel mode
     channel_mode: RwLock<MidiChannelMode>,
     /// Output mode: Both, MidiOnly, or AudioOnly
@@ -198,12 +207,15 @@ impl MidiOutputHandle {
             internal.run();
         });
 
-        // Create initial MidiOutput for port enumeration
-        let port_enumerator = MidiOutput::new("Cadence-Enumerator").ok();
+        // NOTE: We do NOT create MidiOutput here!
+        // Creating a CoreMIDI client at startup can deadlock the system MIDI server
+        // if a previous instance didn't clean up properly. We defer creation until
+        // the user explicitly calls list_ports() or connect().
+        let port_enumerator = None;
 
         Ok(Self {
             command_tx: tx,
-            _thread: thread,
+            thread: Some(thread),
             channel_mode: RwLock::new(MidiChannelMode::default()),
             output_mode: RwLock::new(OutputMode::default()),
             active_notes: Mutex::new(std::collections::HashSet::new()),
@@ -246,24 +258,34 @@ impl MidiOutputHandle {
     }
 
     /// Connect to a MIDI output port by name (partial match supported)
+    /// Uses the shared port_enumerator to validate without creating redundant CoreMIDI clients.
     pub fn connect(&self, port_name: &str) -> Result<()> {
-        // Validate port exists before sending command
-        let midi_out = MidiOutput::new("Cadence")?;
-        let ports = midi_out.ports();
+        // Validate port exists using the shared enumerator (avoid creating redundant CoreMIDI clients)
+        let actual_name = {
+            let mut enumerator = self.port_enumerator.lock().unwrap();
 
-        let port = ports
-            .iter()
-            .find(|p| {
-                midi_out
-                    .port_name(p)
-                    .map(|name| name.contains(port_name))
-                    .unwrap_or(false)
-            })
-            .ok_or_else(|| anyhow!("MIDI port '{}' not found", port_name))?;
+            // Create enumerator lazily if needed
+            if enumerator.is_none() {
+                *enumerator = Some(MidiOutput::new("Cadence-Enumerator")?);
+            }
 
-        let actual_name = midi_out.port_name(port)?;
+            let midi_out = enumerator.as_ref().unwrap();
+            let ports = midi_out.ports();
 
-        // Send connect command to the MIDI thread
+            let port = ports
+                .iter()
+                .find(|p| {
+                    midi_out
+                        .port_name(p)
+                        .map(|name| name.contains(port_name))
+                        .unwrap_or(false)
+                })
+                .ok_or_else(|| anyhow!("MIDI port '{}' not found", port_name))?;
+
+            midi_out.port_name(port)?
+        };
+
+        // Send connect command to the MIDI thread (which will create its own connection)
         self.command_tx
             .send(MidiCommand::Connect {
                 port_name: port_name.to_string(),
@@ -459,7 +481,22 @@ impl MidiOutputHandle {
 
 impl Drop for MidiOutputHandle {
     fn drop(&mut self) {
+        // Send shutdown command to cleanly close the MIDI connection
         let _ = self.command_tx.send(MidiCommand::Shutdown);
+
+        // Wait for the thread to properly close the CoreMIDI connection
+        // Use take() since we need to move ownership out of the Option
+        if let Some(thread) = self.thread.take() {
+            // Use a timeout approach: spawn a joiner thread and wait briefly
+            // This prevents blocking forever if the MIDI server is stuck
+            let joiner = std::thread::spawn(move || {
+                let _ = thread.join();
+            });
+            // Wait up to 200ms for graceful shutdown
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            // If joiner is still running, it will be dropped (thread detached)
+            drop(joiner);
+        }
     }
 }
 

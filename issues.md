@@ -65,3 +65,48 @@ The challenge is that the Evaluator is calling the Interpreter, but currently Ev
 Looking at the code, the problem is that the Evaluator doesn't own an Interpreter. The Interpreter owns the Evaluator. So we can't call Interpreter methods from the Evaluator directly.
 
 Alternative approach: Instead of calling Interpreter from Evaluator, I should enhance the Evaluator itself to properly handle statement execution using the local environment. Let me refactor the evaluator's function execution:
+
+
+___
+
+Very nice! this seems to work!
+```
+cadence> play "C D E F" queue loop
+cadence> Playing "C D E F" (looping, Track 1)
+🎵 Queued "C D E F" (Track 1) - will start on Beat
+cadence> play "kick snare" queue cycle loop
+cadence> Playing "kick snare" (looping, Track 1)
+🎵 Queued "kick snare" (Track 1) - will start on Cycle
+cadence> play "C D E F" queue loop
+Playing "C D E F" (looping, Track 1)
+🎵 Queued "C D E F" (Track 1) - will start on Beat
+cadence> on 2 play "kick snare" queue cycle loop
+Playing "kick snare" (looping, Track 2)
+🎵 Queued "kick snare" (Track 2) - will start on Cycle
+cadence> on 2 stop
+Stopping playback (Track 2)
+cadence> on 2 play "kick snare" queue cycle loop
+cadence> Playing "kick snare" (looping, Track 2)
+🎵 Queued "kick snare" (Track 2) - will start on Cycle
+cadence> on 2 stop
+Stopping playback (Track 2)
+cadence> play "kick snare" queue cycle loop
+Playing "kick snare" (looping, Track 1)
+🎵 Queued "kick snare" (Track 1) - will start on Cycle
+cadence> play "C D E F" queue loop
+cadence> Playing "C D E F" (looping, Track 1)
+🎵 Queued "C D E F" (Track 1) - will start on Beat
+cadence> on 2 play "kick snare" queue cycle loop
+cadence> Playing "kick snare" (looping, Track 2)
+🎵 Queued "kick snare" (Track 2) - will start on Cycle
+cadence> on 2 stop
+cadence> Stopping playback (Track 2)
+cadence> play "kick snare" queue cycle loop
+cadence> Playing "kick snare" (looping, Track 1)
+🎵 Queued "kick snare" (Track 1) - will start on Cycle
+stop
+Stopping all playback
+cadence> 
+```
+
+But I noticed it only worked on 

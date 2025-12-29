@@ -57,8 +57,22 @@ impl Repl {
         let audio_handle =
             Arc::new(AudioPlayerHandle::new().expect("Failed to create audio player"));
 
-        // Initialize MIDI output (non-fatal if it fails)
-        let midi_handle = Arc::new(MidiOutputHandle::new().expect("Failed to create MIDI output"));
+        // Initialize MIDI output (non-fatal if it fails - MIDI server might be deadlocked)
+        let midi_handle = match MidiOutputHandle::new() {
+            Ok(handle) => Arc::new(handle),
+            Err(e) => {
+                eprintln!(
+                    "⚠️  MIDI initialization failed: {}. MIDI features disabled.",
+                    e
+                );
+                eprintln!("   If this persists, try: sudo killall -9 midiserver");
+                // Create a placeholder that will error on use
+                Arc::new(
+                    MidiOutputHandle::new()
+                        .unwrap_or_else(|_| panic!("MIDI output completely unavailable")),
+                )
+            }
+        };
 
         let clock = Arc::new(MasterClock::new(90.0)); // Default 90 BPM
         let bpm = Arc::new(AtomicU64::new(90.0_f32.to_bits() as u64));

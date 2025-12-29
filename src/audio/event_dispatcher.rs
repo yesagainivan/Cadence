@@ -50,6 +50,8 @@ pub struct LoopingPattern {
     pub cached_pattern_info: Option<(usize, f32, Option<(f32, f32, f32, f32)>, Option<Waveform>)>,
     /// Current cycle count (for EveryPattern alternation)
     pub current_cycle: usize,
+    /// Cached beats per cycle for the current pattern (for Cycle queue mode)
+    pub last_known_beats_per_cycle: f32,
 }
 
 impl LoopingPattern {
@@ -67,6 +69,7 @@ impl LoopingPattern {
             last_triggered_step: None,
             cached_pattern_info: None,
             current_cycle: 0,
+            last_known_beats_per_cycle: 0.0,
         }
     }
 
@@ -120,6 +123,7 @@ impl LoopingPattern {
             Value::Pattern(pattern) => {
                 let events = pattern.to_rich_events();
                 let beats_per_cycle = pattern.beats_per_cycle;
+                self.last_known_beats_per_cycle = beats_per_cycle;
 
                 // Calculate position within the cycle
                 let beats_elapsed = (current_beat - self.start_beat) as f32;
@@ -166,6 +170,7 @@ impl LoopingPattern {
                 if let Ok(pattern) = crate::types::Pattern::parse(&s) {
                     let events = pattern.to_rich_events();
                     let beats_per_cycle = pattern.beats_per_cycle;
+                    self.last_known_beats_per_cycle = beats_per_cycle;
 
                     let beats_elapsed = (current_beat - self.start_beat) as f32;
                     let cycle_position = beats_elapsed % beats_per_cycle;
@@ -210,6 +215,7 @@ impl LoopingPattern {
             Value::EveryPattern(every) => {
                 // Get beats_per_cycle from the base pattern (both should have same duration)
                 let beats_per_cycle = every.base.beats_per_cycle;
+                self.last_known_beats_per_cycle = beats_per_cycle;
 
                 // Calculate position within the cycle FIRST
                 let beats_elapsed = (current_beat - self.start_beat) as f32;
@@ -512,6 +518,22 @@ impl EventDispatcher {
         self.is_running.store(false, Ordering::Relaxed);
     }
 
+    /// Check if the active pattern on a track is at the start of a new cycle
+    /// Used by QueueMode::Cycle to determine when to activate pending patterns
+    fn active_pattern_at_cycle_start(&self, track_id: usize, current_beat: f64) -> bool {
+        for pattern in self.active_loops.values() {
+            if pattern.track_id == track_id && pattern.last_known_beats_per_cycle > 0.0 {
+                let beats_elapsed = (current_beat - pattern.start_beat) as f32;
+                let cycle_position = beats_elapsed % pattern.last_known_beats_per_cycle;
+                // At cycle start if position is very small (within tolerance) and some time has passed
+                if cycle_position < 0.05 && beats_elapsed > 0.0 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Handle a command, returns false if should shutdown
     fn handle_command(&mut self, cmd: DispatcherCommand) -> bool {
         match cmd {
@@ -663,9 +685,12 @@ impl EventDispatcher {
                 }
                 QueueMode::Cycle => {
                     // Activate when the current pattern on this track completes a cycle
-                    // For now, treat like Beat mode until we add cycle boundary tracking
-                    // TODO: Track cycle completions per pattern for true Cycle mode
-                    is_beat_boundary && tick.beat.floor() > pending.queued_at_beat.floor()
+                    // If no active pattern, treat like Beat mode (activate on next beat)
+                    if self.active_loops.values().any(|p| p.track_id == *track_id) {
+                        self.active_pattern_at_cycle_start(*track_id, tick.beat)
+                    } else {
+                        is_beat_boundary && tick.beat.floor() > pending.queued_at_beat.floor()
+                    }
                 }
             };
 
@@ -892,5 +917,67 @@ mod tests {
 
         // Verify default is Beat
         assert!(matches!(QueueMode::default(), QueueMode::Beat));
+    }
+
+    /// Test Cycle mode boundary detection math
+    #[test]
+    fn test_queue_mode_cycle_boundary_detection() {
+        // Scenario: Pattern "C D E F" (4 beats) playing on track 1
+        // Queue another pattern with Cycle mode - should activate at cycle boundary
+        let beats_per_cycle = 4.0f32;
+        let start_beat = 0.0f64;
+
+        // At beat 3.9 - NOT at cycle start
+        let current_beat = 3.9f64;
+        let beats_elapsed = (current_beat - start_beat) as f32;
+        let cycle_position = beats_elapsed % beats_per_cycle;
+        assert!(
+            cycle_position > 0.1,
+            "At beat 3.9, cycle_position {} should be > 0.1",
+            cycle_position
+        );
+
+        // At beat 4.02 - IS at cycle start (within tolerance)
+        let current_beat = 4.02f64;
+        let beats_elapsed = (current_beat - start_beat) as f32;
+        let cycle_position = beats_elapsed % beats_per_cycle;
+        assert!(
+            cycle_position < 0.05,
+            "At beat 4.02, cycle_position {} should be < 0.05",
+            cycle_position
+        );
+
+        // At beat 8.01 - IS at cycle start (second cycle)
+        let current_beat = 8.01f64;
+        let beats_elapsed = (current_beat - start_beat) as f32;
+        let cycle_position = beats_elapsed % beats_per_cycle;
+        assert!(
+            cycle_position < 0.05,
+            "At beat 8.01, cycle_position {} should be < 0.05",
+            cycle_position
+        );
+    }
+
+    /// Test cycle boundary with fast patterns
+    #[test]
+    fn test_queue_mode_cycle_with_fast_pattern() {
+        // Pattern "C D".fast(2) has beats_per_cycle = 1.0 (not 2.0)
+        let beats_per_cycle = 1.0f32;
+        let start_beat = 0.5f64;
+
+        // Cycles complete at beats 1.5, 2.5, 3.5...
+        let current_beat = 1.51f64;
+        let beats_elapsed = (current_beat - start_beat) as f32;
+        let cycle_position = beats_elapsed % beats_per_cycle;
+        assert!(
+            cycle_position < 0.05,
+            "At beat 1.51, should be at cycle start"
+        );
+
+        // At beat 1.8 - mid-cycle
+        let current_beat = 1.8f64;
+        let beats_elapsed = (current_beat - start_beat) as f32;
+        let cycle_position = beats_elapsed % beats_per_cycle;
+        assert!(cycle_position > 0.1, "At beat 1.8, should be mid-cycle");
     }
 }
