@@ -941,6 +941,81 @@ impl fmt::Display for Pattern {
 }
 
 // ============================================================================
+// EveryPattern - TidalCycles-style cycle-based pattern alternation
+// ============================================================================
+
+/// A pattern combinator that applies a transformation every N cycles.
+/// This is the TidalCycles-style approach where the pattern itself
+/// tracks which variant to use based on cycle position.
+///
+/// Unlike lazy evaluation, both patterns are pre-computed at creation time,
+/// making the runtime selection fast and predictable.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EveryPattern {
+    /// How often to apply the transformation (every N cycles)
+    pub interval: usize,
+    /// The base (untransformed) pattern
+    pub base: Pattern,
+    /// The transformed pattern (pre-computed at creation time)
+    pub transformed: Pattern,
+}
+
+impl EveryPattern {
+    /// Create a new EveryPattern combinator
+    ///
+    /// # Arguments
+    /// * `interval` - Apply the transformation every N cycles (1 = every cycle, 2 = every other cycle)
+    /// * `base` - The original, untransformed pattern
+    /// * `transformed` - The pattern with the transformation applied
+    pub fn new(interval: usize, base: Pattern, transformed: Pattern) -> Self {
+        Self {
+            interval: interval.max(1), // Ensure interval is at least 1
+            base,
+            transformed,
+        }
+    }
+
+    /// Get the appropriate pattern for the given absolute cycle number.
+    ///
+    /// For `every(N, transform, pattern)`:
+    /// - Transform is applied every Nth cycle, starting from cycle N-1
+    /// - `every(2, rev, p)`: base on 0, transformed on 1, base on 2, transformed on 3...
+    /// - `every(3, rev, p)`: base on 0, 1, transformed on 2, base on 3, 4, transformed on 5...
+    ///
+    /// # Arguments
+    /// * `cycle` - The current cycle number (0-indexed)
+    ///
+    /// # Returns
+    /// A reference to either the transformed or base pattern
+    pub fn get_pattern_for_cycle(&self, cycle: usize) -> &Pattern {
+        // Transform on cycles where (cycle + 1) is divisible by interval
+        // This gives: for interval 2, transform on cycles 1, 3, 5, 7...
+        // For interval 3, transform on cycles 2, 5, 8...
+        if (cycle + 1) % self.interval == 0 {
+            &self.transformed
+        } else {
+            &self.base
+        }
+    }
+
+    /// Get a clone of the pattern for the given cycle
+    pub fn pattern_for_cycle(&self, cycle: usize) -> Pattern {
+        self.get_pattern_for_cycle(cycle).clone()
+    }
+
+    /// Get the interval (how often the transformation is applied)
+    pub fn interval(&self) -> usize {
+        self.interval
+    }
+}
+
+impl fmt::Display for EveryPattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "every({}, transform, {})", self.interval, self.base)
+    }
+}
+
+// ============================================================================
 // Mini-notation parser
 // ============================================================================
 
@@ -1569,5 +1644,162 @@ mod tests {
             PatternStep::Note(n) => assert_eq!(n.pitch_class(), 4), // E
             _ => panic!("Expected Note E"),
         }
+    }
+
+    // ========================================================================
+    // EveryPattern Tests
+    // ========================================================================
+
+    #[test]
+    fn test_every_pattern_creation() {
+        let base = Pattern::parse("C D E F").unwrap();
+        let transformed = base.clone().rev();
+        let every = EveryPattern::new(2, base.clone(), transformed.clone());
+
+        assert_eq!(every.interval, 2);
+        assert_eq!(every.base.steps.len(), 4);
+        assert_eq!(every.transformed.steps.len(), 4);
+
+        // Verify base pattern is C D E F
+        match &every.base.steps[0] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0), // C
+            _ => panic!("Expected Note C"),
+        }
+
+        // Verify transformed pattern is F E D C (reversed)
+        match &every.transformed.steps[0] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 5), // F
+            _ => panic!("Expected Note F"),
+        }
+    }
+
+    #[test]
+    fn test_every_pattern_cycle_selection_interval_2() {
+        let base = Pattern::parse("C D E F").unwrap();
+        let transformed = base.clone().rev(); // F E D C
+        let every = EveryPattern::new(2, base.clone(), transformed.clone());
+
+        // New behavior: every(2) = base, transformed, base, transformed...
+        // Cycle 0: base ((0+1) % 2 = 1, not 0)
+        let pattern_at_0 = every.get_pattern_for_cycle(0);
+        match &pattern_at_0.steps[0] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0, "Cycle 0 should be base (C)"),
+            _ => panic!("Expected Note"),
+        }
+
+        // Cycle 1: transformed ((1+1) % 2 = 0)
+        let pattern_at_1 = every.get_pattern_for_cycle(1);
+        match &pattern_at_1.steps[0] {
+            PatternStep::Note(n) => {
+                assert_eq!(n.pitch_class(), 5, "Cycle 1 should be transformed (F)")
+            }
+            _ => panic!("Expected Note"),
+        }
+
+        // Cycle 2: base ((2+1) % 2 = 1, not 0)
+        let pattern_at_2 = every.get_pattern_for_cycle(2);
+        match &pattern_at_2.steps[0] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0, "Cycle 2 should be base (C)"),
+            _ => panic!("Expected Note"),
+        }
+
+        // Cycle 3: transformed ((3+1) % 2 = 0)
+        let pattern_at_3 = every.get_pattern_for_cycle(3);
+        match &pattern_at_3.steps[0] {
+            PatternStep::Note(n) => {
+                assert_eq!(n.pitch_class(), 5, "Cycle 3 should be transformed (F)")
+            }
+            _ => panic!("Expected Note"),
+        }
+
+        // Cycle 4: base ((4+1) % 2 = 1, not 0)
+        let pattern_at_4 = every.get_pattern_for_cycle(4);
+        match &pattern_at_4.steps[0] {
+            PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0, "Cycle 4 should be base (C)"),
+            _ => panic!("Expected Note"),
+        }
+    }
+
+    #[test]
+    fn test_every_pattern_cycle_selection_interval_3() {
+        let base = Pattern::parse("C D E F").unwrap();
+        let transformed = base.clone().rev();
+        let every = EveryPattern::new(3, base.clone(), transformed.clone());
+
+        // Interval 3: every(3) = base, base, transformed, base, base, transformed...
+        // Cycle 0: base ((0+1) % 3 = 1, not 0)
+        assert_eq!(every.get_pattern_for_cycle(0).steps[0], every.base.steps[0]);
+        // Cycle 1: base ((1+1) % 3 = 2, not 0)
+        assert_eq!(every.get_pattern_for_cycle(1).steps[0], every.base.steps[0]);
+        // Cycle 2: transformed ((2+1) % 3 = 0)
+        assert_eq!(
+            every.get_pattern_for_cycle(2).steps[0],
+            every.transformed.steps[0]
+        );
+        // Cycle 3: base ((3+1) % 3 = 1, not 0)
+        assert_eq!(every.get_pattern_for_cycle(3).steps[0], every.base.steps[0]);
+        // Cycle 4: base ((4+1) % 3 = 2, not 0)
+        assert_eq!(every.get_pattern_for_cycle(4).steps[0], every.base.steps[0]);
+        // Cycle 5: transformed ((5+1) % 3 = 0)
+        assert_eq!(
+            every.get_pattern_for_cycle(5).steps[0],
+            every.transformed.steps[0]
+        );
+        // Cycle 6: base ((6+1) % 3 = 1, not 0)
+        assert_eq!(every.get_pattern_for_cycle(6).steps[0], every.base.steps[0]);
+    }
+
+    #[test]
+    fn test_every_pattern_interval_1_always_transformed() {
+        let base = Pattern::parse("C D").unwrap();
+        let transformed = base.clone().rev();
+        let every = EveryPattern::new(1, base.clone(), transformed.clone());
+
+        // Interval 1: every(1) = transform every cycle (all cycles have (cycle+1) % 1 == 0)
+        for cycle in 0..10 {
+            assert_eq!(
+                every.get_pattern_for_cycle(cycle).steps[0],
+                every.transformed.steps[0],
+                "Interval 1 should return transformed at cycle {}",
+                cycle
+            );
+        }
+    }
+
+    #[test]
+    fn test_every_pattern_interval_0_becomes_1() {
+        // Interval 0 should be clamped to 1 to avoid division by zero
+        let base = Pattern::parse("C D").unwrap();
+        let transformed = base.clone().rev();
+        let every = EveryPattern::new(0, base.clone(), transformed.clone());
+
+        assert_eq!(every.interval, 1, "Interval 0 should be clamped to 1");
+    }
+
+    #[test]
+    fn test_every_pattern_display() {
+        let base = Pattern::parse("C D").unwrap();
+        let transformed = base.clone().rev();
+        let every = EveryPattern::new(2, base, transformed);
+
+        let display = format!("{}", every);
+        assert!(display.contains("every(2"), "Display should show interval");
+    }
+
+    #[test]
+    fn test_every_pattern_pattern_for_cycle_clone() {
+        let base = Pattern::parse("C D E F").unwrap();
+        let transformed = base.clone().rev();
+        let every = EveryPattern::new(2, base.clone(), transformed.clone());
+
+        // Test pattern_for_cycle (returns clone)
+        // Cycle 0 returns base, cycle 1 returns transformed (new logic)
+        let cloned_base = every.pattern_for_cycle(0);
+        assert_eq!(cloned_base.steps.len(), 4);
+        assert_eq!(cloned_base.steps[0], every.base.steps[0]);
+
+        let cloned_transformed = every.pattern_for_cycle(1);
+        assert_eq!(cloned_transformed.steps.len(), 4);
+        assert_eq!(cloned_transformed.steps[0], every.transformed.steps[0]);
     }
 }

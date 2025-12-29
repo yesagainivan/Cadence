@@ -1,4 +1,8 @@
-use crate::types::{chord::Chord, note::Note, pattern::Pattern};
+use crate::types::{
+    chord::Chord,
+    note::Note,
+    pattern::{EveryPattern, Pattern},
+};
 use std::fmt;
 
 // ============================================================================
@@ -418,6 +422,9 @@ pub enum Value {
     Unit,
     /// Array of values (when elements are not all notes)
     Array(Vec<Value>),
+    /// Pattern combinator that applies a transformation every N cycles
+    /// Used for TidalCycles-style `every(2, rev, pattern)` alternation
+    EveryPattern(Box<EveryPattern>),
 }
 
 impl fmt::Display for Expression {
@@ -572,6 +579,11 @@ impl Value {
             }
             Value::Unit => Err("Cannot play unit (void)".to_string()),
             Value::Array(_) => Err("Cannot play an array directly".to_string()),
+            Value::EveryPattern(every) => {
+                // For static evaluation (non-looping), use the base pattern
+                // The real cycle selection happens in the playback engine
+                Value::Pattern(every.base.clone()).to_playback_info()
+            }
         }
     }
 }
@@ -599,6 +611,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, "]")
             }
+            Value::EveryPattern(every) => write!(f, "{}", every),
         }
     }
 }

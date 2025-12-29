@@ -663,6 +663,37 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
             }],
             beats_per_cycle: 1.0, // Single note = 1 beat cycle
         },
+        Value::EveryPattern(ref every) => {
+            // For piano roll visualization, show the base pattern
+            // (during playback, the correct pattern is selected based on cycle)
+            let p = &every.base;
+            let events = p
+                .to_rich_events()
+                .iter()
+                .map(|e| PlayEventJS {
+                    notes: e
+                        .notes
+                        .iter()
+                        .map(|n| NoteInfoJS {
+                            midi: n.midi,
+                            frequency: n.frequency,
+                            name: n.name.clone(),
+                            pitch_class: n.pitch_class,
+                            octave: n.octave,
+                        })
+                        .collect(),
+                    frequencies: e.notes.iter().map(|n| n.frequency).collect(),
+                    drums: e.drums.iter().map(|d| d.short_name().to_string()).collect(),
+                    start_beat: e.start_beat,
+                    duration: e.duration,
+                    is_rest: e.is_rest,
+                })
+                .collect();
+            PatternEventsJS {
+                events,
+                beats_per_cycle: p.beats_per_cycle,
+            }
+        }
         _ => return JsValue::NULL,
     };
 
@@ -940,6 +971,17 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                     Value::Function { .. } => ("function".to_string(), None),
                     Value::Unit => ("unit".to_string(), None),
                     Value::Array(_) => ("array".to_string(), None),
+                    Value::EveryPattern(ref every) => {
+                        // For EveryPattern, expose properties from the base pattern
+                        let props = EditablePropertiesJS {
+                            waveform: every.base.waveform.as_ref().map(|w| w.name().to_string()),
+                            envelope: every.base.envelope.map(|(a, d, s, r)| [a, d, s, r]),
+                            tempo: None,
+                            volume: None,
+                            beats_per_cycle: Some(every.base.beats_per_cycle),
+                        };
+                        ("every_pattern".to_string(), Some(props))
+                    }
                 };
                 (Some(vt), props)
             }
@@ -1198,6 +1240,10 @@ impl WasmInterpreter {
                 Value::Pattern(ref pattern) => {
                     pattern.to_rich_events().iter().map(|e| e.duration).sum()
                 }
+                Value::EveryPattern(ref every) => {
+                    // Use base pattern duration (base and transformed should have same duration)
+                    every.base.to_rich_events().iter().map(|e| e.duration).sum()
+                }
                 _ => 1.0,
             };
 
@@ -1278,6 +1324,30 @@ impl WasmInterpreter {
                         None,
                         None,
                     )
+                }
+                Value::EveryPattern(ref every) => {
+                    // Select the appropriate pattern based on pattern_cycle
+                    let pattern = every.get_pattern_for_cycle(pattern_cycle as usize);
+                    let evs = pattern
+                        .to_rich_events()
+                        .into_iter()
+                        .map(|event| PlayEventJS {
+                            notes: event.notes.iter().map(NoteInfoJS::from).collect(),
+                            frequencies: event.notes.iter().map(|n| n.frequency).collect(),
+                            drums: event
+                                .drums
+                                .iter()
+                                .map(|d| d.short_name().to_string())
+                                .collect(),
+                            start_beat: event.start_beat,
+                            duration: event.duration,
+                            is_rest: event.is_rest,
+                        })
+                        .collect();
+                    let env = pattern.envelope;
+                    let wav = pattern.waveform.as_ref().map(|w| w.name().to_string());
+                    let pan = pattern.pan;
+                    (evs, env, wav, pan)
                 }
                 _ => continue,
             };

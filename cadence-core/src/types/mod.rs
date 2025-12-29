@@ -13,7 +13,7 @@ pub use audio_config::{AdsrParams, QueueMode, Waveform};
 pub use chord::Chord;
 pub use drum::DrumSound;
 pub use note::Note;
-pub use pattern::{NoteInfo, Pattern, PatternStep, PlaybackEvent};
+pub use pattern::{EveryPattern, NoteInfo, Pattern, PatternStep, PlaybackEvent};
 pub use roman_numeral::*;
 pub use scheduled_event::{ScheduledAction, ScheduledEvent};
 pub use voice_leading::VoiceLeading;

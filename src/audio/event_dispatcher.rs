@@ -48,6 +48,8 @@ pub struct LoopingPattern {
     pub last_triggered_step: Option<usize>,
     /// Cached pattern data: (total_steps, beats_per_cycle, envelope, waveform)
     pub cached_pattern_info: Option<(usize, f32, Option<(f32, f32, f32, f32)>, Option<Waveform>)>,
+    /// Current cycle count (for EveryPattern alternation)
+    pub current_cycle: usize,
 }
 
 impl LoopingPattern {
@@ -64,6 +66,7 @@ impl LoopingPattern {
             start_beat,
             last_triggered_step: None,
             cached_pattern_info: None,
+            current_cycle: 0,
         }
     }
 
@@ -202,6 +205,63 @@ impl LoopingPattern {
                     }
                 } else {
                     Err(anyhow::anyhow!("Cannot play string"))
+                }
+            }
+            Value::EveryPattern(every) => {
+                // Get beats_per_cycle from the base pattern (both should have same duration)
+                let beats_per_cycle = every.base.beats_per_cycle;
+
+                // Calculate position within the cycle FIRST
+                let beats_elapsed = (current_beat - self.start_beat) as f32;
+                let cycle_position = beats_elapsed % beats_per_cycle;
+
+                // Calculate current cycle number BEFORE selecting pattern
+                let new_cycle = (beats_elapsed / beats_per_cycle).floor() as usize;
+
+                // Track cycle transitions - reset step tracking when cycle changes
+                if new_cycle > self.current_cycle {
+                    self.current_cycle = new_cycle;
+                    self.last_triggered_step = None; // Reset to trigger first step of new cycle
+                }
+
+                // NOW select the appropriate pattern based on updated cycle
+                let pattern = every.get_pattern_for_cycle(self.current_cycle);
+                let events = pattern.to_rich_events();
+
+                // Find which step we're currently in
+                let mut accumulated = 0.0f32;
+                let mut current_step = 0;
+                for (i, event) in events.iter().enumerate() {
+                    if cycle_position >= accumulated
+                        && cycle_position < accumulated + event.duration
+                    {
+                        current_step = i;
+                        break;
+                    }
+                    accumulated += event.duration;
+                    if i == events.len() - 1 {
+                        current_step = i;
+                    }
+                }
+
+                // Only trigger if this is a new step
+                if self.last_triggered_step != Some(current_step) {
+                    self.last_triggered_step = Some(current_step);
+
+                    if current_step < events.len() {
+                        let event = &events[current_step];
+                        Ok(Some(PlaybackStep {
+                            frequencies: event.notes.iter().map(|n| n.frequency).collect(),
+                            drums: event.drums.clone(),
+                            envelope: pattern.envelope,
+                            waveform: pattern.waveform,
+                            duration_beats: event.duration,
+                        }))
+                    } else {
+                        Ok(None)
+                    }
+                } else {
+                    Ok(None)
                 }
             }
             _ => Err(anyhow::anyhow!("Cannot play this type")),

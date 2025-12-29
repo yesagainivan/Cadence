@@ -437,22 +437,24 @@ impl FunctionRegistry {
         self.register(
             "every",
             "Pattern",
-            "Applies a transformation every n cycles.",
-            "every(n: Number, transform: String | Function, pattern: Pattern) -> Pattern",
+            "Applies a transformation every n cycles during playback. Returns a pattern combinator that alternates between base and transformed patterns based on cycle position.",
+            "every(n: Number, transform: String | Function, pattern: Pattern) -> EveryPattern",
             Arc::new(|evaluator, args, env| {
                 if args.len() != 3 {
                     return Err(anyhow!(
-                        "every() expects 3 arguments: intervals, function_name, pattern"
+                        "every() expects 3 arguments: interval, function_name, pattern"
                     ));
                 }
 
+                // 1. Parse the interval (every N cycles)
                 let n_val = evaluator.eval_with_env(args[0].clone(), env)?;
                 let n = match n_val {
-                    Value::Note(note) => note.pitch_class() as i32,
-                    Value::Number(num) => num,
+                    Value::Note(note) => note.pitch_class() as usize,
+                    Value::Number(num) => num.max(1) as usize,
                     _ => return Err(anyhow!("every() expects a number as first argument")),
                 };
 
+                // 2. Extract the transform function name
                 let transform_name = match &args[1] {
                     Expression::Variable(name) => name.clone(),
                     Expression::String(s) => s.clone(),
@@ -468,8 +470,9 @@ impl FunctionRegistry {
                     }
                 };
 
+                // 3. Evaluate the base pattern
                 let pattern_val = evaluator.eval_with_env(args[2].clone(), env)?;
-                let pattern = match pattern_val {
+                let base_pattern = match pattern_val {
                     Value::Pattern(p) => p,
                     Value::String(s) => match crate::types::Pattern::parse(&s) {
                         Ok(p) => p,
@@ -485,7 +488,7 @@ impl FunctionRegistry {
                             },
                             Err(_) => {
                                 return Err(
-                                    anyhow!("every() expects a pattern or pattern string",),
+                                    anyhow!("every() expects a pattern or pattern string"),
                                 );
                             }
                         },
@@ -493,28 +496,29 @@ impl FunctionRegistry {
                     _ => return Err(anyhow!("every() expects a pattern as third argument")),
                 };
 
-                let cycle = if let Some(e) = env {
-                    match e.get("_cycle") {
-                        Some(Value::Number(c)) => *c,
-                        Some(Value::Note(n)) => n.pitch_class() as i32,
-                        _ => 0,
+                // 4. Pre-compute the transformed pattern by calling the transform function
+                let call_expr = Expression::FunctionCall {
+                    name: transform_name.clone(),
+                    args: vec![Expression::Pattern(base_pattern.clone())],
+                };
+                let transformed_val = evaluator.eval_with_env(call_expr, env)?;
+                let transformed_pattern = match transformed_val {
+                    Value::Pattern(p) => p,
+                    _ => {
+                        return Err(anyhow!(
+                            "Transform function '{}' must return a pattern",
+                            transform_name
+                        ));
                     }
-                } else {
-                    0
                 };
 
-                if n > 0 && cycle % n == 0 {
-                    // Evaluate the transformation by calling the function
-                    // We need to re-evaluate the function call with the pattern
-                    // This is slightly inefficient as we construct a new expression
-                    let call_expr = Expression::FunctionCall {
-                        name: transform_name,
-                        args: vec![Expression::Pattern(pattern)],
-                    };
-                    evaluator.eval_with_env(call_expr, env)
-                } else {
-                    Ok(Value::Pattern(pattern))
-                }
+                // 5. Return the EveryPattern combinator
+                use crate::types::EveryPattern;
+                Ok(Value::EveryPattern(Box::new(EveryPattern::new(
+                    n,
+                    base_pattern,
+                    transformed_pattern,
+                ))))
             }),
         );
 

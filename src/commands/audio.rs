@@ -136,6 +136,11 @@ fn get_frequencies_from_value(value: &Value) -> anyhow::Result<Vec<f32>> {
         }
         Value::Unit => return Err(anyhow::anyhow!("Cannot play unit (void)")),
         Value::Array(_) => return Err(anyhow::anyhow!("Cannot play an array directly")),
+        Value::EveryPattern(_) => {
+            return Err(anyhow::anyhow!(
+                "Cannot play an EveryPattern directly - use 'play X loop' for cycle-based alternation"
+            ));
+        }
     }
 
     Ok(frequencies)

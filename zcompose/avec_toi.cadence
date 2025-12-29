@@ -1,0 +1,335 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// ✨ CADENCE MASTERCLASS ✨
+// A Complete Tutorial & Demo of Every Feature
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// This file demonstrates EVERY feature of Cadence. Run it with:
+//   1. cargo run --release
+//   2. watch demo.cadence
+//   3. Uncomment sections progressively to build up the music!
+//
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 1: BASIC NOTES & CHORDS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Single notes - the building blocks
+// C4 is middle C, numbers indicate octave
+let note1 = C4
+let note2 = G4
+let note3 = Bb3  // Flats work too!
+
+// Chords - multiple notes in brackets
+let cmaj = [C4, E4, G4]
+let fmaj = [F3, A3, C4]
+let gmaj = [G3, B3, D4]
+let am = [A3, C4, E4]
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 2: PATTERNS (TidalCycles-style mini-notation)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Patterns are sequences in quotes - spaces separate steps
+let melody = "C4 D4 E4 F4 G4"
+
+// Rests use underscore - creates silence
+let with_rests = "C4 _ E4 _ G4 _"
+
+// Chords in patterns use brackets
+let chords = "[C4, E4, G4] [F3, A3, C4] [G3, B3, D4]"
+
+// Groups subdivide time - [C D] takes same time as single E
+let subdivision = "[C4 D4] E4 [F4 G4] A4"
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 3: PATTERN TRANSFORMATIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// fast() - doubles playback speed
+let fast_melody = fast("C4 D4 E4 F4", 2)
+
+// slow() - halves playback speed
+let slow_melody = slow("C4 D4 E4 F4", 2)
+
+// rev() - reverses the pattern
+let reversed = rev("C4 D4 E4 F4")
+
+// Chaining - apply multiple transforms
+let transformed = fast(rev("C4 D4 E4 F4"), 2)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 4: NEW PATTERN FUNCTIONS (TidalCycles-style)
+// ═══════════════════════════════════════════════════════════════════════════
+
+let base = "C D E F G A B"
+
+// rotate() - shift steps (positive = right, negative = left)
+let rotated = rotate(base, 2)  // "A B C D E F G"
+
+// take() - keep first N steps
+let first_three = take(base, 3)  // "C D E"
+
+// drop() - remove first N steps
+let last_four = drop(base, 3)  // "F G A B"
+
+// palindrome() - pattern + reverse
+let mirror = palindrome("C D E F")  // "C D E F F E D C"
+
+// stutter() - repeat each step N times
+let stuttered = stutter("C E G", 2)  // "C C E E G G"
+
+// len() - get pattern length
+// let length = len(base)  // Returns 7
+
+// concat() - join patterns
+let combined = concat("C D", "E F")  // "C D E F"
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 5: TRANSPOSITION & ARITHMETIC
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Transpose up/down by semitones
+let up_octave = C4 + 12      // C5
+let down_fifth = G4 - 7      // C4
+
+// Works on chords and patterns too!
+let higher_chord = [C4, E4, G4] + 12
+let transposed = "C D E F" + 5  // All notes up 5 semitones
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 6: EVERY() - CYCLIC TRANSFORMATIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// every(N, "transform", pattern) applies transform every Nth cycle
+// Creates variation and movement in loops!
+
+let arp = "C4 E4 G4 C5"
+let varying = every(2, "rev", arp)  // Reverses every 2nd cycle
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 7: MAP() - APPLY FUNCTIONS TO PATTERNS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// map() applies a function to each chord in a pattern
+let prog = "[C, E, G] [F, A, C]"
+let inverted = map(invert, prog)  // Invert each chord
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 8: USER-DEFINED FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Define reusable functions with fn
+fn octave_up(note) {
+    return note + 12
+}
+
+fn double_speed(pattern) {
+    return fast(pattern, 2)
+}
+
+// Functions can have local variables
+fn create_major_chord(root) {
+    let third = root + 4
+    let fifth = root + 7
+    return [root, third, fifth]
+}
+
+fn create_minor_chord(root) {
+    let third = root + 3
+    let fifth = root + 7
+    return [root, third, fifth]
+}
+
+// Void functions (no return)
+fn setup_track() {
+    // Configuration without return
+}
+
+// Use with map() for custom transformations!
+fn my_invert(chord) {
+    return invert(chord)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 9: SOUND DESIGN - ENVELOPES & WAVEFORMS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// .env(attack, decay, sustain, release) - ADSR envelope in ms/%
+let pad_sound = "C4 E4 G4".env(100, 50, 70, 200)
+
+// Presets: "pad", "pluck", "organ", "string"
+let soft_pad = "C4 E4 G4".env("pad")
+let sharp_pluck = "C4 E4 G4".env("pluck")
+
+// .wave() - oscillator type: "sine", "saw", "square", "triangle"
+let synth_lead = "C4 D4 E4".wave("saw")
+let soft_tone = "C4 D4 E4".wave("sine")
+
+// Combine both!
+let full_sound = "C4 E4 G4".env(50, 100, 80, 300).wave("saw")
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 10: DRUMS (TidalCycles-style percussion)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Drum sounds use short names in patterns:
+// kick/k/bd = bass drum, snare/s/sd = snare, hh/h = hi-hat
+// oh = open hi-hat, clap/cp = clap, tom/t = tom
+
+// Basic beat pattern
+let basic_beat = "kick _ snare _"
+
+// Four-on-the-floor with hi-hats  
+let house_beat = "kick hh snare hh"
+
+// Complex drum pattern using groups
+let complex_drums = "[kick hh] [hh snare] [kick kick] [hh oh]"
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 11: STEREO PANNING
+// ═══════════════════════════════════════════════════════════════════════════
+
+// .pan(position) - 0 = left, 50 = center, 100 = right
+let left_arp = "C4 E4 G4 C5".pan(10)   // Panned left
+let right_arp = "G4 B4 D5 G5".pan(90)  // Panned right
+let center_bass = "C2 _ G2 _".pan(50)  // Center
+
+// Combine pan with other effects
+let wide_pad = "C4 E4 G4".env("pad").pan(25)  // Left-ish pad
+let wide_lead = "G5 E5 C5".env("pluck").pan(75)  // Right-ish lead
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 12: PLAYBACK CONTROLS
+// ═══════════════════════════════════════════════════════════════════════════
+
+tempo 90  // BPM
+
+// play <pattern> - plays once
+// play <pattern> loop - infinite loop
+// play <pattern> queue loop - waits for beat boundary
+// play <pattern> queue cycle loop - waits for pattern cycle
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📚 SECTION 11: MULTI-TRACK ARRANGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+// track N { ... } - target specific track
+// track N play ... - shorthand
+// track N volume N - set volume (0-100)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🎵 THE MASTERPIECE - Putting It All Together
+// ═══════════════════════════════════════════════════════════════════════════
+
+// --- Define the musical elements ---
+
+let Do = create_major_chord(C);
+let SiBemol = create_major_chord(Bb);
+let Fa = create_major_chord(F);
+let Re = create_minor_chord(D);
+
+let Ivan = smooth("Do Re SiBemol Fa")
+
+
+// The Chord Progression (I - vi - IV - V in C)
+let progression = I_vi_IV_V(C); // can also do this!
+let progression = "[C4, E4, G4] [A3, C4, E4] [F3, A3, C4] [G3, B3, D4]"
+let progression = smooth("[C4, E4, G4] [A3, C4, E4] [F3, A3, C4] [G3, B3, D4]") // use smooth voice leading!
+let progression = smooth("Do Re [F3, A3, C4] [G3, B3, D4]")
+
+let progression = Ivan.pan(50);
+
+// Pad layer with soft envelope
+let pads = slow(progression, 2).env(11, 20, 80, 50).wave("sine")
+
+// Bass following root notes
+let bass_pattern = "C2 A1 F1 G1"
+let bass_pattern = "C2 D1 B1 F1"
+let bass = bass_pattern.slow(2).wave("sine")
+
+// Arpeggiated shimmer layer
+let arp_notes = "C4 E4 G4 C5 G4 E4 D D"
+let shimmer = fast(arp_notes, 2).env(10, 50, 30, 100).wave("saw")
+
+// Melodic line with variation every 2 cycles
+let lead = every(2, "rev", "G5 _ E5 _ C5 D5 E5 _").rev().fast(2).env("pluck")
+let lead = every(2, "rev", "G5 _ E5 _ C5 B4 C5 _").rev().fast(2).env("pluck")
+let lead = "G5 _ E5 _ C5 _ D5 _".fast(2).env("pluck").rotate(0).pan(10)
+
+// Ping for melody
+let ping = "C5 _ D5 _ E _ C".fast(1).env(80, 61, 0, 15);
+
+// Rhythmic pulse with rests
+let pulse = "C4 _ _ C4 _ C4 _ _".wave("sine").env(5, 20, 0, 50).pan(60)
+
+let complex_drums = "[kick k] [_ c] [_ _ k _] [_ D]"
+
+// --- The Arrangement ---
+
+// Layer 1: Foundation (Pads)
+track 1 play pads loop
+track 1 volume 1
+
+// Layer 2: Low End (Bass)  
+//track 2 play bass loop
+track 2 volume 10
+
+// Layer 3: Texture (Shimmer)
+// track 3 play shimmer + 12 loop
+track 3 volume 2
+
+// Layer 4: Melody (Lead)
+track 4 play lead loop
+track 4 volume 4
+
+// Layer 5: Rhythm (Pulse)
+// track 5 play pulse loop
+track 5 volume 6
+
+on 12 {play complex_drums loop volume 10}
+
+// on 6 {play "C5".env(70, 100, 59, 30) loop volume 1}
+
+// on 7 play ping loop volume 2
+// on 7 {play ping loop volume 4}
+
+// on 8 {play "k _ k _".env(1,1,1,1) loop volume 20}
+// on 9 {play "_ c _ c".env(1,1,1,1).pan(45) loop volume 20}
+on 9 {play "_ [c _ _ c] [_ C C _] [c _ _ c]".env(1,1,1,1).pan(65) loop volume 20}
+// on 9 {play "_ s _ s".env(1,1,1,1).pan(40) loop volume 10}
+// on 10 {play "[hh hh]".pan(70) loop volume 5}
+// on 11 {play "[hh*8]".pan(42) loop volume 10}
+// on 11 {play "[[hh _ hh]*8]".pan(70) loop volume 5}
+
+// on 10 stop
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🧪 EXPERIMENTS - Try these while it's playing!
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 1. Change the progression:
+//    progression = "[A3, C4, E4] [F3, A3, C4] [C4, E4, G4] [G3, B3, D4]"
+//
+// 2. Add more reversal variety:
+//    let lead = every(3, "rev", "G5 E5 C5 G4")
+//
+// 3. Create a stutter effect:
+//    let pulse = stutter("C3 _ C3 _", 2)
+//
+// 4. Transpose everything up:
+//    track 1 play pads + 5 loop
+//
+// 5. Use your own function:
+//    fn add_fifth(p) { return p + 7 }
+//    map(add_fifth, progression)
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// 🛑 CONTROLS
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// stop              - stop all tracks
+// track N stop      - stop specific track
+// track N volume N  - adjust levels
+// ═══════════════════════════════════════════════════════════════════════════
+//

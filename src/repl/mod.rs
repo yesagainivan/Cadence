@@ -140,6 +140,16 @@ impl Repl {
                     None
                 }
             }
+            Value::EveryPattern(every) => {
+                // For immediate play, use base pattern's first event
+                let events = every.base.to_rich_events();
+                if let Some(first) = events.first() {
+                    let freqs: Vec<f32> = first.notes.iter().map(|n| n.frequency).collect();
+                    Some((freqs, first.drums.clone()))
+                } else {
+                    Some((vec![], vec![]))
+                }
+            }
             _ => None,
         }
     }
@@ -159,14 +169,22 @@ impl Repl {
                 self.clock.start();
 
                 // Extract envelope and waveform from the pattern if present
-                if let Value::Pattern(ref pattern) = display_value {
-                    if let Some(envelope) = pattern.envelope {
+                let pattern_props: Option<(
+                    Option<(f32, f32, f32, f32)>,
+                    Option<crate::types::Waveform>,
+                )> = match &display_value {
+                    Value::Pattern(pattern) => Some((pattern.envelope, pattern.waveform)),
+                    Value::EveryPattern(every) => Some((every.base.envelope, every.base.waveform)),
+                    _ => None,
+                };
+
+                if let Some((envelope, waveform)) = pattern_props {
+                    if let Some(env) = envelope {
                         self.dispatcher_handle
-                            .set_track_envelope(track_id, Some(envelope));
+                            .set_track_envelope(track_id, Some(env));
                     }
-                    if let Some(waveform) = pattern.waveform {
-                        self.dispatcher_handle
-                            .set_track_waveform(track_id, waveform);
+                    if let Some(wf) = waveform {
+                        self.dispatcher_handle.set_track_waveform(track_id, wf);
                     }
                 }
 

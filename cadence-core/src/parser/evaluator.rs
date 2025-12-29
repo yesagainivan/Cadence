@@ -77,6 +77,16 @@ impl Evaluator {
                     Value::Function { .. } => Err(anyhow!("Cannot transpose a function")),
                     Value::Unit => Err(anyhow!("Cannot transpose unit")),
                     Value::Array(_) => Err(anyhow!("Cannot transpose an array")),
+                    Value::EveryPattern(every) => {
+                        // Transpose both the base and transformed patterns
+                        use crate::types::EveryPattern;
+                        let transposed = EveryPattern::new(
+                            every.interval,
+                            every.base.clone() + semitones,
+                            every.transformed.clone() + semitones,
+                        );
+                        Ok(Value::EveryPattern(Box::new(transposed)))
+                    }
                 }
             }
             Expression::Intersection { left, right } => {

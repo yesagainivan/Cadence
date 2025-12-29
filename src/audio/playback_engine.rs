@@ -98,6 +98,10 @@ impl PlaybackSource {
             )),
             Value::Unit => Err(anyhow::anyhow!("Cannot play unit (void)")),
             Value::Array(_) => Err(anyhow::anyhow!("Cannot play an array directly")),
+            Value::EveryPattern(every) => {
+                // Use base pattern for static evaluation (cycle selection happens at playback time)
+                Self::value_to_frequencies(&Value::Pattern(every.base.clone()))
+            }
         }
     }
 
