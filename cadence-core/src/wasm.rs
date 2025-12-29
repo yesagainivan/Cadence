@@ -289,6 +289,48 @@ struct ParseResult {
 }
 
 // ============================================================================
+// Rational Time Serialization
+// ============================================================================
+
+use crate::types::{beats, Time};
+
+/// Rational number for JS serialization (preserves exactness)
+/// Serializes as { "n": numerator, "d": denominator }
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RationalJS {
+    /// Numerator
+    pub n: i64,
+    /// Denominator
+    pub d: i64,
+}
+
+impl From<Time> for RationalJS {
+    fn from(t: Time) -> Self {
+        RationalJS {
+            n: *t.numer(),
+            d: *t.denom(),
+        }
+    }
+}
+
+impl From<&Time> for RationalJS {
+    fn from(t: &Time) -> Self {
+        RationalJS {
+            n: *t.numer(),
+            d: *t.denom(),
+        }
+    }
+}
+
+impl RationalJS {
+    /// Convert to f32 for internal calculations
+    pub fn to_f32(self) -> f32 {
+        self.n as f32 / self.d as f32
+    }
+}
+
+// ============================================================================
 // Script Execution Types (for JS interop)
 // ============================================================================
 
@@ -330,10 +372,10 @@ pub struct PlayEventJS {
     pub frequencies: Vec<f32>,
     /// Drum sounds to play (for percussion)
     pub drums: Vec<String>,
-    /// Start time in beats relative to pattern start
-    pub start_beat: f32,
-    /// Duration in beats
-    pub duration: f32,
+    /// Start time in beats relative to pattern start (exact rational)
+    pub start_beat: RationalJS,
+    /// Duration in beats (exact rational)
+    pub duration: RationalJS,
     /// Whether this is a rest (silence)
     pub is_rest: bool,
 }
@@ -344,8 +386,8 @@ pub struct PlayEventJS {
 pub struct PatternEventsJS {
     /// Individual playback events
     pub events: Vec<PlayEventJS>,
-    /// Total beats in one pattern cycle (affected by fast/slow)
-    pub beats_per_cycle: f32,
+    /// Total beats in one pattern cycle (exact rational, affected by fast/slow)
+    pub beats_per_cycle: RationalJS,
 }
 
 /// Serializable action for JavaScript consumption
@@ -424,8 +466,8 @@ fn convert_action(
                                 .iter()
                                 .map(|d| d.short_name().to_string())
                                 .collect(),
-                            start_beat: event.start_beat,
-                            duration: event.duration,
+                            start_beat: event.start_beat.into(),
+                            duration: event.duration.into(),
                             is_rest: event.is_rest,
                         })
                         .collect();
@@ -442,8 +484,8 @@ fn convert_action(
                         notes: note_infos.iter().map(NoteInfoJS::from).collect(),
                         frequencies: note_infos.iter().map(|n| n.frequency).collect(),
                         drums: vec![],
-                        start_beat: 0.0,
-                        duration: 1.0, // Default 1 beat for single chord
+                        start_beat: beats(0).into(),
+                        duration: beats(1).into(), // Default 1 beat for single chord
                         is_rest: false,
                     }];
                     (events, None, None, None)
@@ -455,8 +497,8 @@ fn convert_action(
                         notes: vec![NoteInfoJS::from(&note_info)],
                         frequencies: vec![note_info.frequency],
                         drums: vec![],
-                        start_beat: 0.0,
-                        duration: 1.0,
+                        start_beat: beats(0).into(),
+                        duration: beats(1).into(),
                         is_rest: false,
                     }];
                     (events, None, None, None)
@@ -614,14 +656,14 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
                         .collect(),
                     frequencies: e.notes.iter().map(|n| n.frequency).collect(),
                     drums: e.drums.iter().map(|d| d.short_name().to_string()).collect(),
-                    start_beat: e.start_beat,
-                    duration: e.duration,
+                    start_beat: e.start_beat.into(),
+                    duration: e.duration.into(),
                     is_rest: e.is_rest,
                 })
                 .collect();
             PatternEventsJS {
                 events,
-                beats_per_cycle: p.beats_per_cycle,
+                beats_per_cycle: p.beats_per_cycle.into(),
             }
         }
         Value::Chord(c) => {
@@ -642,11 +684,11 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
                     notes,
                     frequencies,
                     drums: vec![],
-                    start_beat: 0.0,
-                    duration: 1.0,
+                    start_beat: beats(0).into(),
+                    duration: beats(1).into(),
                     is_rest: false,
                 }],
-                beats_per_cycle: 1.0, // Single chord = 1 beat cycle
+                beats_per_cycle: beats(1).into(), // Single chord = 1 beat cycle
             }
         }
         Value::Note(n) => PatternEventsJS {
@@ -660,11 +702,11 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
                 }],
                 frequencies: vec![n.frequency()],
                 drums: vec![],
-                start_beat: 0.0,
-                duration: 1.0,
+                start_beat: beats(0).into(),
+                duration: beats(1).into(),
                 is_rest: false,
             }],
-            beats_per_cycle: 1.0, // Single note = 1 beat cycle
+            beats_per_cycle: beats(1).into(), // Single note = 1 beat cycle
         },
         Value::EveryPattern(ref every) => {
             // For piano roll visualization, show the base pattern
@@ -687,14 +729,14 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
                         .collect(),
                     frequencies: e.notes.iter().map(|n| n.frequency).collect(),
                     drums: e.drums.iter().map(|d| d.short_name().to_string()).collect(),
-                    start_beat: e.start_beat,
-                    duration: e.duration,
+                    start_beat: e.start_beat.into(),
+                    duration: e.duration.into(),
                     is_rest: e.is_rest,
                 })
                 .collect();
             PatternEventsJS {
                 events,
-                beats_per_cycle: p.beats_per_cycle,
+                beats_per_cycle: p.beats_per_cycle.into(),
             }
         }
         _ => return JsValue::NULL,
@@ -962,7 +1004,7 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                             envelope: p.envelope.map(|(a, d, s, r)| [a, d, s, r]),
                             tempo: None,
                             volume: None,
-                            beats_per_cycle: Some(p.beats_per_cycle),
+                            beats_per_cycle: Some(p.beats_per_cycle_f32()),
                         };
                         ("pattern".to_string(), Some(props))
                     }
@@ -981,7 +1023,7 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                             envelope: every.base.envelope.map(|(a, d, s, r)| [a, d, s, r]),
                             tempo: None,
                             volume: None,
-                            beats_per_cycle: Some(every.base.beats_per_cycle),
+                            beats_per_cycle: Some(every.base.beats_per_cycle_f32()),
                         };
                         ("every_pattern".to_string(), Some(props))
                     }
@@ -1240,12 +1282,19 @@ impl WasmInterpreter {
 
             // Get pattern duration from initial evaluation
             let total_duration: f32 = match &initial_value {
-                Value::Pattern(ref pattern) => {
-                    pattern.to_rich_events().iter().map(|e| e.duration).sum()
-                }
+                Value::Pattern(ref pattern) => pattern
+                    .to_rich_events()
+                    .iter()
+                    .map(|e| e.duration_f32())
+                    .sum(),
                 Value::EveryPattern(ref every) => {
                     // Use base pattern duration (base and transformed should have same duration)
-                    every.base.to_rich_events().iter().map(|e| e.duration).sum()
+                    every
+                        .base
+                        .to_rich_events()
+                        .iter()
+                        .map(|e| e.duration_f32())
+                        .sum()
                 }
                 _ => 1.0,
             };
@@ -1285,8 +1334,8 @@ impl WasmInterpreter {
                                 .iter()
                                 .map(|d| d.short_name().to_string())
                                 .collect(),
-                            start_beat: event.start_beat,
-                            duration: event.duration,
+                            start_beat: event.start_beat.into(),
+                            duration: event.duration.into(),
                             is_rest: event.is_rest,
                         })
                         .collect();
@@ -1303,8 +1352,8 @@ impl WasmInterpreter {
                             notes: note_infos.iter().map(NoteInfoJS::from).collect(),
                             frequencies: note_infos.iter().map(|n| n.frequency).collect(),
                             drums: vec![],
-                            start_beat: 0.0,
-                            duration: 1.0,
+                            start_beat: beats(0).into(),
+                            duration: beats(1).into(),
                             is_rest: false,
                         }],
                         None,
@@ -1319,8 +1368,8 @@ impl WasmInterpreter {
                             notes: vec![NoteInfoJS::from(&note_info)],
                             frequencies: vec![note_info.frequency],
                             drums: vec![],
-                            start_beat: 0.0,
-                            duration: 1.0,
+                            start_beat: beats(0).into(),
+                            duration: beats(1).into(),
                             is_rest: false,
                         }],
                         None,
@@ -1342,8 +1391,8 @@ impl WasmInterpreter {
                                 .iter()
                                 .map(|d| d.short_name().to_string())
                                 .collect(),
-                            start_beat: event.start_beat,
-                            duration: event.duration,
+                            start_beat: event.start_beat.into(),
+                            duration: event.duration.into(),
                             is_rest: event.is_rest,
                         })
                         .collect();
@@ -1356,7 +1405,7 @@ impl WasmInterpreter {
             };
 
             // Calculate total duration
-            let total_duration: f32 = events.iter().map(|e| e.duration).sum();
+            let total_duration: f32 = events.iter().map(|e| e.duration.to_f32()).sum();
             let total_duration_int = total_duration.ceil() as i32;
 
             // Calculate local beat index
@@ -1370,7 +1419,7 @@ impl WasmInterpreter {
 
             // Calculate wrap for looping
             let effective_beat = if total_duration > 0.0 {
-                (local_beat as f32 % total_duration)
+                local_beat as f32 % total_duration
             } else {
                 0.0
             };
@@ -1389,7 +1438,7 @@ impl WasmInterpreter {
                 if current_time >= effective_beat && current_time < (effective_beat + 0.99) {
                     beat_events.push(event.clone());
                 }
-                current_time += event.duration;
+                current_time += event.duration.to_f32();
             }
 
             if !beat_events.is_empty() {

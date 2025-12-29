@@ -7,12 +7,15 @@ license = "MIT"
 
 [dependencies]
 anyhow = "1.0"
-num-rational = "0.4"
 num-traits = "0.2"
+
+[dependencies.num-rational]
+version = "0.4"
+features = []
 
 [features]
 default = ["colored"]
-serde = ["dep:serde"]
+serde = ["dep:serde", "num-rational/serde"]
 colored = ["dep:colored"]
 wasm = ["dep:wasm-bindgen", "serde", "dep:serde-wasm-bindgen"]
 
