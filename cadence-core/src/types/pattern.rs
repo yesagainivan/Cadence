@@ -5,8 +5,10 @@
 
 use super::audio_config::Waveform;
 use super::drum::DrumSound;
+use super::time::{beats, to_f32, Time};
 use crate::types::{Chord, Note};
 use anyhow::{anyhow, Result};
+use num_rational::Ratio;
 use std::fmt;
 use std::str::FromStr;
 
@@ -54,12 +56,26 @@ pub struct PlaybackEvent {
     pub notes: Vec<NoteInfo>,
     /// Drum sounds in this event (for percussion)
     pub drums: Vec<DrumSound>,
-    /// Start time in beats relative to pattern start
-    pub start_beat: f32,
-    /// Duration in beats
-    pub duration: f32,
+    /// Start time in beats relative to pattern start (exact rational)
+    pub start_beat: Time,
+    /// Duration in beats (exact rational)
+    pub duration: Time,
     /// Whether this is a rest (silence)
     pub is_rest: bool,
+}
+
+impl PlaybackEvent {
+    /// Get start_beat as f32 for audio output
+    #[inline]
+    pub fn start_beat_f32(&self) -> f32 {
+        to_f32(self.start_beat)
+    }
+
+    /// Get duration as f32 for audio output
+    #[inline]
+    pub fn duration_f32(&self) -> f32 {
+        to_f32(self.duration)
+    }
 }
 
 /// A single step in a pattern
@@ -224,8 +240,8 @@ impl fmt::Display for PatternStep {
 pub struct Pattern {
     /// Steps in the pattern
     pub steps: Vec<PatternStep>,
-    /// Beats per cycle (default 4)
-    pub beats_per_cycle: f32,
+    /// Beats per cycle (default 4) - exact rational for drift-free timing
+    pub beats_per_cycle: Time,
     /// Optional ADSR envelope parameters for this pattern
     pub envelope: Option<(f32, f32, f32, f32)>, // (attack, decay, sustain, release)
     /// Optional waveform for this pattern
@@ -239,7 +255,7 @@ impl Pattern {
     pub fn new() -> Self {
         Pattern {
             steps: Vec::new(),
-            beats_per_cycle: 4.0,
+            beats_per_cycle: beats(4),
             envelope: None,
             waveform: None,
             pan: None,
@@ -250,25 +266,37 @@ impl Pattern {
     pub fn with_steps(steps: Vec<PatternStep>) -> Self {
         Pattern {
             steps,
-            beats_per_cycle: 4.0,
+            beats_per_cycle: beats(4),
             envelope: None,
             waveform: None,
             pan: None,
         }
     }
 
-    /// Set beats per cycle
-    pub fn with_cycle_length(mut self, beats: f32) -> Self {
-        self.beats_per_cycle = beats;
+    /// Set beats per cycle (accepts integer for convenience)
+    pub fn with_cycle_length(mut self, beats_count: i64) -> Self {
+        self.beats_per_cycle = beats(beats_count);
         self
     }
 
-    /// Get the duration of each step in beats
-    pub fn step_beats(&self) -> f32 {
+    /// Set beats per cycle from a Time value
+    pub fn with_cycle_length_time(mut self, cycle_time: Time) -> Self {
+        self.beats_per_cycle = cycle_time;
+        self
+    }
+
+    /// Get the duration of each step in beats (exact rational)
+    pub fn step_beats(&self) -> Time {
         if self.steps.is_empty() {
-            return 0.0;
+            return Ratio::from_integer(0);
         }
-        self.beats_per_cycle / self.steps.len() as f32
+        self.beats_per_cycle / self.steps.len() as i64
+    }
+
+    /// Get beats_per_cycle as f32 for audio output
+    #[inline]
+    pub fn beats_per_cycle_f32(&self) -> f32 {
+        to_f32(self.beats_per_cycle)
     }
 
     /// Total number of playable events (expanding groups and repeats)
@@ -276,8 +304,8 @@ impl Pattern {
         self.steps.iter().map(|s| s.to_frequencies().len()).sum()
     }
 
-    /// Get all frequencies with their durations
-    /// Returns: Vec of (frequencies, duration_beats, is_rest)
+    /// Get all frequencies with their durations (f32 for audio output)
+    /// Returns: Vec of (frequencies, duration_beats_f32, is_rest)
     pub fn to_events(&self) -> Vec<(Vec<f32>, f32, bool)> {
         let mut events = Vec::new();
         let step_beats = self.step_beats();
@@ -285,10 +313,10 @@ impl Pattern {
         for step in &self.steps {
             let freqs_list = step.to_frequencies();
             let count = freqs_list.len();
-            let event_duration = step_beats / count as f32;
+            let event_duration = step_beats / count as i64;
 
             for (freqs, is_rest) in freqs_list {
-                events.push((freqs, event_duration, is_rest));
+                events.push((freqs, to_f32(event_duration), is_rest));
             }
         }
 
@@ -307,12 +335,12 @@ impl Pattern {
     pub fn to_rich_events(&self) -> Vec<PlaybackEvent> {
         let mut events = Vec::new();
         let step_beats = self.step_beats();
-        let mut current_beat: f32 = 0.0;
+        let mut current_beat: Time = Ratio::from_integer(0);
 
         for step in &self.steps {
             let step_info_list = step.to_step_info();
             let count = step_info_list.len();
-            let event_duration = step_beats / count as f32;
+            let event_duration = step_beats / count as i64;
 
             for (notes, drums, is_rest) in step_info_list {
                 events.push(PlaybackEvent {
@@ -322,7 +350,7 @@ impl Pattern {
                     duration: event_duration,
                     is_rest,
                 });
-                current_beat += event_duration;
+                current_beat = current_beat + event_duration;
             }
         }
 
@@ -331,13 +359,13 @@ impl Pattern {
 
     /// Transform: speed up by factor (plays N times per cycle)
     pub fn fast(mut self, factor: usize) -> Self {
-        self.beats_per_cycle /= factor as f32;
+        self.beats_per_cycle = self.beats_per_cycle / factor as i64;
         self
     }
 
     /// Transform: slow down by factor (takes N cycles to complete)
     pub fn slow(mut self, factor: usize) -> Self {
-        self.beats_per_cycle *= factor as f32;
+        self.beats_per_cycle = self.beats_per_cycle * factor as i64;
         self
     }
 
@@ -535,13 +563,12 @@ impl Pattern {
 
     /// Create a pattern from a vector of chords
     pub fn from_chords(chords: Vec<Chord>) -> Self {
+        let step_count = chords.len() as i64;
         let steps: Vec<PatternStep> = chords.into_iter().map(PatternStep::Chord).collect();
-
-        let beats_per_cycle = steps.len() as f32;
 
         Pattern {
             steps,
-            beats_per_cycle,
+            beats_per_cycle: beats(step_count),
             envelope: Some((0.01, 0.1, 0.7, 0.3)),
             waveform: None,
             pan: None,
@@ -826,7 +853,7 @@ impl Pattern {
         let reversed: Vec<PatternStep> = self.steps.iter().rev().cloned().collect();
         self.steps.extend(reversed);
         // Double the cycle length to accommodate the palindrome
-        self.beats_per_cycle *= 2.0;
+        self.beats_per_cycle = self.beats_per_cycle * 2;
         self
     }
 
@@ -1327,20 +1354,20 @@ mod tests {
     #[test]
     fn test_step_beats() {
         let p = Pattern::parse("C E G _").unwrap();
-        assert_eq!(p.beats_per_cycle, 4.0);
-        assert_eq!(p.step_beats(), 1.0); // 4 steps, 4 beats = 1 beat each
+        assert_eq!(p.beats_per_cycle, beats(4));
+        assert_eq!(p.step_beats(), beats(1)); // 4 steps, 4 beats = 1 beat each
     }
 
     #[test]
     fn test_fast() {
         let p = Pattern::parse("C E").unwrap().fast(2);
-        assert_eq!(p.beats_per_cycle, 2.0); // Now plays in 2 beats
+        assert_eq!(p.beats_per_cycle, beats(2)); // Now plays in 2 beats
     }
 
     #[test]
     fn test_slow() {
         let p = Pattern::parse("C E").unwrap().slow(2);
-        assert_eq!(p.beats_per_cycle, 8.0); // Now takes 8 beats
+        assert_eq!(p.beats_per_cycle, beats(8)); // Now takes 8 beats
     }
 
     #[test]
@@ -1598,8 +1625,7 @@ mod tests {
     fn test_palindrome() {
         let p = Pattern::parse("C D E").unwrap().palindrome();
         assert_eq!(p.steps.len(), 6); // C D E E D C
-        assert_eq!(p.beats_per_cycle, 8.0); // Doubled from 4.0
-                                            // First three: C D E
+        assert_eq!(p.beats_per_cycle, beats(8)); // Doubled from 4
         match &p.steps[0] {
             PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0), // C
             _ => panic!("Expected Note C"),
@@ -1639,7 +1665,7 @@ mod tests {
         let p2 = Pattern::parse("E F").unwrap();
         let combined = p1.concat(p2);
         assert_eq!(combined.steps.len(), 4);
-        assert_eq!(combined.beats_per_cycle, 8.0); // 4 + 4
+        assert_eq!(combined.beats_per_cycle, beats(8)); // 4 + 4
         match &combined.steps[2] {
             PatternStep::Note(n) => assert_eq!(n.pitch_class(), 4), // E
             _ => panic!("Expected Note E"),

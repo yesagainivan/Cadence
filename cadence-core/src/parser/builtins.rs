@@ -898,15 +898,14 @@ impl FunctionRegistry {
 
                 let arg_value = evaluator.eval_with_env(args.into_iter().next().unwrap(), env)?;
 
-                let (original_beats_per_cycle, original_envelope) = match &arg_value {
-                    Value::Pattern(p) => (p.beats_per_cycle, p.envelope),
-                    _ => (4.0, None),
-                };
-
                 let pattern = match arg_value {
                     Value::Pattern(p) => p,
                     _ => return Err(anyhow!("smooth_voice_leading() only works on patterns")),
                 };
+
+                // Save original timing/envelope before optimization
+                let original_beats_per_cycle = pattern.beats_per_cycle;
+                let original_envelope = pattern.envelope;
 
                 println!("Optimizing voice leading...");
                 println!(
@@ -932,24 +931,17 @@ impl FunctionRegistry {
             "Alias for smooth_voice_leading.",
             "smooth(pattern: Pattern) -> Pattern",
             Arc::new(|evaluator, args, env| {
-                // Re-use logic or call the main one?
-                // Ideally we'd call the other function, but we are inside a closure.
-                // I'll just duplicate the simple logic wrapper.
-                // Or, better, I can look up the "smooth_voice_leading" handler and call it?
-                // No, `self` is not available in the closure easily without complexity.
-                // Duplication is fine for now.
                 if args.len() != 1 {
                     return Err(anyhow!("smooth() expects 1 argument"));
                 }
                 let arg_value = evaluator.eval_with_env(args.into_iter().next().unwrap(), env)?;
-                let (original_beats_per_cycle, original_envelope) = match &arg_value {
-                    Value::Pattern(p) => (p.beats_per_cycle, p.envelope),
-                    _ => (4.0, None),
-                };
                 let pattern = match arg_value {
                     Value::Pattern(p) => p,
                     _ => return Err(anyhow!("smooth() only works on patterns")),
                 };
+                // Save original timing/envelope before optimization
+                let original_beats_per_cycle = pattern.beats_per_cycle;
+                let original_envelope = pattern.envelope;
                 println!("Optimizing voice leading...");
                 let optimized = pattern.optimize_voice_leading();
                 let mut result = optimized;

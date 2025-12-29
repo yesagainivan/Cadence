@@ -123,7 +123,7 @@ impl LoopingPattern {
             }
             Value::Pattern(pattern) => {
                 let events = pattern.to_rich_events();
-                let beats_per_cycle = pattern.beats_per_cycle;
+                let beats_per_cycle = pattern.beats_per_cycle_f32();
                 self.last_known_beats_per_cycle = beats_per_cycle;
 
                 // Calculate position within the cycle
@@ -134,13 +134,12 @@ impl LoopingPattern {
                 let mut accumulated = 0.0f32;
                 let mut current_step = 0;
                 for (i, event) in events.iter().enumerate() {
-                    if cycle_position >= accumulated
-                        && cycle_position < accumulated + event.duration
-                    {
+                    let event_dur = event.duration_f32();
+                    if cycle_position >= accumulated && cycle_position < accumulated + event_dur {
                         current_step = i;
                         break;
                     }
-                    accumulated += event.duration;
+                    accumulated += event_dur;
                     // If we've gone past all events, we're in the last one
                     if i == events.len() - 1 {
                         current_step = i;
@@ -158,7 +157,7 @@ impl LoopingPattern {
                             drums: event.drums.clone(),
                             envelope: pattern.envelope,
                             waveform: pattern.waveform,
-                            duration_beats: event.duration,
+                            duration_beats: event.duration_f32(),
                         }))
                     } else {
                         Ok(None)
@@ -170,7 +169,7 @@ impl LoopingPattern {
             Value::String(s) => {
                 if let Ok(pattern) = crate::types::Pattern::parse(&s) {
                     let events = pattern.to_rich_events();
-                    let beats_per_cycle = pattern.beats_per_cycle;
+                    let beats_per_cycle = pattern.beats_per_cycle_f32();
                     self.last_known_beats_per_cycle = beats_per_cycle;
 
                     let beats_elapsed = (current_beat - self.start_beat) as f32;
@@ -179,13 +178,13 @@ impl LoopingPattern {
                     let mut accumulated = 0.0f32;
                     let mut current_step = 0;
                     for (i, event) in events.iter().enumerate() {
-                        if cycle_position >= accumulated
-                            && cycle_position < accumulated + event.duration
+                        let event_dur = event.duration_f32();
+                        if cycle_position >= accumulated && cycle_position < accumulated + event_dur
                         {
                             current_step = i;
                             break;
                         }
-                        accumulated += event.duration;
+                        accumulated += event_dur;
                         if i == events.len() - 1 {
                             current_step = i;
                         }
@@ -201,7 +200,7 @@ impl LoopingPattern {
                                 drums: event.drums.clone(),
                                 envelope: pattern.envelope,
                                 waveform: pattern.waveform,
-                                duration_beats: event.duration,
+                                duration_beats: event.duration_f32(),
                             }))
                         } else {
                             Ok(None)
@@ -215,7 +214,7 @@ impl LoopingPattern {
             }
             Value::EveryPattern(every) => {
                 // Get beats_per_cycle from the base pattern (both should have same duration)
-                let beats_per_cycle = every.base.beats_per_cycle;
+                let beats_per_cycle = every.base.beats_per_cycle_f32();
                 self.last_known_beats_per_cycle = beats_per_cycle;
 
                 // Calculate position within the cycle FIRST
@@ -239,13 +238,12 @@ impl LoopingPattern {
                 let mut accumulated = 0.0f32;
                 let mut current_step = 0;
                 for (i, event) in events.iter().enumerate() {
-                    if cycle_position >= accumulated
-                        && cycle_position < accumulated + event.duration
-                    {
+                    let event_dur = event.duration_f32();
+                    if cycle_position >= accumulated && cycle_position < accumulated + event_dur {
                         current_step = i;
                         break;
                     }
-                    accumulated += event.duration;
+                    accumulated += event_dur;
                     if i == events.len() - 1 {
                         current_step = i;
                     }
@@ -262,7 +260,7 @@ impl LoopingPattern {
                             drums: event.drums.clone(),
                             envelope: pattern.envelope,
                             waveform: pattern.waveform,
-                            duration_beats: event.duration,
+                            duration_beats: event.duration_f32(),
                         }))
                     } else {
                         Ok(None)

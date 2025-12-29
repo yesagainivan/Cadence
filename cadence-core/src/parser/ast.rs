@@ -559,7 +559,7 @@ impl Value {
                         } else {
                             event.notes.iter().map(|n| n.frequency).collect()
                         },
-                        duration_beats: event.duration,
+                        duration_beats: event.duration_f32(),
                         drums: event.drums,
                     })
                     .collect())

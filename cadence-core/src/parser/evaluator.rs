@@ -1052,24 +1052,26 @@ mod evaluator_numeric_tests {
 
         #[test]
         fn test_eval_fast() {
-            // fast("C E", 2) -> pattern with 2.0 beats per cycle (was 4.0)
+            use crate::types::beats;
+            // fast("C E", 2) -> pattern with 2 beats per cycle (was 4)
             let expr = parse("fast(\"C E\", 2)").unwrap();
             let result = Evaluator::new().eval(expr).unwrap();
 
             match result {
-                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, 2.0),
+                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(2)),
                 _ => panic!("Expected pattern value"),
             }
         }
 
         #[test]
         fn test_eval_slow() {
-            // slow("C E", 2) -> pattern with 8.0 beats per cycle (was 4.0)
+            use crate::types::beats;
+            // slow("C E", 2) -> pattern with 8 beats per cycle (was 4)
             let expr = parse("slow(\"C E\", 2)").unwrap();
             let result = Evaluator::new().eval(expr).unwrap();
 
             match result {
-                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, 8.0),
+                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(8)),
                 _ => panic!("Expected pattern value"),
             }
         }
@@ -1155,48 +1157,52 @@ mod evaluator_numeric_tests {
 
         #[test]
         fn test_method_chain_slow() {
+            use crate::types::beats;
             // "C E".slow(2) should work with method chaining and numeric arg
             let expr = parse("\"C E\".slow(2)").unwrap();
             let result = Evaluator::new().eval(expr).unwrap();
 
             match result {
-                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, 8.0),
+                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(8)),
                 _ => panic!("Expected pattern value"),
             }
         }
 
         #[test]
         fn test_method_chain_fast() {
+            use crate::types::beats;
             // "C E".fast(2) should work with method chaining and numeric arg
             let expr = parse("\"C E\".fast(2)").unwrap();
             let result = Evaluator::new().eval(expr).unwrap();
 
             match result {
-                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, 2.0),
+                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(2)),
                 _ => panic!("Expected pattern value"),
             }
         }
 
         #[test]
         fn test_nested_pattern_with_slow() {
+            use crate::types::beats;
             // Nested patterns with slow() should work
             let expr = parse("\"[G5,C5,E5] [Bb4,D5,F5]\".slow(2)").unwrap();
             let result = Evaluator::new().eval(expr).unwrap();
 
             match result {
-                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, 8.0),
+                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(8)),
                 _ => panic!("Expected pattern value"),
             }
         }
 
         #[test]
         fn test_double_nested_pattern_with_slow() {
+            use crate::types::beats;
             // Double-nested patterns with slow() should work (reproduction from issues.md)
             let expr = parse("\"[G5,C5,E5] [[Bb4,D5,F5] [F4,A4,C5]]\".slow(2)").unwrap();
             let result = Evaluator::new().eval(expr).unwrap();
 
             match result {
-                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, 8.0),
+                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(8)),
                 _ => panic!("Expected pattern value"),
             }
         }

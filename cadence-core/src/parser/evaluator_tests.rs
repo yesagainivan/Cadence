@@ -5,24 +5,26 @@ mod pattern_operator_tests {
 
     #[test]
     fn test_eval_fast() {
-        // fast("C E", 2) -> pattern with 2.0 beats per cycle (was 4.0)
+        use crate::types::beats;
+        // fast("C E", 2) -> pattern with 2 beats per cycle (was 4)
         let expr = parse("fast(\"C E\", 2)").unwrap();
         let result = Evaluator::new().eval(expr).unwrap();
 
         match result {
-            Value::Pattern(p) => assert_eq!(p.beats_per_cycle, 2.0),
+            Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(2)),
             _ => panic!("Expected pattern value"),
         }
     }
 
     #[test]
     fn test_eval_slow() {
-        // slow("C E", 2) -> pattern with 8.0 beats per cycle (was 4.0)
+        use crate::types::beats;
+        // slow("C E", 2) -> pattern with 8 beats per cycle (was 4)
         let expr = parse("slow(\"C E\", 2)").unwrap();
         let result = Evaluator::new().eval(expr).unwrap();
 
         match result {
-            Value::Pattern(p) => assert_eq!(p.beats_per_cycle, 8.0),
+            Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(8)),
             _ => panic!("Expected pattern value"),
         }
     }
