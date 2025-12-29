@@ -973,8 +973,29 @@ mod tests {
     fn test_action_flow_play() {
         let mut interpreter = Interpreter::new();
 
-        // Play statement should generate a PlayExpression action
+        // Non-looping play statement should generate ScheduledEvents (not actions)
+        // This is because non-looping plays use the Scheduler for precise timing
         let program = parse_statements("play [C, E, G]").unwrap();
+        let _result = interpreter.run_program(&program);
+
+        // Non-looping plays go to scheduled_events, not actions
+        let scheduled = interpreter.take_scheduled_events();
+        assert_eq!(scheduled.len(), 1);
+        match &scheduled[0].action {
+            crate::parser::interpreter::ScheduledAction::PlayNotes { frequencies, .. } => {
+                // C, E, G chord should have 3 frequencies
+                assert_eq!(frequencies.len(), 3);
+            }
+            _ => panic!("Expected PlayNotes scheduled action"),
+        }
+    }
+
+    #[test]
+    fn test_action_flow_play_loop() {
+        let mut interpreter = Interpreter::new();
+
+        // Looping play statement should generate a PlayExpression action
+        let program = parse_statements("play [C, E, G] loop").unwrap();
         let _result = interpreter.run_program(&program);
 
         let actions = interpreter.take_actions();
@@ -985,7 +1006,7 @@ mod tests {
                 queue_mode,
                 ..
             } => {
-                assert!(!looping);
+                assert!(*looping);
                 assert!(queue_mode.is_none());
             }
             _ => panic!("Expected PlayExpression action"),
@@ -1015,7 +1036,8 @@ mod tests {
         let mut interpreter = Interpreter::new();
 
         // Multiple statements should generate multiple actions
-        let program = parse_statements("tempo 100\nplay [C, E, G]\nstop").unwrap();
+        // Note: Using "play ... loop" because non-looping plays go to scheduled_events, not actions
+        let program = parse_statements("tempo 100\nplay [C, E, G] loop\nstop").unwrap();
         let _result = interpreter.run_program(&program);
 
         let actions = interpreter.take_actions();
@@ -1231,17 +1253,13 @@ mod tests {
         .unwrap();
         interpreter.run_program(&program).unwrap();
 
-        // First play (at virtual_time=0) creates an InterpreterAction
+        // All non-looping plays go to scheduled_events (for Scheduler-based playback)
         let actions = interpreter.take_actions();
-        assert_eq!(
-            actions.len(),
-            1,
-            "First play at VT=0 should be an immediate action"
-        );
+        assert_eq!(actions.len(), 0, "Non-looping plays don't create actions");
 
-        // Remaining plays (at virtual_time>0) become ScheduledEvents
+        // All 3 plays become ScheduledEvents at beats 0, 1, and 2
         let scheduled = interpreter.take_scheduled_events();
-        assert_eq!(scheduled.len(), 2, "Later plays become scheduled events");
+        assert_eq!(scheduled.len(), 3, "All plays become scheduled events");
 
         // Virtual time should be 3 beats
         assert_eq!(interpreter.virtual_time, 3.0);

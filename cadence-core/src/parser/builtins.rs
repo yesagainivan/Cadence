@@ -102,24 +102,30 @@ impl FunctionRegistry {
                 let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
                 let factor_value = evaluator.eval_with_env(args[1].clone(), env)?;
 
-                let pattern = match pattern_value {
-                    Value::Pattern(p) => p,
-                    Value::String(s) => crate::types::Pattern::parse(&s)
-                        .map_err(|e| anyhow!("fast(): invalid pattern string: {}", e))?,
-                    _ => {
-                        return Err(anyhow!(
-                            "fast() first argument must be a pattern or pattern string"
-                        ))
-                    }
-                };
-
                 let factor = match factor_value {
                     Value::Note(note) => (note.pitch_class() as usize).max(1),
                     Value::Number(n) => (n as usize).max(1),
                     _ => return Err(anyhow!("fast() factor must be a note or number")),
                 };
 
-                Ok(Value::Pattern(pattern.fast(factor)))
+                match pattern_value {
+                    Value::Pattern(p) => Ok(Value::Pattern(p.fast(factor))),
+                    Value::String(s) => {
+                        let pattern = crate::types::Pattern::parse(&s)
+                            .map_err(|e| anyhow!("fast(): invalid pattern string: {}", e))?;
+                        Ok(Value::Pattern(pattern.fast(factor)))
+                    }
+                    Value::EveryPattern(every) => {
+                        // Apply fast to both base and transformed patterns
+                        let fast_every = crate::types::EveryPattern::new(
+                            every.interval,
+                            every.base.clone().fast(factor),
+                            every.transformed.clone().fast(factor),
+                        );
+                        Ok(Value::EveryPattern(Box::new(fast_every)))
+                    }
+                    _ => Err(anyhow!("fast() first argument must be a pattern or pattern string")),
+                }
             }),
         );
 
@@ -136,24 +142,30 @@ impl FunctionRegistry {
                 let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
                 let factor_value = evaluator.eval_with_env(args[1].clone(), env)?;
 
-                let pattern = match pattern_value {
-                    Value::Pattern(p) => p,
-                    Value::String(s) => crate::types::Pattern::parse(&s)
-                        .map_err(|e| anyhow!("slow(): invalid pattern string: {}", e))?,
-                    _ => {
-                        return Err(anyhow!(
-                            "slow() first argument must be a pattern or pattern string"
-                        ))
-                    }
-                };
-
                 let factor = match factor_value {
                     Value::Note(note) => (note.pitch_class() as usize).max(1),
                     Value::Number(n) => (n as usize).max(1),
                     _ => return Err(anyhow!("slow() factor must be a note or number")),
                 };
 
-                Ok(Value::Pattern(pattern.slow(factor)))
+                match pattern_value {
+                    Value::Pattern(p) => Ok(Value::Pattern(p.slow(factor))),
+                    Value::String(s) => {
+                        let pattern = crate::types::Pattern::parse(&s)
+                            .map_err(|e| anyhow!("slow(): invalid pattern string: {}", e))?;
+                        Ok(Value::Pattern(pattern.slow(factor)))
+                    }
+                    Value::EveryPattern(every) => {
+                        // Apply slow to both base and transformed patterns
+                        let slow_every = crate::types::EveryPattern::new(
+                            every.interval,
+                            every.base.clone().slow(factor),
+                            every.transformed.clone().slow(factor),
+                        );
+                        Ok(Value::EveryPattern(Box::new(slow_every)))
+                    }
+                    _ => Err(anyhow!("slow() first argument must be a pattern or pattern string")),
+                }
             }),
         );
 
@@ -169,7 +181,21 @@ impl FunctionRegistry {
 
                 let arg_value = evaluator.eval_with_env(args.into_iter().next().unwrap(), env)?;
                 match arg_value {
-                    Value::Pattern(pattern) => Ok(Value::Pattern(pattern.rev())),
+                    Value::Pattern(p) => Ok(Value::Pattern(p.rev())),
+                    Value::String(s) => {
+                        let pattern = crate::types::Pattern::parse(&s)
+                            .map_err(|e| anyhow!("rev(): invalid pattern string: {}", e))?;
+                        Ok(Value::Pattern(pattern.rev()))
+                    }
+                    Value::EveryPattern(every) => {
+                        // When reversing an EveryPattern, reverse both base and transformed
+                        let reversed = crate::types::EveryPattern::new(
+                            every.interval,
+                            every.base.clone().rev(),
+                            every.transformed.clone().rev(),
+                        );
+                        Ok(Value::EveryPattern(Box::new(reversed)))
+                    }
                     _ => Err(anyhow!("rev() only works on patterns")),
                 }
             }),
@@ -1416,26 +1442,40 @@ impl FunctionRegistry {
                 }
 
                 let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let pattern = match pattern_value {
-                    Value::Pattern(p) => p,
-                    _ => return Err(anyhow!("env() first argument must be a pattern")),
+
+                // Helper to apply envelope to a pattern
+                let apply_env = |p: crate::types::Pattern, preset: Option<&str>, adsr: Option<(f32, f32, f32, f32)>| -> crate::types::Pattern {
+                    match (preset, adsr) {
+                        (Some(name), _) => p.env_preset(name),
+                        (_, Some((a, d, s, r))) => p.env(a, d, s, r),
+                        _ => p,
+                    }
                 };
 
                 if args.len() == 2 {
                     // Preset mode: env(pattern, "pluck")
                     let preset_val = evaluator.eval_with_env(args[1].clone(), env)?;
-                    match preset_val {
-                        Value::String(preset_name) => {
-                            Ok(Value::Pattern(pattern.env_preset(&preset_name)))
+                    let preset_name = match preset_val {
+                        Value::String(s) => s,
+                        _ => return Err(anyhow!("env() with 2 arguments expects a preset name string")),
+                    };
+
+                    match pattern_value {
+                        Value::Pattern(p) => Ok(Value::Pattern(apply_env(p, Some(&preset_name), None))),
+                        Value::EveryPattern(every) => {
+                            let env_every = crate::types::EveryPattern::new(
+                                every.interval,
+                                apply_env(every.base.clone(), Some(&preset_name), None),
+                                apply_env(every.transformed.clone(), Some(&preset_name), None),
+                            );
+                            Ok(Value::EveryPattern(Box::new(env_every)))
                         }
-                        _ => Err(anyhow!(
-                            "env() with 2 arguments expects a preset name string"
-                        )),
+                        _ => Err(anyhow!("env() first argument must be a pattern")),
                     }
                 } else if args.len() == 5 {
                     // Custom ADSR: env(pattern, attack, decay, sustain, release)
                     let attack = match evaluator.eval_with_env(args[1].clone(), env)? {
-                        Value::Number(n) => n as f32 / 100.0, // Assume percentage-like input
+                        Value::Number(n) => n as f32 / 100.0,
                         Value::Note(n) => n.pitch_class() as f32 / 100.0,
                         _ => return Err(anyhow!("env() attack must be a number")),
                     };
@@ -1455,7 +1495,18 @@ impl FunctionRegistry {
                         _ => return Err(anyhow!("env() release must be a number")),
                     };
 
-                    Ok(Value::Pattern(pattern.env(attack, decay, sustain, release)))
+                    match pattern_value {
+                        Value::Pattern(p) => Ok(Value::Pattern(apply_env(p, None, Some((attack, decay, sustain, release))))),
+                        Value::EveryPattern(every) => {
+                            let env_every = crate::types::EveryPattern::new(
+                                every.interval,
+                                apply_env(every.base.clone(), None, Some((attack, decay, sustain, release))),
+                                apply_env(every.transformed.clone(), None, Some((attack, decay, sustain, release))),
+                            );
+                            Ok(Value::EveryPattern(Box::new(env_every)))
+                        }
+                        _ => Err(anyhow!("env() first argument must be a pattern")),
+                    }
                 } else {
                     Err(anyhow!(
                         "env() expects either (pattern, preset_name) or (pattern, a, d, s, r)"

@@ -56,45 +56,27 @@ mod pattern_operator_tests {
         use crate::parser::ast::Value;
         use crate::parser::evaluator::Evaluator;
 
-        // Mock environment with _cycle = 0
-        let mut env = crate::parser::environment::Environment::new();
-        env.define("_cycle".to_string(), Value::Number(0));
-
         let expr = parse("every(2, \"rev\", \"C D E\")").unwrap();
-        // Cycle 0: 0 % 2 == 0 => rev applied => "E D C"
-        let result = Evaluator::new()
-            .eval_with_env(expr.clone(), Some(&env))
-            .unwrap();
-        match result {
-            Value::Pattern(p) => {
-                let _events = p.to_events();
-                // First event should be E using to_events which might not be ordered by time?
-                // to_events returns (frequencies, duration, is_rest).
-                // Actually Pattern logic: rev reverses the steps.
-                // "C D E" steps: C, D, E.
-                // Rev steps: E, D, C.
-                // So first step is E.
-                let steps = p.steps;
-                match &steps[0] {
-                    crate::types::PatternStep::Note(n) => assert_eq!(n.pitch_class(), 4), // E
-                    _ => panic!("Expected Note E"),
-                }
-            }
-            _ => panic!("Expected pattern"),
-        }
+        let result = Evaluator::new().eval(expr.clone()).unwrap();
 
-        // Cycle 1: 1 % 2 != 0 => normal => "C D E"
-        env.set("_cycle", Value::Number(1)).unwrap();
-        let result = Evaluator::new().eval_with_env(expr, Some(&env)).unwrap();
+        // every() now returns an EveryPattern, not a Pattern
         match result {
-            Value::Pattern(p) => {
-                let steps = p.steps;
-                match &steps[0] {
+            Value::EveryPattern(every) => {
+                // Test cycle 0: (0 + 1) % 2 != 0, so base pattern "C D E"
+                let p0 = every.get_pattern_for_cycle(0);
+                match &p0.steps[0] {
                     crate::types::PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0), // C
-                    _ => panic!("Expected Note C"),
+                    _ => panic!("Expected Note C at cycle 0"),
+                }
+
+                // Test cycle 1: (1 + 1) % 2 == 0, so transformed pattern "E D C"
+                let p1 = every.get_pattern_for_cycle(1);
+                match &p1.steps[0] {
+                    crate::types::PatternStep::Note(n) => assert_eq!(n.pitch_class(), 4), // E
+                    _ => panic!("Expected Note E at cycle 1"),
                 }
             }
-            _ => panic!("Expected pattern"),
+            _ => panic!("Expected EveryPattern"),
         }
     }
 }
