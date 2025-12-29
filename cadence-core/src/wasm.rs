@@ -6,8 +6,11 @@
 use wasm_bindgen::prelude::*;
 
 // Why are we not using the evaluator and interpreter?
+#[cfg(feature = "wasm")]
 use crate::parser::ast::{Expression, Value};
+#[cfg(feature = "wasm")]
 use crate::parser::evaluator::Evaluator;
+#[cfg(feature = "wasm")]
 use crate::parser::interpreter::{Interpreter, InterpreterAction};
 use crate::parser::lexer::{Lexer, SpannedToken, Token};
 

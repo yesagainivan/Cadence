@@ -1,4 +1,4 @@
-use crate::parser::ast::{Expression, Statement, Value};
+use crate::parser::ast::{Expression, Value};
 use crate::parser::environment::Environment;
 use crate::parser::evaluator::Evaluator;
 use crate::types::{

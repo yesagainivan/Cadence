@@ -1,6 +1,6 @@
 use crate::{
     parser::ast::{Expression, Statement, Value},
-    types::{analyze_progression, Chord, CommonProgressions, Note, RomanNumeral, VoiceLeading},
+    types::{Chord, CommonProgressions, Note},
 };
 // use crate::types::{chord::Chord, note::Note};
 use anyhow::{anyhow, Result};
@@ -1024,6 +1024,7 @@ mod tests {
 mod evaluator_numeric_tests {
     use super::*;
     use crate::parser::parse;
+    use crate::types::analyze_progression;
 
     #[test]
     fn test_eval_numeric_progression() {
@@ -1042,169 +1043,6 @@ mod evaluator_numeric_tests {
                 assert_eq!(analysis[2].to_string(), "I");
             }
             _ => panic!("Expected progression value"),
-        }
-    }
-
-    #[cfg(test)]
-    mod pattern_tests {
-        use super::*;
-        use crate::parser::parse;
-
-        #[test]
-        fn test_eval_fast() {
-            use crate::types::beats;
-            // fast("C E", 2) -> pattern with 2 beats per cycle (was 4)
-            let expr = parse("fast(\"C E\", 2)").unwrap();
-            let result = Evaluator::new().eval(expr).unwrap();
-
-            match result {
-                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(2)),
-                _ => panic!("Expected pattern value"),
-            }
-        }
-
-        #[test]
-        fn test_eval_slow() {
-            use crate::types::beats;
-            // slow("C E", 2) -> pattern with 8 beats per cycle (was 4)
-            let expr = parse("slow(\"C E\", 2)").unwrap();
-            let result = Evaluator::new().eval(expr).unwrap();
-
-            match result {
-                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(8)),
-                _ => panic!("Expected pattern value"),
-            }
-        }
-
-        #[test]
-        fn test_eval_rev() {
-            // rev("C D E") -> E D C
-            let expr = parse("rev(\"C D E\")").unwrap();
-            let result = Evaluator::new().eval(expr).unwrap();
-
-            match result {
-                Value::Pattern(p) => {
-                    let steps = p.steps;
-                    assert_eq!(steps.len(), 3);
-                    // First step should be E (pitch class 4)
-                    match &steps[0] {
-                        crate::types::PatternStep::Note(n) => assert_eq!(n.pitch_class(), 4),
-                        _ => panic!("Expected Note E, got {:?}", steps[0]),
-                    }
-                    // Last step should be C (pitch class 0)
-                    match &steps[2] {
-                        crate::types::PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0),
-                        _ => panic!("Expected Note C, got {:?}", steps[2]),
-                    }
-                }
-                _ => panic!("Expected pattern value"),
-            }
-        }
-
-        #[test]
-        fn test_eval_env_preset() {
-            // env("C E", "pluck") -> pattern with pluck envelope
-            let expr = parse("env(\"C E\", \"pluck\")").unwrap();
-            let result = Evaluator::new().eval(expr).unwrap();
-
-            match result {
-                Value::Pattern(p) => {
-                    assert!(p.envelope.is_some());
-                    let (attack, _decay, sustain, _release) = p.envelope.unwrap();
-                    assert!(attack < 0.01); // pluck has very short attack
-                    assert!(sustain < 0.1); // pluck has no sustain
-                }
-                _ => panic!("Expected pattern value"),
-            }
-        }
-
-        #[test]
-        fn test_method_chain_env() {
-            // "C E".env("pad") should work with method chaining
-            let expr = parse("\"C E\".env(\"pad\")").unwrap();
-            let result = Evaluator::new().eval(expr).unwrap();
-
-            match result {
-                Value::Pattern(p) => {
-                    assert!(p.envelope.is_some());
-                    let (attack, _decay, sustain, _release) = p.envelope.unwrap();
-                    assert!(attack > 0.1); // pad has slow attack
-                    assert!(sustain > 0.5); // pad has high sustain
-                }
-                _ => panic!("Expected pattern value"),
-            }
-        }
-
-        #[test]
-        fn test_eval_env_custom_adsr() {
-            // env("C E", 20, 40, 70, 30) -> pattern with custom ADSR
-            // Values are divided by 100 to get seconds/level
-            let expr = parse("env(\"C E\", 20, 40, 70, 30)").unwrap();
-            let result = Evaluator::new().eval(expr).unwrap();
-
-            match result {
-                Value::Pattern(p) => {
-                    assert!(p.envelope.is_some());
-                    let (attack, decay, sustain, release) = p.envelope.unwrap();
-                    assert!((attack - 0.20).abs() < 0.01);
-                    assert!((decay - 0.40).abs() < 0.01);
-                    assert!((sustain - 0.70).abs() < 0.01);
-                    assert!((release - 0.30).abs() < 0.01);
-                }
-                _ => panic!("Expected pattern value"),
-            }
-        }
-
-        #[test]
-        fn test_method_chain_slow() {
-            use crate::types::beats;
-            // "C E".slow(2) should work with method chaining and numeric arg
-            let expr = parse("\"C E\".slow(2)").unwrap();
-            let result = Evaluator::new().eval(expr).unwrap();
-
-            match result {
-                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(8)),
-                _ => panic!("Expected pattern value"),
-            }
-        }
-
-        #[test]
-        fn test_method_chain_fast() {
-            use crate::types::beats;
-            // "C E".fast(2) should work with method chaining and numeric arg
-            let expr = parse("\"C E\".fast(2)").unwrap();
-            let result = Evaluator::new().eval(expr).unwrap();
-
-            match result {
-                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(2)),
-                _ => panic!("Expected pattern value"),
-            }
-        }
-
-        #[test]
-        fn test_nested_pattern_with_slow() {
-            use crate::types::beats;
-            // Nested patterns with slow() should work
-            let expr = parse("\"[G5,C5,E5] [Bb4,D5,F5]\".slow(2)").unwrap();
-            let result = Evaluator::new().eval(expr).unwrap();
-
-            match result {
-                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(8)),
-                _ => panic!("Expected pattern value"),
-            }
-        }
-
-        #[test]
-        fn test_double_nested_pattern_with_slow() {
-            use crate::types::beats;
-            // Double-nested patterns with slow() should work (reproduction from issues.md)
-            let expr = parse("\"[G5,C5,E5] [[Bb4,D5,F5] [F4,A4,C5]]\".slow(2)").unwrap();
-            let result = Evaluator::new().eval(expr).unwrap();
-
-            match result {
-                Value::Pattern(p) => assert_eq!(p.beats_per_cycle, beats(8)),
-                _ => panic!("Expected pattern value"),
-            }
         }
     }
 

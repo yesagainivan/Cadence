@@ -1177,39 +1177,6 @@ fn take_until_bracket(chars: &mut std::iter::Peekable<std::str::Chars>) -> Resul
     Err(anyhow!("Unclosed bracket in pattern"))
 }
 
-/// Take a note token (e.g., "C", "D#", "Bb", "C4", "D#3")
-fn take_note(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
-    let mut note = String::new();
-
-    // First char is the note letter
-    if let Some(c) = chars.next() {
-        note.push(c.to_ascii_uppercase());
-    }
-
-    // Check for accidental
-    if let Some(&c) = chars.peek() {
-        if c == '#' {
-            // Sharp - always consume
-            note.push(chars.next().unwrap());
-        } else if c == 'b' {
-            // Lowercase 'b' is always a flat indicator
-            note.push(chars.next().unwrap());
-        }
-        // Note: uppercase 'B' would be parsed as a new note, not a flat
-    }
-
-    // Check for octave number
-    while let Some(&c) = chars.peek() {
-        if c.is_ascii_digit() || c == '-' {
-            note.push(chars.next().unwrap());
-        } else {
-            break;
-        }
-    }
-
-    note
-}
-
 /// Take a note token OR a longer identifier (for variable names)
 /// Keeps case as-is for variable names, but uppercases for notes
 fn take_note_or_identifier(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
