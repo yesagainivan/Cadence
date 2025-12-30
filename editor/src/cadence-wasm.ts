@@ -5,7 +5,7 @@
  * providing access to tokenization and parsing functions.
  */
 
-import init, { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, WasmInterpreter } from './wasm/cadence_core.js';
+import init, { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, get_symbols, get_symbol_at_position, WasmInterpreter } from './wasm/cadence_core.js';
 
 export interface HighlightSpan {
     start_line: number;
@@ -319,8 +319,73 @@ export function getDocumentation(): DocItem[] {
     }
 }
 
+// ============================================================================
+// Symbol API (for Language Service features)
+// ============================================================================
+
+/** A function symbol from the source code */
+export interface FunctionSymbol {
+    kind: 'Function';
+    name: string;
+    params: string[];
+    signature: string;
+    start: number;  // UTF-16 position
+    end: number;    // UTF-16 position
+}
+
+/** A variable symbol from the source code */
+export interface VariableSymbol {
+    kind: 'Variable';
+    name: string;
+    value_type: string | null;
+    start: number;  // UTF-16 position
+    end: number;    // UTF-16 position
+}
+
+export type Symbol = FunctionSymbol | VariableSymbol;
+
+export interface SymbolsResult {
+    success: boolean;
+    symbols: Symbol[];
+    error: string | null;
+}
+
+/**
+ * Get all symbols from source code (parses fresh each time)
+ */
+export function getSymbols(code: string): SymbolsResult {
+    if (!wasmInitialized) {
+        return { success: false, symbols: [], error: 'WASM not initialized' };
+    }
+
+    try {
+        return get_symbols(code) as SymbolsResult;
+    } catch (e) {
+        console.error('Get symbols error:', e);
+        return { success: false, symbols: [], error: String(e) };
+    }
+}
+
+/**
+ * Get the symbol at a specific cursor position (for hover)
+ */
+export function getSymbolAtPosition(code: string, position: number): Symbol | null {
+    if (!wasmInitialized) {
+        return null;
+    }
+
+    try {
+        const result = get_symbol_at_position(code, position);
+        return result as Symbol | null;
+    } catch (e) {
+        console.error('Get symbol at position error:', e);
+        return null;
+    }
+}
+
 /**
  * Get user-defined functions from an interpreter instance
+ * @deprecated Use getSymbols() instead for reactive updates
  */
 export function getUserFunctions(interpreter: WasmInterpreter): DocItem[] {
     try {
@@ -333,5 +398,4 @@ export function getUserFunctions(interpreter: WasmInterpreter): DocItem[] {
 }
 
 // Re-export for convenience
-export { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, WasmInterpreter };
-
+export { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, get_symbols, get_symbol_at_position, WasmInterpreter };

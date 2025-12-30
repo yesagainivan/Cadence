@@ -18,6 +18,7 @@ import { audioEngine } from './audio-engine';
 import { PianoRoll } from './piano-roll';
 import { PropertiesPanel } from './properties-panel';
 import { initTheme, getTheme, toggleTheme, onThemeChange, buildCMTheme } from './theme';
+import { debouncedRefreshSymbols } from './hover';
 
 // Global instances
 let pianoRoll: PianoRoll | null = null;
@@ -96,6 +97,9 @@ function createEditor(container: HTMLElement): EditorView {
           updatePianoRollAtCursor(update.view);
         }
         if (update.docChanged) {
+          const code = update.view.state.doc.toString();
+          // Refresh symbols for hover (updates user function docs)
+          debouncedRefreshSymbols(code);
           // Debounced validation
           scheduleValidation(update.view);
         }
