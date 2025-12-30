@@ -1,12 +1,14 @@
 // cadence-core/src/parser/mod.rs
 
 pub mod ast;
+pub mod binder;
 pub mod builtins;
 pub mod environment;
 pub mod evaluator;
 pub mod interpreter;
 pub mod lexer;
 pub mod statement_parser;
+pub mod symbols;
 
 #[cfg(test)]
 mod evaluator_tests;
