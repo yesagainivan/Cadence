@@ -292,7 +292,7 @@ struct ParseResult {
 // Rational Time Serialization
 // ============================================================================
 
-use crate::types::{beats, Time};
+use crate::types::Time;
 
 /// Rational number for JS serialization (preserves exactness)
 /// Serializes as { "n": numerator, "d": denominator }
