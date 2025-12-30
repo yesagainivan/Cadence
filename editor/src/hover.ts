@@ -133,25 +133,35 @@ function createBuiltinTooltip(doc: DocItem): HTMLElement {
 function createSymbolTooltip(symbol: Symbol): HTMLElement {
     const dom = document.createElement("div");
     dom.className = "cm-tooltip-cursor";
-    dom.style.padding = "4px 8px";
-    dom.style.fontFamily = "monospace";
-    dom.style.maxWidth = "400px";
+    dom.style.cssText = `
+        padding: 4px 8px;
+        font-family: monospace;
+        max-width: 400px;
+        background: #21252b;
+        border: 1px solid #3a3f4b;
+        border-radius: 4px;
+        color: #abb2bf;
+    `;
 
     if (symbol.kind === 'Function') {
         dom.innerHTML = `
-            <div style="font-weight: bold; border-bottom: 1px solid #444; margin-bottom: 4px; padding-bottom: 2px;">
+            <div style="font-weight: bold; border-bottom: 1px solid #3a3f4b; margin-bottom: 4px; padding-bottom: 2px;">
                 <span style="color: #61afef">${symbol.name}</span>
-                <span style="float: right; color: #abb2bf; font-size: 0.8em; font-weight: normal">User</span>
+                <span style="float: right; color: #7f848e; font-size: 0.85em; font-weight: normal">User</span>
             </div>
             <div style="color: #98c379;">${symbol.signature}</div>
         `;
     } else {
+        // Variable - show name and type
+        const typeInfo = symbol.value_type
+            ? `<span style="color: #7f848e">:</span> <span style="color: #e5c07b">${symbol.value_type}</span>`
+            : '';
         dom.innerHTML = `
-            <div style="font-weight: bold; border-bottom: 1px solid #444; margin-bottom: 4px; padding-bottom: 2px;">
-                <span style="color: #61afef">${symbol.name}</span>
-                <span style="float: right; color: #abb2bf; font-size: 0.8em; font-weight: normal">Variable</span>
+            <div style="font-weight: bold; border-bottom: 1px solid #3a3f4b; margin-bottom: 4px; padding-bottom: 2px;">
+                <span style="color: #e06c75">${symbol.name}</span>
+                <span style="float: right; color: #7f848e; font-size: 0.85em; font-weight: normal">Variable</span>
             </div>
-            ${symbol.value_type ? `<div style="color: #e5c07b;">: ${symbol.value_type}</div>` : ''}
+            <div style="color: #c678dd;">let ${symbol.name}${typeInfo}</div>
         `;
     }
     return dom;

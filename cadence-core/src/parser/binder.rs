@@ -3,8 +3,34 @@
 //! This is the bridge between parsing and language service features.
 //! Call `bind()` after parsing to get a fresh SymbolTable.
 
-use crate::parser::ast::{SpannedProgram, SpannedStatement, Statement};
+use crate::parser::ast::{Expression, SpannedProgram, SpannedStatement, Statement};
 use crate::parser::symbols::{FunctionSymbol, Span, SymbolTable, VariableSymbol};
+
+/// Infer a type hint from an AST expression (without evaluation)
+fn infer_type_from_expr(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::Note(_) => Some("Note".to_string()),
+        Expression::Chord(_) => Some("Chord".to_string()),
+        Expression::Pattern(_) => Some("Pattern".to_string()),
+        Expression::Number(_) => Some("Number".to_string()),
+        Expression::Boolean(_) => Some("Boolean".to_string()),
+        Expression::String(_) => Some("String".to_string()),
+        Expression::Array(_) => Some("Chord".to_string()), // Arrays often become chords
+        Expression::FunctionCall { name, .. } => {
+            // Some built-in functions have known return types
+            match name.as_str() {
+                "major" | "minor" | "dim" | "aug" | "sus2" | "sus4" | "invert" | "bass" => {
+                    Some("Chord".to_string())
+                }
+                "fast" | "slow" | "rev" | "every" => Some("Pattern".to_string()),
+                "root" | "fifth" => Some("Note".to_string()),
+                _ => None, // Unknown function, can't infer
+            }
+        }
+        Expression::Transpose { target, .. } => infer_type_from_expr(target),
+        _ => None,
+    }
+}
 
 /// Binder walks the AST and extracts symbols
 pub struct Binder {
@@ -54,8 +80,9 @@ impl Binder {
                 }
             }
 
-            Statement::Let { name, value: _ } => {
-                let var = VariableSymbol::new(name.clone(), span);
+            Statement::Let { name, value } => {
+                let inferred_type = infer_type_from_expr(value);
+                let var = VariableSymbol::new(name.clone(), span).with_inferred_type(inferred_type);
                 self.table.add_variable(var);
             }
 

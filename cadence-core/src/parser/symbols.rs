@@ -99,6 +99,12 @@ impl VariableSymbol {
             value_type: Some(value_type),
         }
     }
+
+    /// Builder method to add inferred type
+    pub fn with_inferred_type(mut self, value_type: Option<String>) -> Self {
+        self.value_type = value_type;
+        self
+    }
 }
 
 /// Symbol kinds for generic queries
