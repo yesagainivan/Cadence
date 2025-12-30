@@ -435,6 +435,10 @@ impl Repl {
                                         // Parse and execute as statement(s)
                                         match parse_statements(&line) {
                                             Ok(program) => {
+                                                // Inject _beat for beat() function
+                                                let current_beat = self.clock.current_beat() as i32;
+                                                self.interpreter.set_variable("_beat", Value::Number(current_beat));
+
                                                 match self.interpreter.run_program(&program) {
                                                     Ok(Some(value)) => println!("{}", value),
                                                     Ok(None) => {} // Statement with no value

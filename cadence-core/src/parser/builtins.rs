@@ -266,6 +266,26 @@ impl FunctionRegistry {
             }),
         );
 
+        // beat() - Returns the current global beat
+        self.register(
+            "beat",
+            "Time",
+            "Returns the current global beat (0-based). Use modulo for periodic patterns.",
+            "beat() -> Number",
+            Arc::new(|_evaluator, args, env| {
+                if !args.is_empty() {
+                    return Err(anyhow!("beat() takes no arguments"));
+                }
+                // Read _beat from environment if available
+                if let Some(e) = env {
+                    if let Some(Value::Number(n)) = e.get("_beat") {
+                        return Ok(Value::Number(*n));
+                    }
+                }
+                Ok(Value::Number(0)) // Default if not in playback context
+            }),
+        );
+
         self.register(
             "rev",
             "Pattern",

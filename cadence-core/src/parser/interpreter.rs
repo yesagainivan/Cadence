@@ -112,6 +112,14 @@ impl Interpreter {
         self.virtual_time = 0.0;
     }
 
+    /// Set a variable in the environment (e.g., for injecting _beat from host)
+    pub fn set_variable(&self, name: &str, value: Value) {
+        self.environment
+            .write()
+            .unwrap()
+            .define(name.to_string(), value);
+    }
+
     /// Run a complete program
     pub fn run_program(&mut self, program: &Program) -> Result<Option<Value>> {
         let mut last_value = None;
