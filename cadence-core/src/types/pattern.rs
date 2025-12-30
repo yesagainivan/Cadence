@@ -95,13 +95,18 @@ pub enum PatternStep {
     Variable(String),
     /// Drum sound: kick, snare, hh, etc.
     Drum(DrumSound),
+    /// Weighted step: C@2 means C takes 2 units of duration
+    Weighted(Box<PatternStep>, usize),
 }
 
 impl PatternStep {
-    /// Get the weight of this step for duration calculation
-    /// Groups and repeats have weight 1 (they fit in one slot)
-    pub fn weight(&self) -> f32 {
-        1.0
+    /// Get the weight of this step for duration calculation.
+    /// Weighted steps return their weight, all others return 1.
+    pub fn weight(&self) -> usize {
+        match self {
+            PatternStep::Weighted(_, w) => *w,
+            _ => 1,
+        }
     }
 
     /// Flatten this step into individual notes for playback
@@ -126,6 +131,8 @@ impl PatternStep {
             }
             // Drums return empty frequencies - the sound comes from DrumOscillator, not melodic oscillators
             PatternStep::Drum(_) => vec![(vec![], false)],
+            // Weighted delegates to inner (weight is handled at duration calculation)
+            PatternStep::Weighted(inner, _) => inner.to_frequencies(),
         }
     }
 
@@ -163,6 +170,8 @@ impl PatternStep {
                     false,
                 )]
             }
+            // Weighted delegates to inner (weight is handled at duration calculation)
+            PatternStep::Weighted(inner, _) => inner.to_note_infos(),
         }
     }
 
@@ -188,6 +197,8 @@ impl PatternStep {
                 )
             }
             PatternStep::Drum(d) => vec![(vec![], vec![*d], false)],
+            // Weighted delegates to inner (weight is handled at duration calculation)
+            PatternStep::Weighted(inner, _) => inner.to_step_info(),
         }
     }
 
@@ -205,6 +216,9 @@ impl PatternStep {
             }
             PatternStep::Variable(name) => PatternStep::Variable(name.clone()),
             PatternStep::Drum(d) => PatternStep::Drum(*d), // Drums don't transpose
+            PatternStep::Weighted(inner, weight) => {
+                PatternStep::Weighted(Box::new(inner.transpose(semitones)), *weight)
+            }
         }
     }
 }
@@ -228,6 +242,7 @@ impl fmt::Display for PatternStep {
             PatternStep::Repeat(step, count) => write!(f, "{}*{}", step, count),
             PatternStep::Variable(name) => write!(f, "{}", name),
             PatternStep::Drum(d) => write!(f, "{}", d),
+            PatternStep::Weighted(inner, weight) => write!(f, "{}@{}", inner, weight),
         }
     }
 }
@@ -326,6 +341,8 @@ impl Pattern {
     /// Get rich playback events with full note identity for visualization and accurate MIDI.
     /// Unlike `to_events()`, this preserves note names, MIDI numbers, and computes start times.
     ///
+    /// Supports weighted steps: `C@2 D` means C gets 2/3 of the cycle, D gets 1/3.
+    ///
     /// # Returns
     /// Vec of `PlaybackEvent` with:
     /// - `notes`: Full `NoteInfo` for each note (MIDI, frequency, name, pitch_class, octave)
@@ -334,13 +351,30 @@ impl Pattern {
     /// - `is_rest`: Whether this is silence
     pub fn to_rich_events(&self) -> Vec<PlaybackEvent> {
         let mut events = Vec::new();
-        let step_beats = self.step_beats();
+
+        // Calculate total weight of all steps
+        let total_weight: i64 = self.steps.iter().map(|s| s.weight() as i64).sum();
+
+        // Duration per weight unit (exact rational)
+        // If no steps, avoid division by zero
+        if total_weight == 0 {
+            return events;
+        }
+        let unit_duration = self.beats_per_cycle / total_weight;
+
         let mut current_beat: Time = Ratio::from_integer(0);
 
         for step in &self.steps {
+            let step_weight = step.weight() as i64;
+            let step_duration = unit_duration * step_weight;
+
             let step_info_list = step.to_step_info();
-            let count = step_info_list.len();
-            let event_duration = step_beats / count as i64;
+            let sub_count = step_info_list.len() as i64;
+            let event_duration = if sub_count > 0 {
+                step_duration / sub_count
+            } else {
+                step_duration
+            };
 
             for (notes, drums, is_rest) in step_info_list {
                 events.push(PlaybackEvent {
@@ -785,6 +819,7 @@ impl Pattern {
                 PatternStep::Rest => {}
                 PatternStep::Variable(_) => {} // Variables don't contribute notes until resolved
                 PatternStep::Drum(_) => {}     // Drums don't contribute melodic notes
+                PatternStep::Weighted(inner, _) => collect_notes(inner, notes), // Delegate to inner
             }
         }
 
@@ -1054,6 +1089,7 @@ fn has_non_variable_content(step: &PatternStep) -> bool {
         }
         PatternStep::Group(steps) => steps.iter().any(has_non_variable_content),
         PatternStep::Repeat(inner, _) => has_non_variable_content(inner),
+        PatternStep::Weighted(inner, _) => has_non_variable_content(inner),
         PatternStep::Variable(_) => false,
     }
 }
@@ -1071,7 +1107,7 @@ fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
             // Rest
             '_' => {
                 chars.next();
-                let step = maybe_parse_repeat(&mut chars, PatternStep::Rest)?;
+                let step = maybe_parse_weight_and_repeat(&mut chars, PatternStep::Rest)?;
                 steps.push(step);
             }
             // Group start
@@ -1085,18 +1121,21 @@ fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
                 if trimmed.starts_with('[') {
                     // It's a nested group - parse recursively
                     let inner_steps = parse_steps(&group_content)?;
-                    let step = maybe_parse_repeat(&mut chars, PatternStep::Group(inner_steps))?;
+                    let step =
+                        maybe_parse_weight_and_repeat(&mut chars, PatternStep::Group(inner_steps))?;
                     steps.push(step);
                 } else if group_content.contains(',') {
                     // It's a chord - parse comma-separated notes
                     let note_strs: Vec<&str> = group_content.split(',').map(|s| s.trim()).collect();
                     let chord = Chord::from_note_strings(note_strs)?;
-                    let step = maybe_parse_repeat(&mut chars, PatternStep::Chord(chord))?;
+                    let step =
+                        maybe_parse_weight_and_repeat(&mut chars, PatternStep::Chord(chord))?;
                     steps.push(step);
                 } else {
                     // It's a group
                     let inner_steps = parse_steps(&group_content)?;
-                    let step = maybe_parse_repeat(&mut chars, PatternStep::Group(inner_steps))?;
+                    let step =
+                        maybe_parse_weight_and_repeat(&mut chars, PatternStep::Group(inner_steps))?;
                     steps.push(step);
                 }
             }
@@ -1111,7 +1150,7 @@ fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
                         PatternStep::Variable(token)
                     }
                 };
-                let step = maybe_parse_repeat(&mut chars, step)?;
+                let step = maybe_parse_weight_and_repeat(&mut chars, step)?;
                 steps.push(step);
             }
             // Lowercase letter - could be a flat note (a-g), a drum, or a variable
@@ -1127,7 +1166,7 @@ fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
                     // Not a valid note or drum, treat as variable
                     PatternStep::Variable(token)
                 };
-                let step = maybe_parse_repeat(&mut chars, step)?;
+                let step = maybe_parse_weight_and_repeat(&mut chars, step)?;
                 steps.push(step);
             }
             // Identifier starting with h-z (could be drum like 'kick', 'hh', or variable)
@@ -1139,7 +1178,7 @@ fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
                 } else {
                     PatternStep::Variable(ident)
                 };
-                let step = maybe_parse_repeat(&mut chars, step)?;
+                let step = maybe_parse_weight_and_repeat(&mut chars, step)?;
                 steps.push(step);
             }
             // Unknown
@@ -1243,11 +1282,36 @@ fn take_identifier(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
     ident
 }
 
-/// Parse optional *N repetition suffix
-fn maybe_parse_repeat(
+/// Parse optional @N weight and *N repetition suffixes
+/// Weight is parsed first, then repeat (e.g., C@2*3 means weighted C repeated 3 times)
+fn maybe_parse_weight_and_repeat(
     chars: &mut std::iter::Peekable<std::str::Chars>,
     step: PatternStep,
 ) -> Result<PatternStep> {
+    // Check for @N weight first
+    let step = if chars.peek() == Some(&'@') {
+        chars.next(); // consume '@'
+        let mut weight_str = String::new();
+        while let Some(&c) = chars.peek() {
+            if c.is_ascii_digit() {
+                weight_str.push(chars.next().unwrap());
+            } else {
+                break;
+            }
+        }
+        if weight_str.is_empty() {
+            return Err(anyhow!("Expected number after '@'"));
+        }
+        let weight: usize = weight_str.parse()?;
+        if weight == 0 {
+            return Err(anyhow!("Weight @0 is not allowed (use _ for rest)"));
+        }
+        PatternStep::Weighted(Box::new(step), weight)
+    } else {
+        step
+    };
+
+    // Then check for *N repeat
     if chars.peek() == Some(&'*') {
         chars.next(); // consume '*'
         let mut count_str = String::new();
@@ -1794,5 +1858,137 @@ mod tests {
         let cloned_transformed = every.pattern_for_cycle(1);
         assert_eq!(cloned_transformed.steps.len(), 4);
         assert_eq!(cloned_transformed.steps[0], every.transformed.steps[0]);
+    }
+
+    // ========================================================================
+    // Weighted Steps Tests
+    // ========================================================================
+
+    #[test]
+    fn test_weighted_parse_simple() {
+        let p = Pattern::parse("C@2 D").unwrap();
+        assert_eq!(p.steps.len(), 2);
+        // First step should be Weighted(Note(C), 2)
+        match &p.steps[0] {
+            PatternStep::Weighted(inner, weight) => {
+                assert_eq!(*weight, 2);
+                assert!(matches!(**inner, PatternStep::Note(_)));
+            }
+            _ => panic!("Expected Weighted step"),
+        }
+        // Second step should be Note(D) with weight 1
+        assert!(matches!(&p.steps[1], PatternStep::Note(_)));
+        assert_eq!(p.steps[1].weight(), 1);
+    }
+
+    #[test]
+    fn test_weighted_durations() {
+        let p = Pattern::parse("C@2 D").unwrap();
+        let events = p.to_rich_events();
+
+        // Total weight = 2 + 1 = 3
+        // C gets 2/3 of 4 beats = 8/3 beats
+        // D gets 1/3 of 4 beats = 4/3 beats
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].duration, Ratio::new(8, 3));
+        assert_eq!(events[1].duration, Ratio::new(4, 3));
+
+        // Check start times
+        assert_eq!(events[0].start_beat, Ratio::from_integer(0));
+        assert_eq!(events[1].start_beat, Ratio::new(8, 3));
+    }
+
+    #[test]
+    fn test_weighted_chord() {
+        let p = Pattern::parse("[C,E]@3 G").unwrap();
+        let events = p.to_rich_events();
+
+        // Total weight = 3 + 1 = 4
+        // Chord gets 3/4 of 4 beats = 3 beats
+        // G gets 1/4 of 4 beats = 1 beat
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].duration, beats(3));
+        assert_eq!(events[1].duration, beats(1));
+    }
+
+    #[test]
+    fn test_weighted_rest() {
+        let p = Pattern::parse("C@2 _@2 D").unwrap();
+        let events = p.to_rich_events();
+
+        // Total weight = 2 + 2 + 1 = 5
+        // C gets 2/5 of 4 = 8/5 beats
+        // Rest gets 2/5 of 4 = 8/5 beats
+        // D gets 1/5 of 4 = 4/5 beats
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].duration, Ratio::new(8, 5));
+        assert_eq!(events[1].duration, Ratio::new(8, 5));
+        assert!(events[1].is_rest);
+        assert_eq!(events[2].duration, Ratio::new(4, 5));
+    }
+
+    #[test]
+    fn test_weighted_with_repeat() {
+        // C@2*3 means: weight 2, repeated 3 times
+        let p = Pattern::parse("C@2*3 D").unwrap();
+
+        // Should have 2 steps: Repeat(Weighted(C, 2), 3) and Note(D)
+        assert_eq!(p.steps.len(), 2);
+        match &p.steps[0] {
+            PatternStep::Repeat(inner, count) => {
+                assert_eq!(*count, 3);
+                match inner.as_ref() {
+                    PatternStep::Weighted(note, weight) => {
+                        assert_eq!(*weight, 2);
+                        assert!(matches!(**note, PatternStep::Note(_)));
+                    }
+                    _ => panic!("Expected Weighted inside Repeat"),
+                }
+            }
+            _ => panic!("Expected Repeat step"),
+        }
+    }
+
+    #[test]
+    fn test_weighted_display() {
+        let p = Pattern::parse("C@2 D").unwrap();
+        let display = format!("{}", p);
+        assert!(
+            display.contains("C@2"),
+            "Display should show weight: got {}",
+            display
+        );
+        assert!(
+            display.contains("D"),
+            "Display should show D: got {}",
+            display
+        );
+    }
+
+    #[test]
+    fn test_weighted_transpose() {
+        let p = Pattern::parse("C@2 D").unwrap();
+        let transposed = p.transpose(2);
+
+        // Weight should be preserved after transpose
+        match &transposed.steps[0] {
+            PatternStep::Weighted(inner, weight) => {
+                assert_eq!(*weight, 2);
+                // D (C + 2) should be pitch class 2
+                match inner.as_ref() {
+                    PatternStep::Note(n) => assert_eq!(n.pitch_class(), 2),
+                    _ => panic!("Expected Note inside Weighted"),
+                }
+            }
+            _ => panic!("Expected Weighted step"),
+        }
+    }
+
+    #[test]
+    fn test_weighted_zero_error() {
+        // @0 should be an error
+        let result = Pattern::parse("C@0 D");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("@0"));
     }
 }

@@ -220,3 +220,6 @@ A production-ready music programming language for chord progressions and harmoni
 15. **Queue N countdown** - Full N-beat countdown for `queue N` syntax
 16. **TidalCycles-style `every()`** - Pattern combinator that alternates by cycle. See [docs/handoff.md](docs/handoff.md)
 
+
+
+Add indexing to patterns and chords

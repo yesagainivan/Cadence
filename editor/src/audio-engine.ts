@@ -482,9 +482,15 @@ export class CadenceAudioEngine {
                 const actionPan = action.pan ?? undefined;
 
                 // Schedule events relative to beat start time
-                let time = startTime;
+                // Each tick delivers events for one beat, but we need sub-beat precision
+                // for weighted steps. Use the fractional part of start_beat for offset.
                 for (const event of action.events) {
-                    // Convert rational duration to float beats, then to seconds
+                    // Get the fractional beat offset (within the current beat)
+                    const startBeatFloat = rationalToFloat(event.start_beat);
+                    const beatOffset = startBeatFloat % 1.0; // Fractional part
+                    const eventTime = startTime + this.beatsToSeconds(beatOffset);
+
+                    // Convert rational duration to seconds
                     const durationBeats = rationalToFloat(event.duration);
                     const durationSec = this.beatsToSeconds(durationBeats);
 
@@ -495,18 +501,16 @@ export class CadenceAudioEngine {
                         const normalizedGain = trackVolume / Math.sqrt(noteCount);
 
                         for (const freq of event.frequencies) {
-                            this.scheduleNote(freq, time, durationSec, normalizedGain, actionWaveform, actionAdsr, actionPan);
+                            this.scheduleNote(freq, eventTime, durationSec, normalizedGain, actionWaveform, actionAdsr, actionPan);
                         }
                     }
 
                     // Play drum sounds
                     if (event.drums && event.drums.length > 0) {
                         for (const drumType of event.drums) {
-                            this.scheduleDrum(drumType, time, trackVolume, actionPan);
+                            this.scheduleDrum(drumType, eventTime, trackVolume, actionPan);
                         }
                     }
-
-                    time += durationSec;
                 }
                 break;
             }
