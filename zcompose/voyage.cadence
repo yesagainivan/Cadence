@@ -1,0 +1,111 @@
+//==================//
+//===== Voyage =====//
+//==================//
+// A journey through time and indices
+// showcasing [n] indexing and beat() access.
+
+tempo 110
+
+//=====================//
+//===== Functions =====//
+//=====================//
+
+// Selects a note from a scale using a time-based index
+// "Time travel" through the scale
+fn voyager(root, time_factor) {
+    // Scale intervals (Minor scale)
+    // We define this as an array to index into it!
+    let scale_intervals = [0, 2, 3, 5, 7, 8, 10, 12] 
+    
+    // Evolve the index based on global beat and a factor
+    let raw_idx = (beat() * time_factor) 
+    
+    // Use the new indexing feature!
+    // raw_idx is a float, but indexing truncates it automatically
+    // We use .at() handling modulo wrapping if we wanted, 
+    // but here we do % manually to stay in one octave for index
+    let idx = raw_idx % 8
+    
+    let interval = scale_intervals[idx]
+    
+    return root + interval
+}
+
+// Extract bass note from a chord and drop it
+fn deep_bass(chord) {
+    // Get the root (0th element) using indexing
+    let root = chord[0]
+    
+    // Drop it an octave and return as a single-note pattern
+    // We convert to pattern so we can apply .fast() / .slow() if needed
+    // But returning a Note is also fine for 1-beat steps
+    return root - 12
+}
+
+// Create a generative chord pad that evolves
+fn evolving_pad(root) {
+    // Change chord quality based on time
+    // Cycle every 16 beats through 3 states
+    let b = beat()
+    let quality_idx = (b / 16) % 3
+    
+    // Array of qualities (intervals for the third)
+    // 3=Minor, 4=Major, 2=Sus2
+    let thirds = [3, 4, 2]
+    
+    let third = root + thirds[quality_idx]
+    let fifth = root + 7
+    
+    return [root, third, fifth]
+}
+
+//========================//
+//===== Construction =====//
+//========================//
+
+// Define a root note progression
+// We can index into this array based on time!
+let roots = [C3, A2, F2, G2]
+
+// Calculate current root dynamically
+// beat() / 16 gives measures (at 4 beats/bar * 4 bars). 
+// Actually let's change root every 4 beats (1 bar)
+fn current_root() {
+    let bar = beat() / 4 
+    let idx = bar % 4
+    return roots[idx]
+}
+
+//=================//
+//===== Track =====//
+//=================//
+
+// Track 1: Generative Lead
+on 1 {
+    // Inline the root calculation because local variables in 'on' blocks 
+    // are dropped after the block finishes, but 'play loop' needs them alive!
+    play voyager(current_root() + 12, 2) loop
+    volume 40
+}
+
+// Track 2: Evolving Chord Pad
+on 2 {
+    play evolving_pad(current_root()) loop
+    volume 30
+}
+
+// Track 3: Deep Bass
+on 3 {
+    // Construct the chord inline to avoid local variable scoping issue
+    play deep_bass([current_root(), current_root()+4, current_root()+7]) loop
+    volume 60
+}
+
+// Track 4: Rhythmic Percussion Indexing
+on 4 {
+    // We can use beat() to index into a "drum kit" array
+    // Using Notes: C2 (Kick), Fs2 (Hat), D2 (Snare), Fs2 (Hat)
+    // Note: 'play Note loop' triggers once per beat (quarter notes)
+    play [C2, Fs2, D2, Fs2][beat() % 4] loop
+    volume 50
+}

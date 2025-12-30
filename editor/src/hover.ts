@@ -2,6 +2,7 @@ import { hoverTooltip, type HoverTooltipSource } from "@codemirror/view";
 import { getDocumentation, type DocItem } from "./cadence-wasm";
 
 let cachedDocs: Map<string, DocItem> | null = null;
+let userFunctions: Map<string, DocItem> = new Map();
 
 function ensureDocs() {
     if (cachedDocs) return;
@@ -14,11 +15,18 @@ function ensureDocs() {
     }
 }
 
+/**
+ * Update cached user functions (called after interpreter.load())
+ */
+export function updateUserFunctions(funcs: DocItem[]) {
+    userFunctions = new Map();
+    for (const func of funcs) {
+        userFunctions.set(func.name, func);
+    }
+}
+
 export const cadenceHover = hoverTooltip((view, pos, side) => {
     ensureDocs();
-    if (!cachedDocs) {
-        return null;
-    }
 
     const { from, to, text } = view.state.doc.lineAt(pos);
 
@@ -43,7 +51,9 @@ export const cadenceHover = hoverTooltip((view, pos, side) => {
     if (start === end) return null;
 
     const word = text.slice(start - from, end - from);
-    const doc = cachedDocs.get(word);
+
+    // Check built-ins first, then user functions
+    const doc = cachedDocs?.get(word) || userFunctions.get(word);
 
     if (!doc) return null;
 

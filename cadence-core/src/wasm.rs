@@ -1463,6 +1463,29 @@ impl WasmInterpreter {
         js_actions
     }
 
+    /// Get user-defined functions from the environment as DocItems (for hover)
+    pub fn get_user_functions(&self) -> JsValue {
+        let env = self.interpreter.environment.read().unwrap();
+        let mut docs: Vec<DocItemJS> = Vec::new();
+
+        for (name, value) in env.all_bindings() {
+            // Skip internal variables (starting with _)
+            if name.starts_with('_') {
+                continue;
+            }
+            if let Value::Function { params, .. } = value {
+                docs.push(DocItemJS {
+                    name: name.clone(),
+                    category: "User".to_string(),
+                    description: "User-defined function".to_string(),
+                    signature: format!("fn {}({})", name, params.join(", ")),
+                });
+            }
+        }
+
+        serde_wasm_bindgen::to_value(&docs).unwrap_or(JsValue::NULL)
+    }
+
     /// Define/Updates a global variable
     pub fn set_variable(&mut self, _name: &str, _json_value: JsValue) {
         // This would require parsing JSON to Value, simpler to just re-eval small snippets for now

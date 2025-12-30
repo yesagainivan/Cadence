@@ -1,4 +1,5 @@
-import { type Action, WasmInterpreter, rationalToFloat } from './cadence-wasm';
+import { type Action, WasmInterpreter, rationalToFloat, getUserFunctions } from './cadence-wasm';
+import { updateUserFunctions } from './hover';
 
 /** ADSR envelope parameters */
 export interface AdsrParams {
@@ -383,6 +384,9 @@ export class CadenceAudioEngine {
 
         // Load code and get initial actions - this also pre-populates env including _cycle=0
         const result = this.interpreter.load(code);
+
+        // Update hover cache with user-defined functions from this script
+        updateUserFunctions(getUserFunctions(this.interpreter));
 
         // Process initial actions (like Setup)
         if (result.actions) {

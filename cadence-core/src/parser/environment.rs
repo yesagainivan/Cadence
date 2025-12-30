@@ -89,6 +89,22 @@ impl Environment {
         self.scopes.iter().flat_map(|scope| scope.keys()).collect()
     }
 
+    /// Get all bindings across all scopes (for introspection/hover)
+    /// Returns deduplicated bindings, with inner scopes shadowing outer ones
+    pub fn all_bindings(&self) -> Vec<(&String, &Value)> {
+        let mut seen = std::collections::HashSet::new();
+        let mut result = Vec::new();
+        // Iterate from innermost to outermost (rev) to respect shadowing
+        for scope in self.scopes.iter().rev() {
+            for (name, value) in scope.iter() {
+                if seen.insert(name) {
+                    result.push((name, value));
+                }
+            }
+        }
+        result
+    }
+
     /// Current scope depth (1 = global only)
     pub fn depth(&self) -> usize {
         self.scopes.len()

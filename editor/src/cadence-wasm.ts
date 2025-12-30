@@ -319,5 +319,19 @@ export function getDocumentation(): DocItem[] {
     }
 }
 
+/**
+ * Get user-defined functions from an interpreter instance
+ */
+export function getUserFunctions(interpreter: WasmInterpreter): DocItem[] {
+    try {
+        const result = interpreter.get_user_functions();
+        return result as DocItem[];
+    } catch (e) {
+        console.error('Get user functions error:', e);
+        return [];
+    }
+}
+
 // Re-export for convenience
 export { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, WasmInterpreter };
+
