@@ -240,6 +240,124 @@ impl Evaluator {
                 }
             }
 
+            // Index operation: pattern[0], chord[1], array[-1]
+            Expression::Index { target, index } => {
+                let target_val = self.eval_with_env(*target, env)?;
+                let index_val = self.eval_with_env(*index, env)?;
+
+                let idx = match index_val {
+                    Value::Number(n) => n,
+                    _ => return Err(anyhow!("Index must be a number, got {:?}", index_val)),
+                };
+
+                match target_val {
+                    Value::Pattern(pattern) => {
+                        let len = pattern.steps.len() as i32;
+                        if len == 0 {
+                            return Err(anyhow!("Cannot index into empty pattern"));
+                        }
+                        // Handle negative indices (from end)
+                        let actual_idx = if idx < 0 { len + idx } else { idx };
+                        if actual_idx < 0 || actual_idx >= len {
+                            return Err(anyhow!(
+                                "Index {} out of bounds for pattern with {} steps",
+                                idx,
+                                len
+                            ));
+                        }
+                        // Return the step at index as appropriate Value
+                        use crate::types::PatternStep;
+                        fn step_to_value(step: &PatternStep) -> Result<Value> {
+                            match step {
+                                PatternStep::Note(n) => Ok(Value::Note(*n)),
+                                PatternStep::Chord(c) => Ok(Value::Chord(c.clone())),
+                                PatternStep::Rest => {
+                                    // Return a pattern with just a rest
+                                    Ok(Value::Pattern(crate::types::Pattern::with_steps(vec![
+                                        PatternStep::Rest,
+                                    ])))
+                                }
+                                PatternStep::Drum(d) => {
+                                    Ok(Value::String(d.short_name().to_string()))
+                                }
+                                PatternStep::Variable(_) => {
+                                    Err(anyhow!("Cannot index unresolved variable"))
+                                }
+                                PatternStep::Group(steps) => {
+                                    // Return as pattern containing the group
+                                    Ok(Value::Pattern(crate::types::Pattern::with_steps(
+                                        steps.clone(),
+                                    )))
+                                }
+                                PatternStep::Repeat(inner, count) => {
+                                    // Return as pattern containing the repeat
+                                    Ok(Value::Pattern(crate::types::Pattern::with_steps(vec![
+                                        PatternStep::Repeat(inner.clone(), *count),
+                                    ])))
+                                }
+                                PatternStep::Weighted(inner, _) => {
+                                    // Unwrap weighted step and return its value
+                                    step_to_value(inner)
+                                }
+                            }
+                        }
+                        step_to_value(&pattern.steps[actual_idx as usize])
+                    }
+                    Value::Chord(chord) => {
+                        let notes = chord.notes_vec();
+                        let len = notes.len() as i32;
+                        if len == 0 {
+                            return Err(anyhow!("Cannot index into empty chord"));
+                        }
+                        let actual_idx = if idx < 0 { len + idx } else { idx };
+                        if actual_idx < 0 || actual_idx >= len {
+                            return Err(anyhow!(
+                                "Index {} out of bounds for chord with {} notes",
+                                idx,
+                                len
+                            ));
+                        }
+                        Ok(Value::Note(notes[actual_idx as usize].clone()))
+                    }
+                    Value::Array(arr) => {
+                        let len = arr.len() as i32;
+                        if len == 0 {
+                            return Err(anyhow!("Cannot index into empty array"));
+                        }
+                        let actual_idx = if idx < 0 { len + idx } else { idx };
+                        if actual_idx < 0 || actual_idx >= len {
+                            return Err(anyhow!(
+                                "Index {} out of bounds for array with {} elements",
+                                idx,
+                                len
+                            ));
+                        }
+                        Ok(arr[actual_idx as usize].clone())
+                    }
+                    Value::String(s) => {
+                        // Allow indexing into strings to get char (as string)
+                        let chars: Vec<char> = s.chars().collect();
+                        let len = chars.len() as i32;
+                        if len == 0 {
+                            return Err(anyhow!("Cannot index into empty string"));
+                        }
+                        let actual_idx = if idx < 0 { len + idx } else { idx };
+                        if actual_idx < 0 || actual_idx >= len {
+                            return Err(anyhow!(
+                                "Index {} out of bounds for string with {} chars",
+                                idx,
+                                len
+                            ));
+                        }
+                        Ok(Value::String(chars[actual_idx as usize].to_string()))
+                    }
+                    _ => Err(anyhow!(
+                        "Cannot index into {:?} - only Pattern, Chord, Array, or String supported",
+                        target_val
+                    )),
+                }
+            }
+
             // Binary arithmetic operations: +, -, *, /, %
             Expression::BinaryOp {
                 left,

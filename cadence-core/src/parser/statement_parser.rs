@@ -840,44 +840,60 @@ impl StatementParser {
         Ok(left)
     }
 
-    /// Parse postfix operations (method calls)
-    /// Grammar: postfix_expr = primary_expr ('.' identifier '(' args ')')*
+    /// Parse postfix operations (method calls and indexing)
+    /// Grammar: postfix_expr = primary_expr (('.' identifier '(' args ')') | ('[' expr ']'))*
     /// Desugars method calls to function calls: expr.method(a, b) → method(expr, a, b)
     fn parse_postfix_expression(&mut self) -> Result<Expression> {
         let mut expr = self.parse_primary_expression()?;
 
-        // Handle chained method calls
-        while matches!(self.current(), Token::Dot) {
-            self.advance(); // consume '.'
+        // Handle chained method calls and indexing
+        loop {
+            if matches!(self.current(), Token::Dot) {
+                self.advance(); // consume '.'
 
-            let method_name = match self.current().clone() {
-                Token::Identifier(name) => name,
-                _ => {
-                    let span = self.current_span();
-                    return Err(anyhow!(
-                        "at {}: Expected method name after '.', found {:?}",
-                        span,
-                        self.current()
-                    ));
-                }
-            };
-            self.advance();
+                let method_name = match self.current().clone() {
+                    Token::Identifier(name) => name,
+                    _ => {
+                        let span = self.current_span();
+                        return Err(anyhow!(
+                            "at {}: Expected method name after '.', found {:?}",
+                            span,
+                            self.current()
+                        ));
+                    }
+                };
+                self.advance();
 
-            // Parse method arguments (must have parentheses)
-            self.expect(&Token::LeftParen)?;
-            let mut args = vec![expr]; // receiver is first argument
+                // Parse method arguments (must have parentheses)
+                self.expect(&Token::LeftParen)?;
+                let mut args = vec![expr]; // receiver is first argument
 
-            if !matches!(self.current(), Token::RightParen) {
-                args.push(self.parse_expression()?);
-                while matches!(self.current(), Token::Comma) {
-                    self.advance();
+                if !matches!(self.current(), Token::RightParen) {
                     args.push(self.parse_expression()?);
+                    while matches!(self.current(), Token::Comma) {
+                        self.advance();
+                        args.push(self.parse_expression()?);
+                    }
                 }
-            }
-            self.expect(&Token::RightParen)?;
+                self.expect(&Token::RightParen)?;
 
-            // Desugar to function call: receiver.method(a, b) → method(receiver, a, b)
-            expr = Expression::function_call(method_name, args);
+                // Desugar to function call: receiver.method(a, b) → method(receiver, a, b)
+                expr = Expression::function_call(method_name, args);
+            } else if matches!(self.current(), Token::LeftBracket) {
+                self.advance(); // consume '['
+
+                let index = self.parse_expression()?;
+
+                self.expect(&Token::RightBracket)?;
+
+                // Create Index expression
+                expr = Expression::Index {
+                    target: Box::new(expr),
+                    index: Box::new(index),
+                };
+            } else {
+                break;
+            }
         }
 
         Ok(expr)

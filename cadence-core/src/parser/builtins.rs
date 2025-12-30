@@ -169,6 +169,103 @@ impl FunctionRegistry {
             }),
         );
 
+        // at() - Index into a pattern, chord, or array
+        self.register(
+            "at",
+            "Pattern",
+            "Returns the element at the specified index (0-based). Negative indices count from the end.",
+            "at(pattern: Pattern | Chord | Array, index: Number) -> Note | Chord | Value",
+            Arc::new(|evaluator, args, env| {
+                if args.len() != 2 {
+                    return Err(anyhow!("at() expects 2 arguments: target, index"));
+                }
+
+                let target_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let index_value = evaluator.eval_with_env(args[1].clone(), env)?;
+
+                let idx = match index_value {
+                    Value::Number(n) => n,
+                    _ => return Err(anyhow!("at() index must be a number")),
+                };
+
+                match target_value {
+                    Value::Pattern(pattern) => {
+                        let len = pattern.steps.len() as i32;
+                        if len == 0 {
+                            return Err(anyhow!("Cannot index into empty pattern"));
+                        }
+                        let actual_idx = if idx < 0 { len + idx } else { idx };
+                        if actual_idx < 0 || actual_idx >= len {
+                            return Err(anyhow!(
+                                "Index {} out of bounds for pattern with {} steps",
+                                idx,
+                                len
+                            ));
+                        }
+                        use crate::types::PatternStep;
+                        fn step_to_value(step: &PatternStep) -> Result<Value> {
+                            match step {
+                                PatternStep::Note(n) => Ok(Value::Note(*n)),
+                                PatternStep::Chord(c) => Ok(Value::Chord(c.clone())),
+                                PatternStep::Rest => Ok(Value::Pattern(
+                                    crate::types::Pattern::with_steps(vec![PatternStep::Rest]),
+                                )),
+                                PatternStep::Drum(d) => Ok(Value::String(d.short_name().to_string())),
+                                PatternStep::Variable(_) => {
+                                    Err(anyhow!("Cannot index unresolved variable"))
+                                }
+                                PatternStep::Group(steps) => Ok(Value::Pattern(
+                                    crate::types::Pattern::with_steps(steps.clone()),
+                                )),
+                                PatternStep::Repeat(inner, count) => Ok(Value::Pattern(
+                                    crate::types::Pattern::with_steps(vec![PatternStep::Repeat(
+                                        inner.clone(),
+                                        *count,
+                                    )]),
+                                )),
+                                PatternStep::Weighted(inner, _) => step_to_value(inner),
+                            }
+                        }
+                        step_to_value(&pattern.steps[actual_idx as usize])
+                    }
+                    Value::Chord(chord) => {
+                        let notes = chord.notes_vec();
+                        let len = notes.len() as i32;
+                        if len == 0 {
+                            return Err(anyhow!("Cannot index into empty chord"));
+                        }
+                        let actual_idx = if idx < 0 { len + idx } else { idx };
+                        if actual_idx < 0 || actual_idx >= len {
+                            return Err(anyhow!(
+                                "Index {} out of bounds for chord with {} notes",
+                                idx,
+                                len
+                            ));
+                        }
+                        Ok(Value::Note(notes[actual_idx as usize].clone()))
+                    }
+                    Value::Array(arr) => {
+                        let len = arr.len() as i32;
+                        if len == 0 {
+                            return Err(anyhow!("Cannot index into empty array"));
+                        }
+                        let actual_idx = if idx < 0 { len + idx } else { idx };
+                        if actual_idx < 0 || actual_idx >= len {
+                            return Err(anyhow!(
+                                "Index {} out of bounds for array with {} elements",
+                                idx,
+                                len
+                            ));
+                        }
+                        Ok(arr[actual_idx as usize].clone())
+                    }
+                    _ => Err(anyhow!(
+                        "at() requires Pattern, Chord, or Array as first argument"
+                    )),
+                }
+            }),
+        );
+
         self.register(
             "rev",
             "Pattern",

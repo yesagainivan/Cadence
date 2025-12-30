@@ -374,6 +374,12 @@ pub enum Expression {
     /// Logical NOT: !expr
     LogicalNot(Box<Expression>),
 
+    /// Index operation: pattern[0], chord[1], array[-1]
+    Index {
+        target: Box<Expression>,
+        index: Box<Expression>,
+    },
+
     /// Binary arithmetic operation: expr + expr, expr * expr, etc.
     BinaryOp {
         left: Box<Expression>,
@@ -498,6 +504,9 @@ impl fmt::Display for Expression {
             }
             Expression::LogicalNot(expr) => {
                 write!(f, "!{}", expr)
+            }
+            Expression::Index { target, index } => {
+                write!(f, "{}[{}]", target, index)
             }
             Expression::BinaryOp {
                 left,
