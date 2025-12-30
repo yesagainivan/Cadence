@@ -6,6 +6,7 @@
  */
 
 import type { PlayEvent, PatternEvents } from './cadence-wasm';
+import { rationalToFloat } from './cadence-wasm';
 import { getTheme, onThemeChange } from './theme';
 
 // Piano key properties
@@ -162,7 +163,7 @@ export class PianoRoll {
             const events = this.getEventsCallback(code, position);
             if (events && events.events.length > 0) {
                 this.events = events.events;
-                this.beatsPerCycle = events.beats_per_cycle;
+                this.beatsPerCycle = rationalToFloat(events.beats_per_cycle);
                 this.calculateRange();
                 this.render(this.events);
             }
@@ -211,7 +212,7 @@ export class PianoRoll {
         if (this.locked) return;
 
         this.events = patternEvents.events;
-        this.beatsPerCycle = patternEvents.beats_per_cycle;
+        this.beatsPerCycle = rationalToFloat(patternEvents.beats_per_cycle);
         this.calculateRange();
         this.render(this.events);
     }
@@ -378,8 +379,10 @@ export class PianoRoll {
         for (const event of events) {
             if (event.is_rest) continue;
 
-            const x = KEY_LABEL_WIDTH + event.start_beat * beatWidth;
-            const w = event.duration * beatWidth - 2;  // Small gap between notes
+            const startBeat = rationalToFloat(event.start_beat);
+            const durationBeats = rationalToFloat(event.duration);
+            const x = KEY_LABEL_WIDTH + startBeat * beatWidth;
+            const w = durationBeats * beatWidth - 2;  // Small gap between notes
 
             for (const note of event.notes) {
                 const y = HEADER_HEIGHT + (this.maxNote - note.midi - 1) * noteHeight;

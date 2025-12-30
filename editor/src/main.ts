@@ -158,7 +158,7 @@ function updatePianoRollAtCursor(view: EditorView): void {
     pianoRoll.update(patternEvents);
   } else {
     // Clear piano roll if no events
-    pianoRoll.update({ events: [], beats_per_cycle: 4 });
+    pianoRoll.update({ events: [], beats_per_cycle: { n: 4, d: 1 } });
   }
 }
 

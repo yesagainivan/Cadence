@@ -37,6 +37,19 @@ export interface DocItem {
 // Script Execution Types
 // ============================================================================
 
+/** Rational number for precise timing (numerator / denominator) */
+export interface RationalJS {
+    /** Numerator */
+    n: number;
+    /** Denominator */
+    d: number;
+}
+
+/** Convert RationalJS to float */
+export function rationalToFloat(r: RationalJS): number {
+    return r.n / r.d;
+}
+
 /** Rich information about a single note */
 export interface NoteInfo {
     /** MIDI note number (0-127) */
@@ -59,10 +72,10 @@ export interface PlayEvent {
     frequencies: number[];
     /** Drum sounds to play (for percussion) */
     drums: string[];
-    /** Start time in beats relative to pattern start */
-    start_beat: number;
-    /** Duration in beats */
-    duration: number;
+    /** Start time in beats relative to pattern start (rational) */
+    start_beat: RationalJS;
+    /** Duration in beats (rational) */
+    duration: RationalJS;
     /** Whether this is a rest (silence) */
     is_rest: boolean;
 }
@@ -71,8 +84,8 @@ export interface PlayEvent {
 export interface PatternEvents {
     /** Individual playback events */
     events: PlayEvent[];
-    /** Total beats in one pattern cycle (affected by fast/slow) */
-    beats_per_cycle: number;
+    /** Total beats in one pattern cycle (rational, affected by fast/slow) */
+    beats_per_cycle: RationalJS;
 }
 
 /** Play action with pattern events */

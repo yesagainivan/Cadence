@@ -1,4 +1,4 @@
-import { type Action, WasmInterpreter } from './cadence-wasm';
+import { type Action, WasmInterpreter, rationalToFloat } from './cadence-wasm';
 
 /** ADSR envelope parameters */
 export interface AdsrParams {
@@ -484,7 +484,9 @@ export class CadenceAudioEngine {
                 // Schedule events relative to beat start time
                 let time = startTime;
                 for (const event of action.events) {
-                    const durationSec = this.beatsToSeconds(event.duration);
+                    // Convert rational duration to float beats, then to seconds
+                    const durationBeats = rationalToFloat(event.duration);
+                    const durationSec = this.beatsToSeconds(durationBeats);
 
                     // Play melodic notes
                     if (!event.is_rest && event.frequencies.length > 0) {
