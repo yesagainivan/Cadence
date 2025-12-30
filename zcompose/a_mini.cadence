@@ -18,3 +18,27 @@ on 2 volume 20
 // play [note,note + 12] loop // works perfectly
 
 // play "note note" loop // shows: Error: Runtime error: Undefined variable 'note' in pattern
+
+/*
+tempo 120
+let chords_list = ("[C,G,E4] [D,F,A] [G,A,D] [Bb3,D,F]").rotate(-1)
+let chord = "[C,G,E4] [D,F,A] [G,A,D] [Bb3,D,F]".at(beat()%4)
+let note = chord.at((beat()/8)%3)
+
+fn do(){
+  let b = beat()/8
+  return smooth(chords_list).at(b%4)
+}
+
+let a_note = A;
+// let note = C;
+// play note loop // works perfectly
+
+on 2 play do() loop
+on 2 volume 30
+// play [note,note + 12] loop // works perfectly
+
+play "note note note".env(6, 26, 0, 6).transpose(12) loop // shows: Error: Runtime error: Undefined variable 'note' in pattern
+
+volume 10
+*/

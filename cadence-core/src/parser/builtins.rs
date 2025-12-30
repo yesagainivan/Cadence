@@ -1113,16 +1113,7 @@ impl FunctionRegistry {
                 let original_beats_per_cycle = pattern.beats_per_cycle;
                 let original_envelope = pattern.envelope;
 
-                println!("Optimizing voice leading...");
-                println!(
-                    "Original voice leading quality: {:.1}",
-                    pattern.average_voice_leading_quality()
-                );
                 let optimized = pattern.optimize_voice_leading();
-                println!(
-                    "Optimized voice leading quality: {:.1}",
-                    optimized.average_voice_leading_quality()
-                );
 
                 let mut result_pattern = optimized;
                 result_pattern.beats_per_cycle = original_beats_per_cycle;
@@ -1148,7 +1139,6 @@ impl FunctionRegistry {
                 // Save original timing/envelope before optimization
                 let original_beats_per_cycle = pattern.beats_per_cycle;
                 let original_envelope = pattern.envelope;
-                println!("Optimizing voice leading...");
                 let optimized = pattern.optimize_voice_leading();
                 let mut result = optimized;
                 result.beats_per_cycle = original_beats_per_cycle;

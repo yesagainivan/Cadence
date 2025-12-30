@@ -838,40 +838,13 @@ pub fn optimize_chord_sequence(chords: Vec<Chord>) -> Vec<Chord> {
         return chords;
     }
 
-    println!("=== Voice Leading Optimization ===");
-    let original_quality = average_quality(&chords);
-    println!("Original quality: {:.1}", original_quality);
-
     let mut optimized = vec![chords[0].clone()];
-    println!("Starting with: {}", chords[0]);
 
     for i in 1..chords.len() {
         let previous = &optimized[i - 1];
         let current = &chords[i];
-
-        println!("\n--- Transition {} → {} ---", i - 1, i);
-        println!("From: {} | To: {}", previous, current);
-
         let best_inversion = find_best_voicing(previous, current);
         optimized.push(best_inversion);
-    }
-
-    let new_quality = average_quality(&optimized);
-
-    println!("\n=== Optimization Complete ===");
-    println!(
-        "Quality improvement: {:.1} → {:.1} ({:+.1})",
-        original_quality,
-        new_quality,
-        new_quality - original_quality
-    );
-
-    if new_quality < original_quality {
-        println!("✓ Voice leading improved!");
-    } else if (new_quality - original_quality).abs() < 0.01 {
-        println!("✓ Voicings optimized for smooth voice leading");
-    } else {
-        println!("⚠ Voice leading got worse - this shouldn't happen!");
     }
 
     optimized
