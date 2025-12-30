@@ -139,7 +139,15 @@ fn play_chord(id) {
 }
 
 
-let playing_chord = play_chord(beat() % 2)
+let playing_chord = play_chord(beat() % 12)
+
+let moot = [C, C5 + beat()%2, G]
+let moot2 = [C, C5 + beat()%3, G]
+let moot3 = [C, C5 + beat()%2, G]
+
+let pato = "moot moot2 moot3"
+
+// "Csus".every(2, "Bbmaj Fmaj") // Error: Runtime error: every() expects a number as first argument
 
 
 // let chords = "Cmaj [Bbmaj Fmaj]".slow(8)
@@ -151,9 +159,9 @@ let chords = "Cmaj [Bbmaj Fmaj]".slow(8).env(5,20,60,1)
 let pattern = cool
 let pulse = "_ G _ G"
 
-repeat 1 {
- on 5 {play C5 loop volume 5 wait 1}
-}
+//repeat 1 {
+// on 5 {play C5 loop volume 5 wait 1}
+//}
 
 
 //===============//
@@ -161,14 +169,16 @@ repeat 1 {
 //===============//
 
 on 1 {
-  play pattern.pan(20) loop
+  // play pattern.pan(20) loop
   volume 30
 }
 on 2 {
-  play chords loop
+  // play chords loop
+  // play playing_chord loop
+  play pato loop
   volume 30
 }
 on 3 {
-  play pulse.pan(80) loop
+  // play pulse.pan(80) loop
   volume 0
 }

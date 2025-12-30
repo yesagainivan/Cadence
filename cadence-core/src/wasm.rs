@@ -476,7 +476,9 @@ pub fn get_symbol_at_position(code: &str, position: usize) -> JsValue {
 // Rational Time Serialization
 // ============================================================================
 
-use crate::types::{beats, Time};
+#[cfg(feature = "wasm")]
+use crate::types::beats;
+use crate::types::Time;
 
 /// Rational number for JS serialization (preserves exactness)
 /// Serializes as { "n": numerator, "d": denominator }

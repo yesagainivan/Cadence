@@ -1,0 +1,83 @@
+//===========================================//
+//===== Dynamic Patterns - What Works =====//
+//===========================================//
+
+// This file demonstrates the current capabilities and limitations
+// for dynamic patterns using beat().
+
+tempo 120
+
+//=== WORKS: Inline expressions with beat() ===//
+
+// Direct play with beat() - re-evaluates each tick
+// play "[C,G,E4] D G D".at(beat()%4) loop  // ✓ Works!
+
+// Pattern that changes based on beat number
+// play "C D E F".at(beat()%4) loop  // ✓ Works!
+
+
+//=== DOES NOT WORK: Variables with beat() ===//
+
+// let melody = "C D E F".at(beat()%4)  // ✗ Evaluates ONCE
+// play melody loop                       // Always plays same note
+
+
+//=== WORKAROUND 1: Use every() for periodic transforms ===//
+
+// Apply rev() every 2nd cycle
+let pattern1 = "C D E F"
+// play pattern1.every(2, "rev", pattern1) loop
+
+
+//=== WORKAROUND 2: Use groups for alternation within pattern ===//
+
+// This alternates [C E] and [G B] within the pattern
+let pattern2 = "[C E] [G B] D F"
+// play pattern2 loop
+
+
+//=== WORKAROUND 3: Define pattern in function, call inline ===//
+
+// The function BODY isn't evaluated until called
+fn dynamic_note() {
+  // This beat() is evaluated when function is called
+  let idx = beat() % 4
+  if idx == 0 { return C }
+  else if idx == 1 { return D }
+  else if idx == 2 { return E }
+  else { return F }
+}
+
+// Call function directly in play statement
+// play dynamic_note() loop  // ✓ Works - function re-called each tick
+
+
+//=== LIMITATION: Functions returning patterns with beat() ===//
+
+// Even inside functions, if you use beat() in a let, it's captured once
+fn get_melody() {
+  let note = "C D E F".at(beat() % 4)  // beat() evaluated when function called
+  return note
+}
+
+// Only works if function is called each tick:
+// play get_melody() loop  // ✓ Function re-called each tick
+
+
+//=== CURRENT BEST PRACTICE ===//
+
+// For dynamic patterns that depend on beat():
+// 1. Put the beat()-dependent expression DIRECTLY in play statement
+// 2. Or use a function and call it inline
+
+// Example: Evolving chord progression
+fn evolving_chord() {
+  let b = beat() % 8
+  if b < 4 { return "C E G" }
+  else { return "F A C" }
+}
+
+on 1 {
+  play evolving_chord() loop
+  volume 30
+}

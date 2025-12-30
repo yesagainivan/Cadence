@@ -167,7 +167,20 @@ impl FunctionRegistry {
                         );
                         Ok(Value::EveryPattern(Box::new(fast_every)))
                     }
-                    _ => Err(anyhow!("fast() first argument must be a pattern or pattern string")),
+                    // Auto-wrap Note/Chord into single-step patterns for method chaining
+                    Value::Note(n) => {
+                        let pattern = crate::types::Pattern::with_steps(vec![
+                            crate::types::PatternStep::Note(n)
+                        ]);
+                        Ok(Value::Pattern(pattern.fast(factor)))
+                    }
+                    Value::Chord(c) => {
+                        let pattern = crate::types::Pattern::with_steps(vec![
+                            crate::types::PatternStep::Chord(c)
+                        ]);
+                        Ok(Value::Pattern(pattern.fast(factor)))
+                    }
+                    _ => Err(anyhow!("fast() first argument must be a pattern, note, chord, or pattern string")),
                 }
             }),
         );
@@ -207,7 +220,20 @@ impl FunctionRegistry {
                         );
                         Ok(Value::EveryPattern(Box::new(slow_every)))
                     }
-                    _ => Err(anyhow!("slow() first argument must be a pattern or pattern string")),
+                    // Auto-wrap Note/Chord into single-step patterns for method chaining
+                    Value::Note(n) => {
+                        let pattern = crate::types::Pattern::with_steps(vec![
+                            crate::types::PatternStep::Note(n)
+                        ]);
+                        Ok(Value::Pattern(pattern.slow(factor)))
+                    }
+                    Value::Chord(c) => {
+                        let pattern = crate::types::Pattern::with_steps(vec![
+                            crate::types::PatternStep::Chord(c)
+                        ]);
+                        Ok(Value::Pattern(pattern.slow(factor)))
+                    }
+                    _ => Err(anyhow!("slow() first argument must be a pattern, note, chord, or pattern string")),
                 }
             }),
         );
