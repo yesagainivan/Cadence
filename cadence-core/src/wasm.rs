@@ -783,7 +783,15 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
     // Parse with span tracking
     let spanned_program = match parse_spanned_statements(code) {
         Ok(p) => p,
-        Err(_) => return JsValue::NULL,
+        Err(e) => {
+            // Return error for display in editor instead of NULL
+            return serde_wasm_bindgen::to_value(&PatternEventsJS {
+                events: vec![],
+                beats_per_cycle: beats(4).into(),
+                error: Some(format!("Parse error: {}", e)),
+            })
+            .unwrap_or(JsValue::NULL);
+        }
     };
 
     // Find statement containing cursor position (using UTF-16 since position comes from JS)
@@ -795,7 +803,15 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
     // Run the full program first to populate environment
     let mut interpreter = Interpreter::new();
     let program = spanned_program.to_program();
-    let _ = interpreter.run_program(&program);
+    if let Err(e) = interpreter.run_program(&program) {
+        // Return interpreter errors (e.g., undefined variables)
+        return serde_wasm_bindgen::to_value(&PatternEventsJS {
+            events: vec![],
+            beats_per_cycle: beats(4).into(),
+            error: Some(format!("Runtime error: {}", e)),
+        })
+        .unwrap_or(JsValue::NULL);
+    }
 
     let env = interpreter.environment.read().unwrap();
     let evaluator = Evaluator::new();
