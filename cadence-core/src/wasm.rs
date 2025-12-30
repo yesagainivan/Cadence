@@ -281,6 +281,136 @@ pub fn get_documentation() -> JsValue {
     serde_wasm_bindgen::to_value(&js_docs).unwrap_or(JsValue::NULL)
 }
 
+// ============================================================================
+// Symbol Table WASM API (for Language Service features)
+// ============================================================================
+
+/// A symbol for JavaScript consumption
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "kind"))]
+pub enum SymbolJS {
+    Function {
+        name: String,
+        params: Vec<String>,
+        signature: String,
+        /// UTF-16 span start
+        start: usize,
+        /// UTF-16 span end
+        end: usize,
+    },
+    Variable {
+        name: String,
+        value_type: Option<String>,
+        /// UTF-16 span start
+        start: usize,
+        /// UTF-16 span end
+        end: usize,
+    },
+}
+
+/// Result of get_symbols call
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SymbolsResult {
+    pub success: bool,
+    pub symbols: Vec<SymbolJS>,
+    pub error: Option<String>,
+}
+
+/// Get all symbols from a Cadence source file
+/// Parses the code and binds symbols, returning them all
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn get_symbols(code: &str) -> JsValue {
+    use crate::parser::binder::Binder;
+    use crate::parser::statement_parser::parse_spanned_statements;
+
+    // Parse the code
+    let program = match parse_spanned_statements(code) {
+        Ok(p) => p,
+        Err(e) => {
+            return serde_wasm_bindgen::to_value(&SymbolsResult {
+                success: false,
+                symbols: vec![],
+                error: Some(e.to_string()),
+            })
+            .unwrap_or(JsValue::NULL);
+        }
+    };
+
+    // Bind symbols
+    let table = Binder::bind(&program);
+
+    // Convert to JS-friendly format
+    let mut symbols = Vec::new();
+
+    for func in table.all_functions() {
+        symbols.push(SymbolJS::Function {
+            name: func.name.clone(),
+            params: func.params.clone(),
+            signature: func.signature(),
+            start: func.span.utf16_start,
+            end: func.span.utf16_end,
+        });
+    }
+
+    for var in table.all_variables() {
+        symbols.push(SymbolJS::Variable {
+            name: var.name.clone(),
+            value_type: var.value_type.clone(),
+            start: var.span.utf16_start,
+            end: var.span.utf16_end,
+        });
+    }
+
+    serde_wasm_bindgen::to_value(&SymbolsResult {
+        success: true,
+        symbols,
+        error: None,
+    })
+    .unwrap_or(JsValue::NULL)
+}
+
+/// Get the symbol at a specific cursor position (for hover)
+/// Returns the symbol if found, or null
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn get_symbol_at_position(code: &str, position: usize) -> JsValue {
+    use crate::parser::binder::Binder;
+    use crate::parser::statement_parser::parse_spanned_statements;
+    use crate::parser::symbols::Symbol;
+
+    // Parse the code
+    let program = match parse_spanned_statements(code) {
+        Ok(p) => p,
+        Err(_) => return JsValue::NULL,
+    };
+
+    // Bind symbols
+    let table = Binder::bind(&program);
+
+    // Find symbol at position
+    match table.get_at_position(position) {
+        Some(Symbol::Function(func)) => serde_wasm_bindgen::to_value(&SymbolJS::Function {
+            name: func.name.clone(),
+            params: func.params.clone(),
+            signature: func.signature(),
+            start: func.span.utf16_start,
+            end: func.span.utf16_end,
+        })
+        .unwrap_or(JsValue::NULL),
+        Some(Symbol::Variable(var)) => serde_wasm_bindgen::to_value(&SymbolJS::Variable {
+            name: var.name.clone(),
+            value_type: var.value_type.clone(),
+            start: var.span.utf16_start,
+            end: var.span.utf16_end,
+        })
+        .unwrap_or(JsValue::NULL),
+        None => JsValue::NULL,
+    }
+}
+
 #[cfg(feature = "wasm")]
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ParseResult {
