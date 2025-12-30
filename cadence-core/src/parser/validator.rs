@@ -2,7 +2,7 @@ use crate::parser::ast::{Expression, SpannedProgram, SpannedStatement, Statement
 use crate::parser::binder::Binder;
 use crate::parser::error::CadenceError;
 use crate::parser::lexer::Span;
-use crate::types::CommonProgressions;
+use crate::types::{CommonProgressions, Pattern};
 
 pub struct Validator<'a> {
     errors: Vec<CadenceError>,
@@ -35,22 +35,110 @@ impl<'a> Validator<'a> {
             Statement::Expression(expr) => self.visit_expression(expr, span),
             Statement::Let { value, .. } => self.visit_expression(value, span),
             Statement::Assign { value, .. } => self.visit_expression(value, span),
-            Statement::FunctionDef { .. } => {
-                // TODO: Validate body
+            Statement::FunctionDef { body, .. } => {
+                // Validate function body
+                for inner_stmt in body {
+                    self.visit_unspanned_statement(inner_stmt, span.clone());
+                }
             }
             Statement::If {
                 condition,
                 then_body,
                 else_body,
             } => {
-                self.visit_expression(condition, span);
-                // TODO: visit body
+                self.visit_expression(condition, span.clone());
+                // Validate then branch
+                for inner_stmt in then_body {
+                    self.visit_unspanned_statement(inner_stmt, span.clone());
+                }
+                // Validate else branch
+                if let Some(else_stmts) = else_body {
+                    for inner_stmt in else_stmts {
+                        self.visit_unspanned_statement(inner_stmt, span.clone());
+                    }
+                }
             }
             Statement::Repeat { body, .. } | Statement::Loop { body } => {
-                // TODO: visit body
-                let _ = body;
+                // Validate loop body
+                for inner_stmt in body {
+                    self.visit_unspanned_statement(inner_stmt, span.clone());
+                }
+            }
+            Statement::For { body, .. } => {
+                // Validate for loop body
+                for inner_stmt in body {
+                    self.visit_unspanned_statement(inner_stmt, span.clone());
+                }
+            }
+            Statement::Block(body) => {
+                // Validate block body
+                for inner_stmt in body {
+                    self.visit_unspanned_statement(inner_stmt, span.clone());
+                }
+            }
+            Statement::Track { body, .. } => {
+                // Validate track body (boxed statement)
+                self.visit_unspanned_statement(body, span.clone());
             }
             Statement::Play { target, .. } => self.visit_expression(target, span),
+            Statement::Tempo(expr) | Statement::Volume(expr) | Statement::Wait { beats: expr } => {
+                self.visit_expression(expr, span);
+            }
+            Statement::Return(Some(expr)) => self.visit_expression(expr, span),
+            _ => {}
+        }
+    }
+
+    /// Visit an unspanned statement (used for nested bodies)
+    /// Uses the parent span for error reporting
+    fn visit_unspanned_statement(&mut self, stmt: &Statement, parent_span: Span) {
+        match stmt {
+            Statement::Expression(expr) => self.visit_expression(expr, parent_span),
+            Statement::Let { value, .. } => self.visit_expression(value, parent_span),
+            Statement::Assign { value, .. } => self.visit_expression(value, parent_span),
+            Statement::FunctionDef { body, .. } => {
+                for inner_stmt in body {
+                    self.visit_unspanned_statement(inner_stmt, parent_span.clone());
+                }
+            }
+            Statement::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                self.visit_expression(condition, parent_span.clone());
+                for inner_stmt in then_body {
+                    self.visit_unspanned_statement(inner_stmt, parent_span.clone());
+                }
+                if let Some(else_stmts) = else_body {
+                    for inner_stmt in else_stmts {
+                        self.visit_unspanned_statement(inner_stmt, parent_span.clone());
+                    }
+                }
+            }
+            Statement::Repeat { body, .. } | Statement::Loop { body } => {
+                for inner_stmt in body {
+                    self.visit_unspanned_statement(inner_stmt, parent_span.clone());
+                }
+            }
+            Statement::For { body, .. } => {
+                for inner_stmt in body {
+                    self.visit_unspanned_statement(inner_stmt, parent_span.clone());
+                }
+            }
+            Statement::Block(body) => {
+                for inner_stmt in body {
+                    self.visit_unspanned_statement(inner_stmt, parent_span.clone());
+                }
+            }
+            Statement::Track { body, .. } => {
+                self.visit_unspanned_statement(body, parent_span.clone());
+            }
+            Statement::Play { target, .. } => self.visit_expression(target, parent_span),
+            Statement::Tempo(expr) | Statement::Volume(expr) | Statement::Wait { beats: expr } => {
+                self.visit_expression(expr, parent_span);
+            }
+            Statement::Return(Some(expr)) => self.visit_expression(expr, parent_span),
             _ => {}
         }
     }
@@ -60,7 +148,7 @@ impl<'a> Validator<'a> {
             Expression::FunctionCall { name, args } => {
                 self.check_function_call(name, args, span.clone());
                 for arg in args {
-                    self.visit_expression(arg, span.clone()); // Propagate span is approx
+                    self.visit_expression(arg, span.clone());
                 }
             }
             Expression::BinaryOp { left, right, .. }
@@ -68,7 +156,8 @@ impl<'a> Validator<'a> {
             | Expression::LogicalOr { left, right }
             | Expression::Intersection { left, right }
             | Expression::Union { left, right }
-            | Expression::Difference { left, right } => {
+            | Expression::Difference { left, right }
+            | Expression::Comparison { left, right, .. } => {
                 self.visit_expression(left, span.clone());
                 self.visit_expression(right, span.clone());
             }
@@ -78,6 +167,15 @@ impl<'a> Validator<'a> {
             Expression::Index { target, index } => {
                 self.visit_expression(target, span.clone());
                 self.visit_expression(index, span.clone());
+            }
+            Expression::Array(elements) => {
+                for elem in elements {
+                    self.visit_expression(elem, span.clone());
+                }
+            }
+            // Pre-validate pattern strings for syntax errors
+            Expression::String(s) => {
+                self.check_pattern_string(s, span);
             }
             _ => {}
         }
@@ -135,6 +233,23 @@ impl<'a> Validator<'a> {
                 ));
             }
             return;
+        }
+    }
+
+    /// Pre-validate pattern strings for syntax errors
+    /// This catches malformed patterns at parse time rather than runtime
+    fn check_pattern_string(&mut self, s: &str, span: Span) {
+        // Try to parse the string as a pattern
+        // This will catch syntax errors like unclosed brackets, invalid notes, etc.
+        // Variable references are allowed (they're resolved at runtime)
+        if let Err(e) = Pattern::parse(s) {
+            let msg = e.to_string();
+            // Only report if it's a real syntax error, not a "single word" error
+            // since single words might be valid function args like "pluck"
+            if !msg.contains("Single word") {
+                self.errors
+                    .push(CadenceError::new(format!("Pattern error: {}", msg), span));
+            }
         }
     }
 }
