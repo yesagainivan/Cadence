@@ -27,6 +27,8 @@ pub struct PlaybackStep {
     pub drums: Vec<DrumSound>,
     pub envelope: Option<(f32, f32, f32, f32)>,
     pub waveform: Option<Waveform>,
+    /// Stereo pan position (0.0 = left, 0.5 = center, 1.0 = right)
+    pub pan: Option<f32>,
     /// Duration of this step in beats (for fast/slow support)
     pub duration_beats: f32,
 }
@@ -97,6 +99,7 @@ impl LoopingPattern {
                         drums: vec![],
                         envelope: None,
                         waveform: None,
+                        pan: None,
                         duration_beats: 1.0,
                     }))
                 } else {
@@ -115,6 +118,7 @@ impl LoopingPattern {
                         drums: vec![],
                         envelope: None,
                         waveform: None,
+                        pan: None,
                         duration_beats: 1.0,
                     }))
                 } else {
@@ -157,6 +161,7 @@ impl LoopingPattern {
                             drums: event.drums.clone(),
                             envelope: pattern.envelope,
                             waveform: pattern.waveform,
+                            pan: pattern.pan,
                             duration_beats: event.duration_f32(),
                         }))
                     } else {
@@ -200,6 +205,7 @@ impl LoopingPattern {
                                 drums: event.drums.clone(),
                                 envelope: pattern.envelope,
                                 waveform: pattern.waveform,
+                                pan: pattern.pan,
                                 duration_beats: event.duration_f32(),
                             }))
                         } else {
@@ -260,6 +266,7 @@ impl LoopingPattern {
                             drums: event.drums.clone(),
                             envelope: pattern.envelope,
                             waveform: pattern.waveform,
+                            pan: pattern.pan,
                             duration_beats: event.duration_f32(),
                         }))
                     } else {
@@ -812,6 +819,10 @@ impl EventDispatcher {
             // Apply waveform if present (enables reactive waveform updates)
             if let Some(waveform) = step.waveform {
                 let _ = self.audio_handle.set_track_waveform(track_id, waveform);
+            }
+            // Apply pan if present (enables reactive pan updates)
+            if let Some(pan) = step.pan {
+                let _ = self.audio_handle.set_track_pan(track_id, pan);
             }
 
             if audio_enabled {
