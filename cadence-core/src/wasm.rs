@@ -1083,9 +1083,10 @@ impl WasmInterpreter {
         self.cycle = 0;
         self.interpreter.clear_actions(); // Clear previous actions
 
-        // Reset environment cycle to 0
+        // Reset environment cycle and beat to 0
         if let Ok(mut env) = self.interpreter.environment.write() {
             let _ = env.define("_cycle".to_string(), Value::Number(0));
+            let _ = env.define("_beat".to_string(), Value::Number(0));
         }
 
         // Parse
@@ -1243,9 +1244,10 @@ impl WasmInterpreter {
         // Increment cycle
         self.cycle += 1;
 
-        // Update _cycle in environment
+        // Update _cycle and _beat in environment
         if let Ok(mut env) = self.interpreter.environment.write() {
             let _ = env.define("_cycle".to_string(), Value::Number(self.cycle));
+            let _ = env.define("_beat".to_string(), Value::Number(self.cycle));
         }
 
         let js_actions = self.generate_beat_events(self.cycle);
