@@ -12,6 +12,8 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import { linter, lintGutter } from '@codemirror/lint';
+import type { Diagnostic } from '@codemirror/lint';
 import { cadenceWasm } from './lang-cadence-wasm';
 import { initWasm, parseCode, isWasmReady, getEventsAtPosition, getContextAtCursor } from './cadence-wasm';
 import { audioEngine } from './audio-engine';
@@ -57,6 +59,44 @@ play cmaj
 
 
 /**
+ * Cadence Linter
+ * Uses the WASM parser to find errors and display them in the editor.
+ */
+const cadenceLinter = linter((view) => {
+  if (!isWasmReady()) return [];
+
+  const code = view.state.doc.toString();
+  const result = parseCode(code);
+
+  if (!result.success && result.error) {
+    const err = result.error;
+    // Map Cadence error to CodeMirror Diagnostic
+    // Note: WASM returns 1-based line numbers, CodeMirror expects 0-based lines? 
+    // Wait, parseCode error has `start` and `end` offsets (UTF-16).
+    // CodeMirror Diagnostic uses `from` and `to`.
+
+    // Fallback if start/end are 0 (e.g. general error)
+    let from = err.start;
+    let to = err.end;
+
+    // If range is empty (0 length), highlight at least one char or end of line
+    if (from === to) {
+      to = Math.min(from + 1, code.length);
+    }
+
+    const diagnostic: Diagnostic = {
+      from,
+      to,
+      severity: 'error',
+      message: err.message,
+    };
+    return [diagnostic];
+  }
+
+  return [];
+});
+
+/**
  * Create the CodeMirror editor
  */
 function createEditor(container: HTMLElement): EditorView {
@@ -73,6 +113,8 @@ function createEditor(container: HTMLElement): EditorView {
       closeBrackets(),
       autocompletion(),
       highlightSelectionMatches(),
+      lintGutter(),
+      cadenceLinter,
 
       // Keymaps
       keymap.of([
@@ -241,7 +283,8 @@ function validateCode(view: EditorView): ReturnType<typeof parseCode> | null {
         (statusEl.querySelector('.status-dot') as HTMLElement).style.backgroundColor = '#7fb069'; // --color-success
       }
     } else {
-      statusEl.innerHTML = `<span class="status-dot"></span>${result.error || 'Parse error'}`;
+      const msg = result.error ? result.error.message : 'Parse error';
+      statusEl.innerHTML = `<span class="status-dot"></span>${msg}`;
       if (statusEl.querySelector('.status-dot')) {
         (statusEl.querySelector('.status-dot') as HTMLElement).style.backgroundColor = '#c9736f'; // --color-error
       }

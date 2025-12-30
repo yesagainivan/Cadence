@@ -11,8 +11,9 @@
 use crate::parser::ast::{
     ComparisonOp, Expression, Program, SpannedProgram, SpannedStatement, Statement,
 };
+use crate::parser::error::CadenceError;
 use crate::parser::lexer::{Lexer, Span, SpannedToken, Token};
-use anyhow::{anyhow, Result};
+// use anyhow::Result; // Removed anyhow dependency
 
 /// Parses statements and programs (sequences of statements)
 pub struct StatementParser {
@@ -22,9 +23,12 @@ pub struct StatementParser {
 
 impl StatementParser {
     /// Create a new statement parser from input string
-    pub fn new(input: &str) -> Result<Self> {
+    pub fn new(input: &str) -> Result<Self, CadenceError> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer.tokenize_spanned()?;
+        let tokens = lexer.tokenize_spanned().map_err(|e| {
+            // Map lexer error to CadenceError (using default span for now)
+            CadenceError::new(e.to_string(), Span::default())
+        })?;
 
         Ok(StatementParser {
             tokens,
@@ -157,17 +161,15 @@ impl StatementParser {
     }
 
     /// Expect a specific token
-    fn expect(&mut self, expected: &Token) -> Result<()> {
+    fn expect(&mut self, expected: &Token) -> Result<(), CadenceError> {
         if self.current() == expected {
             self.advance();
             Ok(())
         } else {
             let span = self.current_span();
-            Err(anyhow!(
-                "at {}: Expected {:?}, found {:?}",
+            Err(CadenceError::new(
+                format!("Expected {:?}, found {:?}", expected, self.current()),
                 span,
-                expected,
-                self.current()
             ))
         }
     }
@@ -178,7 +180,7 @@ impl StatementParser {
     }
 
     /// Parse a complete program (sequence of statements)
-    pub fn parse_program(&mut self) -> Result<Program> {
+    pub fn parse_program(&mut self) -> Result<Program, CadenceError> {
         let mut program = Program::new();
 
         while !self.check(&Token::Eof) {
@@ -199,7 +201,7 @@ impl StatementParser {
     }
 
     /// Parse a complete program with source location tracking for each statement
-    pub fn parse_spanned_program(&mut self) -> Result<SpannedProgram> {
+    pub fn parse_spanned_program(&mut self) -> Result<SpannedProgram, CadenceError> {
         let mut program = SpannedProgram::new();
 
         while !self.check(&Token::Eof) {
@@ -237,7 +239,7 @@ impl StatementParser {
     }
 
     /// Parse a single statement
-    pub fn parse_statement(&mut self) -> Result<Statement> {
+    pub fn parse_statement(&mut self) -> Result<Statement, CadenceError> {
         match self.current().clone() {
             Token::Let => self.parse_let_statement(),
             Token::Play => self.parse_play_statement(),
@@ -290,12 +292,17 @@ impl StatementParser {
     }
 
     /// Parse: let <name> = <expression>
-    fn parse_let_statement(&mut self) -> Result<Statement> {
+    fn parse_let_statement(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::Let)?;
 
         let name = match self.current().clone() {
             Token::Identifier(name) => name,
-            _ => return Err(anyhow!("Expected identifier after 'let'")),
+            _ => {
+                return Err(CadenceError::new(
+                    "Expected identifier after 'let'".to_string(),
+                    self.current_span(),
+                ))
+            }
         };
         self.advance();
 
@@ -307,7 +314,7 @@ impl StatementParser {
     }
 
     /// Parse: play <expression> [loop] [queue [beat|bar|cycle]] [duration <n>]
-    fn parse_play_statement(&mut self) -> Result<Statement> {
+    fn parse_play_statement(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::Play)?;
 
         let target = self.parse_expression()?;
@@ -361,7 +368,12 @@ impl StatementParser {
                             duration = Some(*n as f32);
                             self.advance();
                         }
-                        _ => return Err(anyhow!("Expected number after 'duration'")),
+                        _ => {
+                            return Err(CadenceError::new(
+                                "Expected number after 'duration'".to_string(),
+                                self.current_span(),
+                            ))
+                        }
                     }
                 }
                 _ => break,
@@ -377,29 +389,30 @@ impl StatementParser {
     }
 
     /// Parse: tempo <expression>
-    fn parse_tempo_statement(&mut self) -> Result<Statement> {
+    fn parse_tempo_statement(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::Tempo)?;
         let expr = self.parse_expression()?;
         Ok(Statement::Tempo(expr))
     }
 
     /// Parse: volume <expression>
-    fn parse_volume_statement(&mut self) -> Result<Statement> {
+    fn parse_volume_statement(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::Volume)?;
         let expr = self.parse_expression()?;
         Ok(Statement::Volume(expr))
     }
 
     /// Parse: waveform "sine" | "saw" | "square" | "triangle"
-    fn parse_waveform_statement(&mut self) -> Result<Statement> {
+    fn parse_waveform_statement(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::Waveform)?;
 
         let name = match self.current().clone() {
             Token::StringLiteral(s) => s,
             Token::Identifier(s) => s, // Also allow: waveform sine (without quotes)
             _ => {
-                return Err(anyhow!(
-                    "Expected waveform name (sine, saw, square, triangle)"
+                return Err(CadenceError::new(
+                    "Expected waveform name (sine, saw, square, triangle)".to_string(),
+                    self.current_span(),
                 ));
             }
         };
@@ -409,12 +422,17 @@ impl StatementParser {
     }
 
     /// Parse: load "path/to/file.cadence"
-    fn parse_load_statement(&mut self) -> Result<Statement> {
+    fn parse_load_statement(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::Load)?;
 
         let path = match self.current().clone() {
             Token::StringLiteral(s) => s,
-            _ => return Err(anyhow!("Expected string after 'load'")),
+            _ => {
+                return Err(CadenceError::new(
+                    "Expected string after 'load'".to_string(),
+                    self.current_span(),
+                ))
+            }
         };
         self.advance();
 
@@ -422,13 +440,18 @@ impl StatementParser {
     }
 
     /// Parse: fn name(param1, param2, ...) { body }
-    fn parse_function_def(&mut self) -> Result<Statement> {
+    fn parse_function_def(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::Fn)?;
 
         // Parse function name
         let name = match self.current().clone() {
             Token::Identifier(name) => name,
-            _ => return Err(anyhow!("Expected function name after 'fn'")),
+            _ => {
+                return Err(CadenceError::new(
+                    "Expected function name after 'fn'".to_string(),
+                    self.current_span(),
+                ))
+            }
         };
         self.advance();
 
@@ -444,7 +467,12 @@ impl StatementParser {
                     params.push(param);
                     self.advance();
                 }
-                _ => return Err(anyhow!("Expected parameter name")),
+                _ => {
+                    return Err(CadenceError::new(
+                        "Expected parameter name".to_string(),
+                        self.current_span(),
+                    ))
+                }
             }
 
             // Parse remaining parameters
@@ -455,7 +483,12 @@ impl StatementParser {
                         params.push(param);
                         self.advance();
                     }
-                    _ => return Err(anyhow!("Expected parameter name after ','")),
+                    _ => {
+                        return Err(CadenceError::new(
+                            "Expected parameter name after ','".to_string(),
+                            self.current_span(),
+                        ))
+                    }
                 }
             }
         }
@@ -470,20 +503,33 @@ impl StatementParser {
 
     /// Parse: track <n> <statement> (or block)
     /// Also handles: on <n> <statement> (alias syntax)
-    fn parse_track_statement(&mut self) -> Result<Statement> {
+    fn parse_track_statement(&mut self) -> Result<Statement, CadenceError> {
         // Accept either 'track' or 'on' as the prefix
         if self.check(&Token::Track) {
             self.advance();
         } else if self.check(&Token::On) {
             self.advance();
         } else {
-            return Err(anyhow!("Expected 'track' or 'on' keyword"));
+            return Err(CadenceError::new(
+                "Expected 'track' or 'on' keyword".to_string(),
+                self.current_span(),
+            ));
         }
 
         let id = match self.current() {
             Token::Number(n) if *n > 0 => *n as usize,
-            Token::Number(_) => return Err(anyhow!("Track ID must be positive")),
-            _ => return Err(anyhow!("Expected track number after 'track' or 'on'")),
+            Token::Number(_) => {
+                return Err(CadenceError::new(
+                    "Track ID must be positive".to_string(),
+                    self.current_span(),
+                ))
+            }
+            _ => {
+                return Err(CadenceError::new(
+                    "Expected track number after 'track' or 'on'".to_string(),
+                    self.current_span(),
+                ))
+            }
         };
         self.advance();
 
@@ -496,19 +542,24 @@ impl StatementParser {
     }
 
     /// Parse: loop { statements }
-    fn parse_loop_statement(&mut self) -> Result<Statement> {
+    fn parse_loop_statement(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::Loop)?;
         let body = self.parse_block()?;
         Ok(Statement::Loop { body })
     }
 
     /// Parse: repeat <n> { statements }
-    fn parse_repeat_statement(&mut self) -> Result<Statement> {
+    fn parse_repeat_statement(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::Repeat)?;
 
         let count = match self.current() {
             Token::Number(n) if *n >= 0 => *n as u32,
-            _ => return Err(anyhow!("Expected positive number after 'repeat'")),
+            _ => {
+                return Err(CadenceError::new(
+                    "Expected positive number after 'repeat'".to_string(),
+                    self.current_span(),
+                ))
+            }
         };
         self.advance();
 
@@ -518,13 +569,18 @@ impl StatementParser {
     }
 
     /// Parse: for <var> in <start>..<end> { statements }
-    fn parse_for_statement(&mut self) -> Result<Statement> {
+    fn parse_for_statement(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::For)?;
 
         // Get iteration variable name
         let var = match self.current() {
             Token::Identifier(name) => name.clone(),
-            _ => return Err(anyhow!("Expected identifier after 'for'")),
+            _ => {
+                return Err(CadenceError::new(
+                    "Expected identifier after 'for'".to_string(),
+                    self.current_span(),
+                ))
+            }
         };
         self.advance();
 
@@ -533,7 +589,12 @@ impl StatementParser {
         // Parse start value
         let start = match self.current() {
             Token::Number(n) => *n,
-            _ => return Err(anyhow!("Expected number in range expression")),
+            _ => {
+                return Err(CadenceError::new(
+                    "Expected number in range expression".to_string(),
+                    self.current_span(),
+                ))
+            }
         };
         self.advance();
 
@@ -542,7 +603,12 @@ impl StatementParser {
         // Parse end value
         let end = match self.current() {
             Token::Number(n) => *n,
-            _ => return Err(anyhow!("Expected number after '..' in range expression")),
+            _ => {
+                return Err(CadenceError::new(
+                    "Expected number after '..' in range expression".to_string(),
+                    self.current_span(),
+                ))
+            }
         };
         self.advance();
 
@@ -558,14 +624,14 @@ impl StatementParser {
 
     /// Parse: wait <expression>
     /// Advances virtual time by the specified number of beats
-    fn parse_wait_statement(&mut self) -> Result<Statement> {
+    fn parse_wait_statement(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::Wait)?;
         let beats = self.parse_expression()?;
         Ok(Statement::Wait { beats })
     }
 
     /// Parse: if <condition> { statements } [else if ... | else { statements }]
-    fn parse_if_statement(&mut self) -> Result<Statement> {
+    fn parse_if_statement(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::If)?;
 
         let condition = self.parse_expression()?;
@@ -596,7 +662,7 @@ impl StatementParser {
     }
 
     /// Parse: return [expression]
-    fn parse_return_statement(&mut self) -> Result<Statement> {
+    fn parse_return_statement(&mut self) -> Result<Statement, CadenceError> {
         self.expect(&Token::Return)?;
 
         // Check if there's an expression following
@@ -613,13 +679,13 @@ impl StatementParser {
     }
 
     /// Parse: { statements }
-    fn parse_block_statement(&mut self) -> Result<Statement> {
+    fn parse_block_statement(&mut self) -> Result<Statement, CadenceError> {
         let body = self.parse_block()?;
         Ok(Statement::Block(body))
     }
 
     /// Parse a block: { statement* }
-    fn parse_block(&mut self) -> Result<Vec<Statement>> {
+    fn parse_block(&mut self) -> Result<Vec<Statement>, CadenceError> {
         self.expect(&Token::LeftBrace)?;
 
         let mut statements = Vec::new();
@@ -648,13 +714,13 @@ impl StatementParser {
 
     /// Parse an expression (handles operator precedence)
     /// Grammar: expression = logical_or_expr
-    fn parse_expression(&mut self) -> Result<Expression> {
+    fn parse_expression(&mut self) -> Result<Expression, CadenceError> {
         self.parse_logical_or_expression()
     }
 
     /// Parse logical OR (||) - lowest precedence
     /// Grammar: logical_or_expr = logical_and_expr ('||' logical_and_expr)*
-    fn parse_logical_or_expression(&mut self) -> Result<Expression> {
+    fn parse_logical_or_expression(&mut self) -> Result<Expression, CadenceError> {
         let mut left = self.parse_logical_and_expression()?;
 
         while matches!(self.current(), Token::Or) {
@@ -671,7 +737,7 @@ impl StatementParser {
 
     /// Parse logical AND (&&)
     /// Grammar: logical_and_expr = set_expr ('&&' set_expr)*
-    fn parse_logical_and_expression(&mut self) -> Result<Expression> {
+    fn parse_logical_and_expression(&mut self) -> Result<Expression, CadenceError> {
         let mut left = self.parse_set_expression()?;
 
         while matches!(self.current(), Token::And) {
@@ -688,7 +754,7 @@ impl StatementParser {
 
     /// Parse set operations (&, |, ^) - between logical AND and comparison
     /// Grammar: set_expr = comparison_expr (('&' | '|' | '^') comparison_expr)*
-    fn parse_set_expression(&mut self) -> Result<Expression> {
+    fn parse_set_expression(&mut self) -> Result<Expression, CadenceError> {
         let mut left = self.parse_comparison_expression()?;
 
         while matches!(
@@ -712,7 +778,7 @@ impl StatementParser {
 
     /// Parse comparison operations (==, !=, <, >, <=, >=)
     /// Grammar: comparison_expr = additive_expr (('==' | '!=' | '<' | '>' | '<=' | '>=') additive_expr)?
-    fn parse_comparison_expression(&mut self) -> Result<Expression> {
+    fn parse_comparison_expression(&mut self) -> Result<Expression, CadenceError> {
         let left = self.parse_additive_expression()?;
 
         if matches!(
@@ -752,7 +818,7 @@ impl StatementParser {
     /// This handles two modes:
     /// 1. For notes/chords followed by +/- number: transposition (C + 2 → D)
     /// 2. For numbers: regular arithmetic (3 + 4 → 7)
-    fn parse_additive_expression(&mut self) -> Result<Expression> {
+    fn parse_additive_expression(&mut self) -> Result<Expression, CadenceError> {
         use crate::parser::ast::ArithmeticOp;
 
         let mut left = self.parse_multiplicative_expression()?;
@@ -815,7 +881,7 @@ impl StatementParser {
 
     /// Parse multiplicative operations (*, /, %) - higher precedence than additive
     /// Grammar: multiplicative_expr = postfix_expr (('*' | '/' | '%') postfix_expr)*
-    fn parse_multiplicative_expression(&mut self) -> Result<Expression> {
+    fn parse_multiplicative_expression(&mut self) -> Result<Expression, CadenceError> {
         use crate::parser::ast::ArithmeticOp;
 
         let mut left = self.parse_postfix_expression()?;
@@ -841,9 +907,9 @@ impl StatementParser {
     }
 
     /// Parse postfix operations (method calls and indexing)
-    /// Grammar: postfix_expr = primary_expr (('.' identifier '(' args ')') | ('[' expr ']'))*
+    /// Grammar: postfix_expr = primary_expr ('.' identifier '(' args ')') | ('[' expr ']'))*
     /// Desugars method calls to function calls: expr.method(a, b) → method(expr, a, b)
-    fn parse_postfix_expression(&mut self) -> Result<Expression> {
+    fn parse_postfix_expression(&mut self) -> Result<Expression, CadenceError> {
         let mut expr = self.parse_primary_expression()?;
 
         // Handle chained method calls and indexing
@@ -855,10 +921,9 @@ impl StatementParser {
                     Token::Identifier(name) => name,
                     _ => {
                         let span = self.current_span();
-                        return Err(anyhow!(
-                            "at {}: Expected method name after '.', found {:?}",
+                        return Err(CadenceError::new(
+                            format!("Expected method name after '.', found {:?}", self.current()),
                             span,
-                            self.current()
                         ));
                     }
                 };
@@ -900,7 +965,7 @@ impl StatementParser {
     }
 
     /// Parse primary expressions (notes, chords, progressions, function calls, patterns)
-    fn parse_primary_expression(&mut self) -> Result<Expression> {
+    fn parse_primary_expression(&mut self) -> Result<Expression, CadenceError> {
         // Handle unary NOT first
         if matches!(self.current(), Token::Not) {
             self.advance();
@@ -910,9 +975,12 @@ impl StatementParser {
 
         match self.current().clone() {
             Token::Note(note_str) => {
-                let note: crate::types::Note = note_str
-                    .parse()
-                    .map_err(|e| anyhow!("Invalid note '{}': {}", note_str, e))?;
+                let note: crate::types::Note = note_str.parse().map_err(|e| {
+                    CadenceError::new(
+                        format!("Invalid note '{}': {}", note_str, e),
+                        self.current_span(),
+                    )
+                })?;
                 self.advance();
                 Ok(Expression::Note(note))
             }
@@ -975,10 +1043,9 @@ impl StatementParser {
 
             token => {
                 let span = self.current_span();
-                Err(anyhow!(
-                    "at {}: Unexpected token in expression: {:?}",
+                Err(CadenceError::new(
+                    format!("Unexpected token in expression: {:?}", token),
                     span,
-                    token
                 ))
             }
         }
@@ -986,7 +1053,7 @@ impl StatementParser {
 
     /// Parse bracket expression: [expr, expr, ...]
     /// Returns Expression::Array - evaluator decides if it becomes a Chord or Array
-    fn parse_bracket_expression(&mut self) -> Result<Expression> {
+    fn parse_bracket_expression(&mut self) -> Result<Expression, CadenceError> {
         self.expect(&Token::LeftBracket)?;
 
         let mut elements = Vec::new();
@@ -1011,7 +1078,7 @@ impl StatementParser {
     }
 
     /// Parse a progression literal: [[C, E, G], [F, A, C]]
-    fn parse_expr_progression(&mut self) -> Result<Expression> {
+    fn parse_expr_progression(&mut self) -> Result<Expression, CadenceError> {
         self.expect(&Token::LeftDoubleBracket)?;
 
         let mut chords = Vec::new();
@@ -1036,20 +1103,23 @@ impl StatementParser {
     }
 
     /// Parse chord contents (notes only, no brackets)
-    fn parse_chord_contents(&mut self) -> Result<crate::types::Chord> {
+    fn parse_chord_contents(&mut self) -> Result<crate::types::Chord, CadenceError> {
         let mut notes = Vec::new();
 
         // Parse first note
         if let Token::Note(note_str) = self.current().clone() {
-            let note: crate::types::Note = note_str
-                .parse()
-                .map_err(|e| anyhow!("Invalid note '{}': {}", note_str, e))?;
+            let note: crate::types::Note = note_str.parse().map_err(|e| {
+                CadenceError::new(
+                    format!("Invalid note '{}': {}", note_str, e),
+                    self.current_span(),
+                )
+            })?;
             notes.push(note);
             self.advance();
         } else {
-            return Err(anyhow!(
-                "Expected note in chord, found {:?}",
-                self.current()
+            return Err(CadenceError::new(
+                format!("Expected note in chord, found {:?}", self.current()),
+                self.current_span(),
             ));
         }
 
@@ -1058,15 +1128,18 @@ impl StatementParser {
             self.advance();
 
             if let Token::Note(note_str) = self.current().clone() {
-                let note: crate::types::Note = note_str
-                    .parse()
-                    .map_err(|e| anyhow!("Invalid note '{}': {}", note_str, e))?;
+                let note: crate::types::Note = note_str.parse().map_err(|e| {
+                    CadenceError::new(
+                        format!("Invalid note '{}': {}", note_str, e),
+                        self.current_span(),
+                    )
+                })?;
                 notes.push(note);
                 self.advance();
             } else {
-                return Err(anyhow!(
-                    "Expected note after comma, found {:?}",
-                    self.current()
+                return Err(CadenceError::new(
+                    format!("Expected note after comma, found {:?}", self.current()),
+                    self.current_span(),
                 ));
             }
         }
@@ -1081,7 +1154,10 @@ impl StatementParser {
     }
 
     /// Parse a function call: invert([C, E, G]) or ii_V_I(C)
-    fn parse_function_call(&mut self, name: String) -> Result<Expression> {
+    fn parse_function_call(
+        &mut self,
+        name: String,
+    ) -> std::result::Result<Expression, CadenceError> {
         self.expect(&Token::LeftParen)?;
 
         let mut args = Vec::new();
@@ -1107,19 +1183,19 @@ impl StatementParser {
 }
 
 /// Convenience function to parse a string into statements
-pub fn parse_statements(input: &str) -> Result<Program> {
+pub fn parse_statements(input: &str) -> std::result::Result<Program, CadenceError> {
     let mut parser = StatementParser::new(input)?;
     parser.parse_program()
 }
 
 /// Convenience function to parse a string into statements with source spans
-pub fn parse_spanned_statements(input: &str) -> Result<SpannedProgram> {
+pub fn parse_spanned_statements(input: &str) -> std::result::Result<SpannedProgram, CadenceError> {
     let mut parser = StatementParser::new(input)?;
     parser.parse_spanned_program()
 }
 
 /// Convenience function to parse a string into a single expression
-pub fn parse_expression(input: &str) -> Result<Expression> {
+pub fn parse_expression(input: &str) -> std::result::Result<Expression, CadenceError> {
     let mut parser = StatementParser::new(input)?;
     parser.parse_expression()
 }
@@ -1148,7 +1224,7 @@ mod tests {
 
         match &program.statements[0] {
             Statement::Tempo(expr) => match expr {
-                Expression::Number(n) => assert_eq!(*n, 120),
+                Expression::Number(n) => assert_eq!(*n as f32, 120.0),
                 _ => panic!("Expected Number expression"),
             },
             _ => panic!("Expected Tempo statement"),
@@ -1347,7 +1423,7 @@ mod expression_tests {
     use super::*;
     use crate::parser::ast::Expression;
 
-    fn parse(input: &str) -> Result<Expression> {
+    fn parse(input: &str) -> std::result::Result<Expression, CadenceError> {
         parse_expression(input)
     }
 

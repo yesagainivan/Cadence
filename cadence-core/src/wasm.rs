@@ -3,6 +3,8 @@
 //! Provides JavaScript-accessible functions for tokenization and parsing.
 
 #[cfg(feature = "wasm")]
+use crate::parser::error::CadenceError;
+#[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;
 
 // Why are we not using the evaluator and interpreter?
@@ -234,6 +236,36 @@ pub fn tokenize(input: &str) -> JsValue {
 }
 
 #[cfg(feature = "wasm")]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ParseErrorJS {
+    pub message: String,
+    pub line: usize,
+    pub column: usize,
+    pub start: usize,
+    pub end: usize,
+}
+
+#[cfg(feature = "wasm")]
+impl From<CadenceError> for ParseErrorJS {
+    fn from(e: CadenceError) -> Self {
+        ParseErrorJS {
+            message: e.message,
+            line: e.span.line,
+            column: e.span.column,
+            start: e.span.utf16_offset,
+            end: e.span.utf16_offset + e.span.utf16_len,
+        }
+    }
+}
+
+#[cfg(feature = "wasm")]
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ParseResult {
+    success: bool,
+    error: Option<ParseErrorJS>,
+}
+
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn parse_and_check(input: &str) -> JsValue {
     use crate::parser::parse_statements;
@@ -244,11 +276,15 @@ pub fn parse_and_check(input: &str) -> JsValue {
             error: None,
         })
         .unwrap_or(JsValue::NULL),
-        Err(e) => serde_wasm_bindgen::to_value(&ParseResult {
-            success: false,
-            error: Some(e.to_string()),
-        })
-        .unwrap_or(JsValue::NULL),
+        Err(e) => {
+            // e is now CadenceError
+            let error_js: ParseErrorJS = e.into();
+            serde_wasm_bindgen::to_value(&ParseResult {
+                success: false,
+                error: Some(error_js),
+            })
+            .unwrap_or(JsValue::NULL)
+        }
     }
 }
 
@@ -411,12 +447,7 @@ pub fn get_symbol_at_position(code: &str, position: usize) -> JsValue {
     }
 }
 
-#[cfg(feature = "wasm")]
-#[derive(serde::Serialize, serde::Deserialize)]
-struct ParseResult {
-    success: bool,
-    error: Option<String>,
-}
+// ParseResult struct definition removed from here as it is moved up
 
 // ============================================================================
 // Rational Time Serialization

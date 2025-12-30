@@ -20,9 +20,17 @@ export interface HighlightSpan {
     utf16_len: number;
 }
 
+export interface ParseError {
+    message: string;
+    line: number;
+    column: number;
+    start: number;
+    end: number;
+}
+
 export interface ParseResult {
     success: boolean;
-    error: string | null;
+    error: ParseError | null;
 }
 
 /** Documentation for built-in functions */
@@ -235,7 +243,7 @@ export function tokenizeCode(input: string): HighlightSpan[] {
 export function parseCode(input: string): ParseResult {
     if (!wasmInitialized) {
         console.warn('WASM not initialized, call initWasm() first');
-        return { success: false, error: 'WASM not initialized' };
+        return { success: false, error: { message: 'WASM not initialized', line: 0, column: 0, start: 0, end: 0 } };
     }
 
     try {
@@ -243,7 +251,7 @@ export function parseCode(input: string): ParseResult {
         return result as ParseResult;
     } catch (e) {
         console.error('Parse error:', e);
-        return { success: false, error: String(e) };
+        return { success: false, error: { message: String(e), line: 0, column: 0, start: 0, end: 0 } };
     }
 }
 

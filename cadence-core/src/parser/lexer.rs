@@ -148,6 +148,7 @@ impl fmt::Display for Token {
 
 /// Position in source code (line/column for display, offset for indexing)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Span {
     pub line: usize,
     pub column: usize,
