@@ -34,7 +34,7 @@ fn infer_type_from_expr(expr: &Expression) -> Option<String> {
 
 /// Binder walks the AST and extracts symbols
 pub struct Binder {
-    table: SymbolTable,
+    pub table: SymbolTable,
 }
 
 impl Binder {

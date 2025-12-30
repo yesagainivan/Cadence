@@ -17,13 +17,56 @@ pub fn get_registry() -> &'static FunctionRegistry {
     REGISTRY.get_or_init(FunctionRegistry::new)
 }
 
-#[derive(Clone)]
 pub struct BuiltinFunction {
     pub name: String,
     pub category: String, // e.g., "Core", "Math", "Pattern", "Audio"
     pub description: String,
     pub signature: String, // e.g., "fast(pattern: Pattern, factor: Number/Note) -> Pattern"
     pub handler: BuiltinHandler,
+}
+
+impl BuiltinFunction {
+    pub fn arity(&self) -> usize {
+        // Legacy: return the first valid arity default
+        *self.valid_arities().first().unwrap_or(&0)
+    }
+
+    pub fn valid_arities(&self) -> Vec<usize> {
+        let mut arities = Vec::new();
+        // Split signature by " or " to handle overloads
+        let parts: Vec<&str> = self.signature.split(" or ").collect();
+
+        for part in parts {
+            if let Some(start) = part.find('(') {
+                if let Some(end) = part.find(')') {
+                    let args_str = &part[start + 1..end];
+                    let mut count = if args_str.trim().is_empty() {
+                        0
+                    } else {
+                        args_str.chars().filter(|c| *c == ',').count() + 1
+                    };
+
+                    // Heuristic: If signature looks like a method call (e.g. "pattern.env(...)"),
+                    // and the function logic expects the object as the first argument,
+                    // we need to add 1 to the count for the implicit 'self'.
+                    // Most builtins in Cadence that are documented as methods still take the object as first arg in the handler.
+                    if part.trim().contains('.') && !part.trim().starts_with("fn") {
+                        count += 1;
+                    }
+
+                    arities.push(count);
+                }
+            }
+        }
+        
+        if arities.is_empty() {
+            vec![0]
+        } else {
+            arities.sort();
+            arities.dedup();
+            arities
+        }
+    }
 }
 
 pub struct DocItem {

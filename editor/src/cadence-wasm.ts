@@ -31,6 +31,7 @@ export interface ParseError {
 export interface ParseResult {
     success: boolean;
     error: ParseError | null;
+    errors: ParseError[];
 }
 
 /** Documentation for built-in functions */
@@ -94,6 +95,8 @@ export interface PatternEvents {
     events: PlayEvent[];
     /** Total beats in one pattern cycle (rational, affected by fast/slow) */
     beats_per_cycle: RationalJS;
+    /** Optional error message if evaluation failed */
+    error: string | null;
 }
 
 /** Play action with pattern events */
@@ -243,7 +246,11 @@ export function tokenizeCode(input: string): HighlightSpan[] {
 export function parseCode(input: string): ParseResult {
     if (!wasmInitialized) {
         console.warn('WASM not initialized, call initWasm() first');
-        return { success: false, error: { message: 'WASM not initialized', line: 0, column: 0, start: 0, end: 0 } };
+        return {
+            success: false,
+            error: { message: 'WASM not initialized', line: 0, column: 0, start: 0, end: 0 },
+            errors: [] // Fallback
+        };
     }
 
     try {
@@ -251,7 +258,11 @@ export function parseCode(input: string): ParseResult {
         return result as ParseResult;
     } catch (e) {
         console.error('Parse error:', e);
-        return { success: false, error: { message: String(e), line: 0, column: 0, start: 0, end: 0 } };
+        return {
+            success: false,
+            error: { message: String(e), line: 0, column: 0, start: 0, end: 0 },
+            errors: [] // Fallback
+        };
     }
 }
 

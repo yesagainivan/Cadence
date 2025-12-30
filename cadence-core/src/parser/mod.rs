@@ -10,6 +10,7 @@ pub mod interpreter;
 pub mod lexer;
 pub mod statement_parser;
 pub mod symbols;
+pub mod validator;
 
 #[cfg(test)]
 mod evaluator_tests;

@@ -236,7 +236,7 @@ pub fn tokenize(input: &str) -> JsValue {
 }
 
 #[cfg(feature = "wasm")]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParseErrorJS {
     pub message: String,
     pub line: usize,
@@ -262,30 +262,53 @@ impl From<CadenceError> for ParseErrorJS {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ParseResult {
     success: bool,
-    error: Option<ParseErrorJS>,
+    error: Option<ParseErrorJS>, // Deprecated, keeping for safety if needed, or just remove? Let's keep it behaving as "first error" for now OR change it.
+    errors: Vec<ParseErrorJS>,
 }
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn parse_and_check(input: &str) -> JsValue {
-    use crate::parser::parse_statements;
+    use crate::parser::binder::Binder;
+    use crate::parser::statement_parser::parse_spanned_statements;
+    use crate::parser::validator::Validator;
 
-    match parse_statements(input) {
-        Ok(_) => serde_wasm_bindgen::to_value(&ParseResult {
-            success: true,
-            error: None,
-        })
-        .unwrap_or(JsValue::NULL),
+    let spanned_program = match parse_spanned_statements(input) {
+        Ok(p) => p,
         Err(e) => {
-            // e is now CadenceError
             let error_js: ParseErrorJS = e.into();
-            serde_wasm_bindgen::to_value(&ParseResult {
+            return serde_wasm_bindgen::to_value(&ParseResult {
                 success: false,
-                error: Some(error_js),
+                error: Some(error_js.clone()), // Legacy
+                errors: vec![error_js],
             })
-            .unwrap_or(JsValue::NULL)
+            .unwrap_or(JsValue::NULL);
         }
+    };
+
+    // Run static analysis
+    let table = Binder::bind(&spanned_program);
+    let binder = Binder { table };
+    let validation_errors = Validator::validate(&spanned_program, &binder);
+
+    if !validation_errors.is_empty() {
+        let errors_js: Vec<ParseErrorJS> =
+            validation_errors.into_iter().map(|e| e.into()).collect();
+
+        return serde_wasm_bindgen::to_value(&ParseResult {
+            success: false,
+            error: Some(errors_js[0].clone()), // First error
+            errors: errors_js,
+        })
+        .unwrap_or(JsValue::NULL);
     }
+
+    serde_wasm_bindgen::to_value(&ParseResult {
+        success: true,
+        error: None,
+        errors: vec![],
+    })
+    .unwrap_or(JsValue::NULL)
 }
 
 /// Documentation item for a built-in function (JS-serializable)
@@ -549,6 +572,8 @@ pub struct PatternEventsJS {
     pub events: Vec<PlayEventJS>,
     /// Total beats in one pattern cycle (exact rational, affected by fast/slow)
     pub beats_per_cycle: RationalJS,
+    /// Optional error message if evaluation failed
+    pub error: Option<String>,
 }
 
 /// Serializable action for JavaScript consumption
@@ -792,9 +817,18 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
     };
 
     // Evaluate the expression
+    // Evaluate the expression
     let value = match evaluator.eval_with_env(expr, Some(&env)) {
         Ok(v) => v,
-        Err(_) => return JsValue::NULL,
+        Err(e) => {
+            // Return error for display in editor
+            return serde_wasm_bindgen::to_value(&PatternEventsJS {
+                events: vec![],
+                beats_per_cycle: beats(4).into(),
+                error: Some(e.to_string()),
+            })
+            .unwrap_or(JsValue::NULL);
+        }
     };
 
     // Convert to events with cycle timing
@@ -825,6 +859,7 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
             PatternEventsJS {
                 events,
                 beats_per_cycle: p.beats_per_cycle.into(),
+                error: None,
             }
         }
         Value::Chord(c) => {
@@ -850,6 +885,7 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
                     is_rest: false,
                 }],
                 beats_per_cycle: beats(1).into(), // Single chord = 1 beat cycle
+                error: None,
             }
         }
         Value::Note(n) => PatternEventsJS {
@@ -868,6 +904,7 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
                 is_rest: false,
             }],
             beats_per_cycle: beats(1).into(), // Single note = 1 beat cycle
+            error: None,
         },
         Value::EveryPattern(ref every) => {
             // For piano roll visualization, show the base pattern
@@ -898,6 +935,7 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
             PatternEventsJS {
                 events,
                 beats_per_cycle: p.beats_per_cycle.into(),
+                error: None,
             }
         }
         _ => return JsValue::NULL,

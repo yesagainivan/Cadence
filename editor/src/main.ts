@@ -68,29 +68,27 @@ const cadenceLinter = linter((view) => {
   const code = view.state.doc.toString();
   const result = parseCode(code);
 
-  if (!result.success && result.error) {
-    const err = result.error;
-    // Map Cadence error to CodeMirror Diagnostic
-    // Note: WASM returns 1-based line numbers, CodeMirror expects 0-based lines? 
-    // Wait, parseCode error has `start` and `end` offsets (UTF-16).
-    // CodeMirror Diagnostic uses `from` and `to`.
+  if (!result.success) {
+    // Support both single error (legacy/fallback) and detailed errors array
+    const errors = (result.errors && result.errors.length > 0) ? result.errors : (result.error ? [result.error] : []);
 
-    // Fallback if start/end are 0 (e.g. general error)
-    let from = err.start;
-    let to = err.end;
+    return errors.map(err => {
+      let from = err.start;
+      let to = err.end;
 
-    // If range is empty (0 length), highlight at least one char or end of line
-    if (from === to) {
-      to = Math.min(from + 1, code.length);
-    }
+      // If range is empty (0 length), highlight at least one char or end of line
+      if (from === to) {
+        to = Math.min(from + 1, code.length);
+      }
 
-    const diagnostic: Diagnostic = {
-      from,
-      to,
-      severity: 'error',
-      message: err.message,
-    };
-    return [diagnostic];
+      const diagnostic: Diagnostic = {
+        from,
+        to,
+        severity: 'error',
+        message: err.message,
+      };
+      return diagnostic;
+    });
   }
 
   return [];
@@ -202,9 +200,32 @@ function updatePianoRollAtCursor(view: EditorView): void {
 
   if (patternEvents && patternEvents.events && patternEvents.events.length > 0) {
     pianoRoll.update(patternEvents);
+
+    // Clear error status if valid events
+    const statusEl = document.getElementById('status');
+    if (statusEl && statusEl.textContent?.startsWith('Error:')) {
+      statusEl.innerHTML = '<span class="status-dot"></span>Valid';
+      const dot = statusEl.querySelector('.status-dot') as HTMLElement;
+      if (dot) dot.style.backgroundColor = '#7fb069';
+    }
+
   } else {
+    // Check if there was an error in the pattern evaluation (e.g. arity error)
+    if (patternEvents?.error) {
+      const statusEl = document.getElementById('status');
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="status-dot"></span>Error: ${patternEvents.error}`;
+        const dot = statusEl.querySelector('.status-dot') as HTMLElement;
+        if (dot) dot.style.backgroundColor = '#c9736f';
+      }
+    }
+
     // Clear piano roll if no events
-    pianoRoll.update({ events: [], beats_per_cycle: { n: 4, d: 1 } });
+    pianoRoll.update({
+      events: [],
+      beats_per_cycle: { n: 4, d: 1 },
+      error: null
+    });
   }
 }
 
