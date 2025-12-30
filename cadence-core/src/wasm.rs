@@ -1186,15 +1186,176 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                 }
             }
         }
-        _ => {
-            // Other statement types (loop, repeat, if, etc.)
+        Statement::FunctionDef { name, params, body } => {
+            // Show function signature nicely
+            let signature = format!("fn {}({})", name, params.join(", "));
             let context = CursorContextJS {
-                statement_type: format!("{:?}", spanned_stmt.statement)
-                    .split('(')
-                    .next()
-                    .unwrap_or("unknown")
-                    .to_lowercase(),
+                statement_type: "function".to_string(),
+                value_type: Some(format!("{} statements", body.len())),
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
+                },
+                variable_name: Some(signature),
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Loop { body } => {
+            let context = CursorContextJS {
+                statement_type: "loop".to_string(),
+                value_type: Some(format!("{} statements", body.len())),
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
+                },
+                variable_name: None,
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Repeat { count, body } => {
+            let context = CursorContextJS {
+                statement_type: "repeat".to_string(),
+                value_type: Some(format!("{} statements", body.len())),
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
+                },
+                variable_name: Some(format!("{} times", count)),
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::For {
+            var,
+            start,
+            end,
+            body,
+        } => {
+            let context = CursorContextJS {
+                statement_type: "for".to_string(),
+                value_type: Some(format!("{} statements", body.len())),
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
+                },
+                variable_name: Some(format!("{} in {}..{}", var, start, end)),
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let else_info = if else_body.is_some() { " + else" } else { "" };
+            let context = CursorContextJS {
+                statement_type: "if".to_string(),
+                value_type: Some(format!("{} statements{}", then_body.len(), else_info)),
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
+                },
+                variable_name: None,
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Return(expr) => {
+            let context = CursorContextJS {
+                statement_type: "return".to_string(),
+                value_type: if expr.is_some() {
+                    Some("value".to_string())
+                } else {
+                    None
+                },
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
+                },
+                variable_name: None,
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Break => {
+            let context = CursorContextJS {
+                statement_type: "break".to_string(),
                 value_type: None,
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
+                },
+                variable_name: None,
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Continue => {
+            let context = CursorContextJS {
+                statement_type: "continue".to_string(),
+                value_type: None,
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
+                },
+                variable_name: None,
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Wait { .. } => {
+            let context = CursorContextJS {
+                statement_type: "wait".to_string(),
+                value_type: Some("beats".to_string()),
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
+                },
+                variable_name: None,
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Load(path) => {
+            let context = CursorContextJS {
+                statement_type: "load".to_string(),
+                value_type: Some("file".to_string()),
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
+                },
+                variable_name: Some(path.clone()),
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Block(body) => {
+            let context = CursorContextJS {
+                statement_type: "block".to_string(),
+                value_type: Some(format!("{} statements", body.len())),
                 properties: None,
                 span: SpanInfoJS {
                     start: spanned_stmt.start,
