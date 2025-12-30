@@ -1,0 +1,36 @@
+// Welcome to Cadence!
+// A music programming language for live coding
+
+// Set the tempo
+tempo 120
+
+// Define a simple chord progression
+fn major(root) {
+  let third = root + 4
+  let fifth = root + 7
+  let chord = [root,third,fifth]
+  
+  return chord
+}
+
+
+// let cmaj = major(C);
+let fmaj = [F, A, C]
+let gmaj = [G, B, D]
+let amin = [A, C, E]
+
+
+// Create a pattern
+let p = "C E G B".palindrome() // this works fine!
+let pattern = p
+// let pattern = every(2,rev,"C E G B").palindrome() // but this breaks with no errors
+let pattern = every(2,rev,"C E G B").rev() // but this works! 
+
+
+// Play with a pattern (uncomment to try)
+play pattern loop
+
+// Try some transformations:
+// play cmaj + 2     // transpose up 2 semitones
+// play invert(cmaj) // first inversion
+

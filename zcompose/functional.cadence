@@ -1,0 +1,141 @@
+//=================//
+//===== Setup =====//
+//=================//
+
+// Set the tempo
+tempo 120
+
+//=====================//
+//===== Functions =====//
+//=====================//
+
+//=== Chord generators ===//
+
+fn major(root) {
+  let third = root + 4
+  let fifth = root + 7
+  let chord = [root,third,fifth]
+  
+  return chord
+}
+
+fn minor(root) {
+  let third = root + 3
+  let fifth = root + 7
+  let chord = [root,third,fifth]
+  
+  return chord
+}
+
+fn sus2(root) {
+  let third = root + 2
+  let fifth = root + 7
+  let chord = [root,third,fifth]
+  
+  return chord
+}
+
+// Create a chord
+// with root `r` and a choice!
+fn Chord(r, choice) {
+  if choice == 0 {
+    return major(r) 
+  } else if choice == 1 {
+    return minor(r) 
+  } else if choice == 2 {
+    return sus2(r) 
+  } else {
+    return r // just return root
+  }
+}
+
+//=== Arp generators ===//
+
+fn Arp(root, quality, speed, sense) {
+  let third = (root + 4) - quality
+  let fifth = root + 7
+  let seventh = third + 7
+  let arp = "root third fifth seventh".env(1,20,1,0)
+
+  if sense%2 != 0 {
+    arp = arp.rev()
+  }
+
+  if speed < 0 {
+    let n_speed = speed * -1
+    return arp.slow(n_speed)
+  } else if speed > 0 {
+    return arp.fast(speed)
+  } else {
+    return arp
+  }
+}
+
+fn ArpFromTriad(chord, sense) {
+  let roo = chord.root()
+  let thir = chord.invert().bass()
+  if (roo + 2) == thir {
+     thir = roo + 2
+  }
+  
+  let fif = chord.invert_n(2).bass()
+  let sev = thir + 7
+
+  let a = "roo thir fif sev"
+
+  if sense%2 != 0 {
+    a = a.rev()
+  }
+
+  return a
+}
+
+
+//========================//
+//===== Construction =====//
+//========================//
+
+let Bbmaj = Bb3.Chord(0)
+let Cmaj = Chord(C, 0)
+let Fmaj = Chord(F3,0).invert_n(2) - 0
+let Fsus = Chord(F3,2)
+let Gmaj = Chord(G, 0)
+let Amin = Chord(A, 1).invert_n(0)
+
+let Bbsus = Chord(Bb,2)
+
+let carp = Arp(C, 2, 2, 2)
+
+let wow = ArpFromTriad(Fsus, 0)
+
+let cool = [C,D,G].invert_n(0).ArpFromTriad(3).fast(2)
+
+
+
+// let chords = "Cmaj [Bbmaj Fmaj]".slow(8)
+let chords = "Cmaj [Bbmaj Fmaj]".slow(8).env(5,20,60,1)
+
+// chords = smooth(chords)
+
+
+let pattern = cool // but this works! 
+let pulse = "_ G _ G"
+
+
+
+//===============//
+//===== Mix =====//
+//===============//
+
+on 1 {
+  play pattern.pan(20) loop
+  volume 30
+}
+on 2 {
+  play chords loop
+  volume 50
+}
+on 3 {
+  play pulse.pan(80) loop
+  volume 20
+}

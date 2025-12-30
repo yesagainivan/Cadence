@@ -333,14 +333,24 @@ impl FunctionRegistry {
 
                 let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
 
-                let pattern = match pattern_value {
-                    Value::Pattern(p) => p,
-                    Value::String(s) => crate::types::Pattern::parse(&s)
-                        .map_err(|e| anyhow!("palindrome(): invalid pattern: {}", e))?,
-                    _ => return Err(anyhow!("palindrome() argument must be a pattern")),
-                };
-
-                Ok(Value::Pattern(pattern.palindrome()))
+                match pattern_value {
+                    Value::Pattern(p) => Ok(Value::Pattern(p.palindrome())),
+                    Value::String(s) => {
+                        let pattern = crate::types::Pattern::parse(&s)
+                            .map_err(|e| anyhow!("palindrome(): invalid pattern: {}", e))?;
+                        Ok(Value::Pattern(pattern.palindrome()))
+                    }
+                    Value::EveryPattern(every) => {
+                        // Apply palindrome to both base and transformed patterns
+                        let palindrome_every = crate::types::EveryPattern::new(
+                            every.interval,
+                            every.base.clone().palindrome(),
+                            every.transformed.clone().palindrome(),
+                        );
+                        Ok(Value::EveryPattern(Box::new(palindrome_every)))
+                    }
+                    _ => Err(anyhow!("palindrome() argument must be a pattern")),
+                }
             }),
         );
 
@@ -357,20 +367,30 @@ impl FunctionRegistry {
                 let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
                 let n_value = evaluator.eval_with_env(args[1].clone(), env)?;
 
-                let pattern = match pattern_value {
-                    Value::Pattern(p) => p,
-                    Value::String(s) => crate::types::Pattern::parse(&s)
-                        .map_err(|e| anyhow!("stutter(): invalid pattern: {}", e))?,
-                    _ => return Err(anyhow!("stutter() first argument must be a pattern")),
-                };
-
                 let n = match n_value {
                     Value::Number(n) => n.max(1) as usize,
                     Value::Note(note) => (note.pitch_class() as usize).max(1),
                     _ => return Err(anyhow!("stutter() second argument must be a number")),
                 };
 
-                Ok(Value::Pattern(pattern.stutter(n)))
+                match pattern_value {
+                    Value::Pattern(p) => Ok(Value::Pattern(p.stutter(n))),
+                    Value::String(s) => {
+                        let pattern = crate::types::Pattern::parse(&s)
+                            .map_err(|e| anyhow!("stutter(): invalid pattern: {}", e))?;
+                        Ok(Value::Pattern(pattern.stutter(n)))
+                    }
+                    Value::EveryPattern(every) => {
+                        // Apply stutter to both base and transformed patterns
+                        let stutter_every = crate::types::EveryPattern::new(
+                            every.interval,
+                            every.base.clone().stutter(n),
+                            every.transformed.clone().stutter(n),
+                        );
+                        Ok(Value::EveryPattern(Box::new(stutter_every)))
+                    }
+                    _ => Err(anyhow!("stutter() first argument must be a pattern")),
+                }
             }),
         );
 
