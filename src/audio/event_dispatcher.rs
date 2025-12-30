@@ -83,6 +83,13 @@ impl LoopingPattern {
         current_beat: f64,
     ) -> Result<Option<PlaybackStep>, anyhow::Error> {
         let evaluator = Evaluator::new();
+
+        // Inject _beat into environment for beat() function
+        {
+            let mut env_write = self.env.write().map_err(|e| anyhow::anyhow!("{}", e))?;
+            env_write.define("_beat".to_string(), Value::Number(current_beat as i32));
+        }
+
         let env_guard = self.env.read().map_err(|e| anyhow::anyhow!("{}", e))?;
         let value = evaluator.eval_with_env(self.expression.clone(), Some(&env_guard))?;
 
