@@ -145,7 +145,12 @@ impl Interpreter {
     pub fn run_statement(&mut self, stmt: &Statement) -> Result<ControlFlow> {
         match stmt {
             Statement::Let { name, value } => {
-                let val = self.eval_expression(value)?;
+                // Store as thunk for lazy/reactive evaluation (TidalCycles-style)
+                // The expression will be re-evaluated each time the variable is accessed
+                let val = Value::Thunk {
+                    expression: Box::new(value.clone()),
+                    env: self.environment.clone(),
+                };
                 self.environment.write().unwrap().define(name.clone(), val);
                 Ok(ControlFlow::Normal)
             }

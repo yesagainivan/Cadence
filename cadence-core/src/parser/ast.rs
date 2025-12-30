@@ -410,7 +410,7 @@ pub enum ArithmeticOp {
 }
 
 /// Represents the result of evaluating an expression
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Note(Note),
     Chord(Chord),
@@ -431,6 +431,45 @@ pub enum Value {
     /// Pattern combinator that applies a transformation every N cycles
     /// Used for TidalCycles-style `every(2, rev, pattern)` alternation
     EveryPattern(Box<EveryPattern>),
+    /// Lazy/thunked expression - evaluated on each access
+    /// Used for TidalCycles-style reactive variables
+    Thunk {
+        expression: Box<Expression>,
+        /// Environment captured at definition time (for closures)
+        env: crate::parser::environment::SharedEnvironment,
+    },
+}
+
+// Manual PartialEq impl because Thunk contains SharedEnvironment which doesn't impl PartialEq
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Note(a), Value::Note(b)) => a == b,
+            (Value::Chord(a), Value::Chord(b)) => a == b,
+            (Value::Boolean(a), Value::Boolean(b)) => a == b,
+            (Value::Pattern(a), Value::Pattern(b)) => a == b,
+            (Value::Number(a), Value::Number(b)) => a == b,
+            (Value::String(a), Value::String(b)) => a == b,
+            (
+                Value::Function {
+                    name: n1,
+                    params: p1,
+                    body: b1,
+                },
+                Value::Function {
+                    name: n2,
+                    params: p2,
+                    body: b2,
+                },
+            ) => n1 == n2 && p1 == p2 && b1 == b2,
+            (Value::Unit, Value::Unit) => true,
+            (Value::Array(a), Value::Array(b)) => a == b,
+            (Value::EveryPattern(a), Value::EveryPattern(b)) => a == b,
+            // For thunks, compare only the expression (env identity doesn't matter for equality)
+            (Value::Thunk { expression: e1, .. }, Value::Thunk { expression: e2, .. }) => e1 == e2,
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for Expression {
@@ -593,6 +632,9 @@ impl Value {
                 // The real cycle selection happens in the playback engine
                 Value::Pattern(every.base.clone()).to_playback_info()
             }
+            Value::Thunk { .. } => {
+                Err("Cannot play a thunk directly - it should have been evaluated".to_string())
+            }
         }
     }
 }
@@ -621,6 +663,7 @@ impl fmt::Display for Value {
                 write!(f, "]")
             }
             Value::EveryPattern(every) => write!(f, "{}", every),
+            Value::Thunk { expression, .. } => write!(f, "<thunk: {}>", expression),
         }
     }
 }

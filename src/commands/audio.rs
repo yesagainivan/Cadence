@@ -141,6 +141,11 @@ fn get_frequencies_from_value(value: &Value) -> anyhow::Result<Vec<f32>> {
                 "Cannot play an EveryPattern directly - use 'play X loop' for cycle-based alternation"
             ));
         }
+        Value::Thunk { .. } => {
+            return Err(anyhow::anyhow!(
+                "Cannot play a thunk directly - it should have been evaluated"
+            ));
+        }
     }
 
     Ok(frequencies)

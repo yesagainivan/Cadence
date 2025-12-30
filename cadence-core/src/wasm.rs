@@ -1405,6 +1405,7 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                         };
                         ("every_pattern".to_string(), Some(props))
                     }
+                    Value::Thunk { .. } => ("thunk".to_string(), None),
                 };
                 (Some(vt), props)
             }

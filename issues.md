@@ -110,3 +110,42 @@ cadence>
 ```
 
 But I noticed it only worked on 
+
+
+
+//
+
+Okay, it now goes through, but doesnt behave as expected! We hear the chord sustain, things arent changing every beats, we do hear a G at a point. We expected to hear the created pattern slowed. but I realize this might be a issue in my logic..
+
+Slowing down happens at the beat level:
+```
+fn evolving() {
+  // return "[C,G,E4] D G D".at(beat()%4) // this works fine!
+  return "[C,G,E4] D G D".at((beat()/4)%4) // this also works! produces a "stuttered", slowed progression!
+}
+```
+
+//
+
+```
+// "Csus".every(2, "Bbmaj Fmaj") // Error: Runtime error: every() expects a number as first argument
+```
+
+And I still think there is a strange behavior; it seems 
+```
+// play "[C,G,E4] D G D".at(beat()%4) loop // this works fine
+
+let john = "[C,G,E4] D G D".at(beat()%4) // we create a variable
+
+play john loop // this is now flawed
+```
+
+What is happening?
+
+//
+
+
+```
+run_statements_in_local_env
+ to use thunks. However, for pure function evaluation within the evaluator, I'll keep it eagerly evaluated since local environments don't support SharedEnvironment. Let me run a quick build check:
+```

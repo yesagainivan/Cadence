@@ -87,6 +87,22 @@ impl Evaluator {
                         );
                         Ok(Value::EveryPattern(Box::new(transposed)))
                     }
+                    Value::Thunk {
+                        expression,
+                        env: thunk_env,
+                    } => {
+                        // Evaluate thunk first, then transpose the result
+                        let env_guard = thunk_env.read().map_err(|e| anyhow!("{}", e))?;
+                        let resolved = self.eval_with_env(*expression, Some(&env_guard))?;
+                        // Recursively transpose the resolved value
+                        self.eval_with_env(
+                            Expression::Transpose {
+                                target: Box::new(Expression::Value(Box::new(resolved))),
+                                semitones,
+                            },
+                            env,
+                        )
+                    }
                 }
             }
             Expression::Intersection { left, right } => {
@@ -129,10 +145,20 @@ impl Evaluator {
                 self.eval_function_with_env(&name, args, env)
             }
             Expression::Variable(name) => match env {
-                Some(e) => e
-                    .get(&name)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("Variable '{}' is not defined", name)),
+                Some(e) => {
+                    match e.get(&name).cloned() {
+                        Some(Value::Thunk {
+                            expression,
+                            env: thunk_env,
+                        }) => {
+                            // Re-evaluate thunk with its captured environment
+                            let env_guard = thunk_env.read().map_err(|e| anyhow!("{}", e))?;
+                            self.eval_with_env(*expression, Some(&env_guard))
+                        }
+                        Some(v) => Ok(v),
+                        None => Err(anyhow!("Variable '{}' is not defined", name)),
+                    }
+                }
                 None => Err(anyhow!(
                     "Variable '{}' cannot be resolved (no environment)",
                     name
@@ -803,6 +829,17 @@ fn value_to_pattern_steps(value: &Value) -> Option<Vec<crate::types::PatternStep
         Value::Pattern(pattern) => {
             // Return the pattern's steps directly
             Some(pattern.steps.clone())
+        }
+        Value::Thunk { expression, env } => {
+            // Evaluate the thunk and recursively convert the result
+            let evaluator = Evaluator::new();
+            if let Ok(env_guard) = env.read() {
+                if let Ok(resolved) = evaluator.eval_with_env(*expression.clone(), Some(&env_guard))
+                {
+                    return value_to_pattern_steps(&resolved);
+                }
+            }
+            None
         }
         // Other values can't be converted to pattern steps
         _ => None,
