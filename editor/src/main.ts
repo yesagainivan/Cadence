@@ -22,10 +22,16 @@ import { PropertiesPanel } from './properties-panel';
 import { initTheme, getTheme, toggleTheme, onThemeChange, buildCMTheme } from './theme';
 import { debouncedRefreshSymbols } from './hover';
 import { gotoDefinition, gotoDefinitionPlugin, initGotoDefinitionCursor } from './gotoDefinition';
+import { initializeFileSystem, getFileSystemService, FileSystemService } from './filesystem-service';
+import { FileTreePanel } from './file-tree';
+import { TabBar } from './tab-bar';
 
 // Global instances
 let pianoRoll: PianoRoll | null = null;
 let propertiesPanel: PropertiesPanel | null = null;
+let fileTree: FileTreePanel | null = null;
+let tabBar: TabBar | null = null;
+let editorView: EditorView | null = null;
 
 // CodeMirror theme compartment for dynamic theme switching
 const themeCompartment = new Compartment();
@@ -365,7 +371,102 @@ async function init(): Promise<void> {
     console.error('WASM init error:', e);
   }
 
+  // Initialize virtual filesystem (OPFS)
+  if (FileSystemService.isSupported()) {
+    try {
+      await initializeFileSystem();
+      log('File system initialized (OPFS)');
+    } catch (e) {
+      log(`File system failed: ${e}`);
+    }
+  } else {
+    log('OPFS not supported - file browser disabled');
+  }
+
   const editor = createEditor(editorContainer);
+  editorView = editor;
+
+  // Initialize tab bar
+  const tabBarContainer = document.getElementById('tab-bar');
+  if (tabBarContainer) {
+    tabBar = new TabBar(tabBarContainer, {
+      onTabSelect: async (path) => {
+        // Load file content into editor
+        const content = tabBar?.getContent(path);
+        if (content !== null && content !== undefined && editorView) {
+          editorView.dispatch({
+            changes: { from: 0, to: editorView.state.doc.length, insert: content }
+          });
+        }
+        log(`Opened: ${path}`);
+      },
+      onTabClose: (path) => {
+        log(`Closed: ${path}`);
+        // If no more tabs, show sample code
+        if (tabBar && !tabBar.getActiveTab() && editorView) {
+          editorView.dispatch({
+            changes: { from: 0, to: editorView.state.doc.length, insert: SAMPLE_CODE }
+          });
+        }
+      },
+      onSaveRequest: async (path) => {
+        // Save current content to filesystem
+        const content = editorView?.state.doc.toString() || '';
+        const fs = getFileSystemService();
+        await fs.writeFile(path, content);
+        tabBar?.setDirty(path, false);
+        tabBar?.updateContent(path, content);
+        log(`Saved: ${path}`);
+      }
+    });
+  }
+
+  // Initialize file tree panel
+  const fileTreeContainer = document.getElementById('file-tree-panel');
+  if (fileTreeContainer && FileSystemService.isSupported()) {
+    fileTree = new FileTreePanel(fileTreeContainer, {
+      onFileSelect: async (path) => {
+        // Open file in tab
+        const fs = getFileSystemService();
+        try {
+          const content = await fs.readFile(path);
+          tabBar?.openTab(path, content);
+          // Load into editor
+          if (editorView) {
+            editorView.dispatch({
+              changes: { from: 0, to: editorView.state.doc.length, insert: content }
+            });
+          }
+        } catch (e) {
+          log(`Failed to open: ${e}`);
+        }
+      },
+      onFileCreate: (path) => {
+        log(`Created: ${path}`);
+      },
+      onFileDelete: (path) => {
+        tabBar?.removeTab(path);
+        log(`Deleted: ${path}`);
+      },
+      onFileRename: (oldPath, newPath) => {
+        tabBar?.renameTab(oldPath, newPath);
+        log(`Renamed: ${oldPath} → ${newPath}`);
+      }
+    });
+
+    // Initial refresh
+    await fileTree.refresh();
+  }
+
+  // Track dirty state on edits if a tab is open
+  editor.dom.addEventListener('input', () => {
+    const activeTab = tabBar?.getActiveTab();
+    if (activeTab) {
+      tabBar?.setDirty(activeTab, true);
+      // Update content in memory
+      tabBar?.updateContent(activeTab, editor.state.doc.toString());
+    }
+  });
 
   // Initialize piano roll
   try {
