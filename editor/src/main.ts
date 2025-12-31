@@ -21,6 +21,7 @@ import { PianoRoll } from './piano-roll';
 import { PropertiesPanel } from './properties-panel';
 import { initTheme, getTheme, toggleTheme, onThemeChange, buildCMTheme } from './theme';
 import { debouncedRefreshSymbols } from './hover';
+import { gotoDefinition, gotoDefinitionPlugin, initGotoDefinitionCursor } from './gotoDefinition';
 
 // Global instances
 let pianoRoll: PianoRoll | null = null;
@@ -121,10 +122,14 @@ function createEditor(container: HTMLElement): EditorView {
         ...foldKeymap,
         ...closeBracketsKeymap,
         ...searchKeymap,
+        { key: 'F12', run: gotoDefinition },
       ]),
 
       // Cadence language support (WASM-powered highlighting)
       cadenceWasm(),
+
+      // Go-to-definition (Cmd+Click)
+      gotoDefinitionPlugin,
 
       // Theme (via Compartment for dynamic switching)
       themeCompartment.of(buildCMTheme(getTheme())),
@@ -147,10 +152,15 @@ function createEditor(container: HTMLElement): EditorView {
     ],
   });
 
-  return new EditorView({
+  const view = new EditorView({
     state,
     parent: container,
   });
+
+  // Enable pointer cursor on Cmd/Ctrl hold
+  initGotoDefinitionCursor(container);
+
+  return view;
 }
 
 /**

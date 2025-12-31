@@ -5,7 +5,7 @@
  * providing access to tokenization and parsing functions.
  */
 
-import init, { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, get_symbols, get_symbol_at_position, WasmInterpreter } from './wasm/cadence_core.js';
+import init, { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, get_symbols, get_symbol_at_position, get_definition_by_name, WasmInterpreter } from './wasm/cadence_core.js';
 
 export interface HighlightSpan {
     start_line: number;
@@ -420,4 +420,4 @@ export function getUserFunctions(interpreter: WasmInterpreter): DocItem[] {
 }
 
 // Re-export for convenience
-export { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, get_symbols, get_symbol_at_position, WasmInterpreter };
+export { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, get_symbols, get_symbol_at_position, get_definition_by_name, WasmInterpreter };

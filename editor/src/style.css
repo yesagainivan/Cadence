@@ -649,3 +649,8 @@ body {
   padding: 1px 4px;
   border-radius: 2px;
 }
+
+/* === GO-TO-DEFINITION === */
+.cm-goto-definition-active .cm-content {
+  cursor: pointer;
+}

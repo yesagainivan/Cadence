@@ -444,6 +444,62 @@ pub fn get_symbols(code: &str) -> JsValue {
     .unwrap_or(JsValue::NULL)
 }
 
+/// Definition location result
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DefinitionJS {
+    pub found: bool,
+    /// UTF-16 start position of definition
+    pub start: usize,
+    /// UTF-16 end position of definition
+    pub end: usize,
+}
+
+/// Get the definition location of a symbol by name
+/// Used for go-to-definition feature
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn get_definition_by_name(code: &str, name: &str) -> JsValue {
+    use crate::parser::binder::Binder;
+    use crate::parser::statement_parser::parse_spanned_statements;
+
+    // Parse and bind
+    let program = match parse_spanned_statements(code) {
+        Ok(p) => p,
+        Err(_) => {
+            return serde_wasm_bindgen::to_value(&DefinitionJS {
+                found: false,
+                start: 0,
+                end: 0,
+            })
+            .unwrap_or(JsValue::NULL)
+        }
+    };
+
+    let table = Binder::bind(&program);
+
+    // Look up by name
+    if let Some(symbol) = table.get(name) {
+        let (start, end) = match symbol {
+            crate::parser::symbols::Symbol::Function(f) => (f.span.utf16_start, f.span.utf16_end),
+            crate::parser::symbols::Symbol::Variable(v) => (v.span.utf16_start, v.span.utf16_end),
+        };
+        return serde_wasm_bindgen::to_value(&DefinitionJS {
+            found: true,
+            start,
+            end,
+        })
+        .unwrap_or(JsValue::NULL);
+    }
+
+    serde_wasm_bindgen::to_value(&DefinitionJS {
+        found: false,
+        start: 0,
+        end: 0,
+    })
+    .unwrap_or(JsValue::NULL)
+}
+
 /// Get the symbol at a specific cursor position (for hover)
 /// Returns the symbol if found, or null
 #[cfg(feature = "wasm")]
