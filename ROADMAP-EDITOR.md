@@ -165,6 +165,7 @@ A web-based editor for the Cadence music programming language with live syntax h
 13. **Live coding** — `updateScript()` preserves cycle position during edits
 14. **Statement span tracking** — `SpannedStatement`/`SpannedProgram` types with byte offset tracking
 15. **Cursor-aware piano roll** — `get_events_at_position()` WASM function shows statement at cursor
+16. **Go-to-Definition** — Cmd+Click and F12 to jump to symbol definition
 
 ---
 

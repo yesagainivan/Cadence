@@ -461,6 +461,7 @@ impl Pattern {
                 PatternStep::Variable(_) => true,
                 PatternStep::Group(steps) => steps.iter().any(step_has_variables),
                 PatternStep::Repeat(inner, _) => step_has_variables(inner),
+                PatternStep::Weighted(inner, _) => step_has_variables(inner),
                 _ => false,
             }
         }
@@ -478,6 +479,7 @@ impl Pattern {
                     }
                 }
                 PatternStep::Repeat(inner, _) => collect_vars(inner, vars),
+                PatternStep::Weighted(inner, _) => collect_vars(inner, vars),
                 _ => {}
             }
         }
@@ -522,6 +524,21 @@ impl Pattern {
                         Ok(vec![PatternStep::Repeat(
                             Box::new(PatternStep::Group(resolved_inner)),
                             *count,
+                        )])
+                    }
+                }
+                PatternStep::Weighted(inner, weight) => {
+                    let resolved_inner = resolve_step(inner, lookup)?;
+                    if resolved_inner.len() == 1 {
+                        Ok(vec![PatternStep::Weighted(
+                            Box::new(resolved_inner.into_iter().next().unwrap()),
+                            *weight,
+                        )])
+                    } else {
+                        // If variable resolved to multiple steps, weight the group
+                        Ok(vec![PatternStep::Weighted(
+                            Box::new(PatternStep::Group(resolved_inner)),
+                            *weight,
                         )])
                     }
                 }
