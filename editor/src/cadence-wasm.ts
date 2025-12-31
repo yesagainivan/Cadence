@@ -5,7 +5,7 @@
  * providing access to tokenization and parsing functions.
  */
 
-import init, { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, get_symbols, get_symbol_at_position, get_definition_by_name, WasmInterpreter } from './wasm/cadence_core.js';
+import init, { tokenize, parse_and_check, run_script, get_events_at_position, get_context_at_cursor, get_documentation, get_symbols, get_symbol_at_position, get_definition_by_name, get_use_statements, WasmInterpreter } from './wasm/cadence_core.js';
 import { getFileSystemService, FileSystemService } from './filesystem-service.js';
 
 export interface HighlightSpan {
@@ -495,15 +495,142 @@ export async function resolveModule(
         await fs.initialize();
 
         // Read the file content
+        console.log(`[resolveModule] Reading file: ${path}`);
         const content = await fs.readFile(path);
+        console.log(`[resolveModule] File content (${content.length} chars):`, content.substring(0, 100));
 
         // Pass to WASM for parsing and binding
-        const result = interpreter.resolve_module(path, content);
-        return result as ModuleResolutionResult;
+        const wasmResult = interpreter.resolve_module(path, content);
+        console.log('[resolveModule] WASM result:', wasmResult);
+
+        // The WASM result might be a Map (from serde_wasm_bindgen) or a plain object
+        // Handle both cases
+        let result: ModuleResolutionResult;
+        if (wasmResult instanceof Map) {
+            result = {
+                success: wasmResult.get('success') as boolean,
+                exports: wasmResult.get('exports') as string[],
+                error: wasmResult.get('error') as string | undefined
+            };
+        } else {
+            result = wasmResult as ModuleResolutionResult;
+        }
+
+        console.log('[resolveModule] Parsed result:', result);
+        return result;
     } catch (e) {
+        console.error(`[resolveModule] Error loading '${path}':`, e);
         return {
             success: false,
             error: `Failed to load module '${path}': ${e}`
         };
     }
+}
+
+/** Result of get_use_statements call */
+export interface UseStatementsResult {
+    success: boolean;
+    paths: string[];
+    error?: string;
+}
+
+/**
+ * Get all `use` statement paths from code
+ * Used for pre-resolving imports before execution
+ */
+export function getUseStatements(code: string): UseStatementsResult {
+    if (!wasmInitialized) {
+        return { success: false, paths: [], error: 'WASM not initialized' };
+    }
+
+    try {
+        return get_use_statements(code) as UseStatementsResult;
+    } catch (e) {
+        return { success: false, paths: [], error: String(e) };
+    }
+}
+
+/**
+ * Pre-resolve all imports in a script before execution.
+ * This handles the async/sync bridge by resolving all `use` statements
+ * before the synchronous WASM execution begins.
+ * 
+ * @param interpreter The WasmInterpreter instance to resolve into
+ * @param code The source code containing potential `use` statements
+ * @param onProgress Optional callback for progress updates
+ * @returns List of resolved module paths, or throws on error
+ */
+export async function preResolveImports(
+    interpreter: WasmInterpreter,
+    code: string,
+    onProgress?: (resolved: string[], remaining: number) => void
+): Promise<string[]> {
+    const resolved = new Set<string>();
+    const pending = new Set<string>();
+    const failed: string[] = [];
+
+    // Get initial use statements
+    const result = getUseStatements(code);
+    console.log('[preResolveImports] Use statements result:', result);
+    if (!result.success) {
+        throw new Error(`Failed to parse code: ${result.error}`);
+    }
+    console.log('[preResolveImports] Found use paths:', result.paths);
+
+    // Add to pending queue
+    for (const path of result.paths) {
+        pending.add(path);
+    }
+
+    // Resolve until all done
+    while (pending.size > 0) {
+        // Get first pending path (convert to array for safe access)
+        const pendingArray = Array.from(pending);
+        const path = pendingArray[0];
+        pending.delete(path);
+
+        // Skip if already resolved
+        if (resolved.has(path)) continue;
+
+        // Notify progress
+        if (onProgress) {
+            onProgress(Array.from(resolved), pending.size);
+        }
+
+        // Resolve the module
+        const moduleResult = await resolveModule(interpreter, path);
+
+        if (!moduleResult.success) {
+            console.warn(`Failed to resolve module '${path}': ${moduleResult.error}`);
+            failed.push(path);
+            continue;
+        }
+
+        resolved.add(path);
+
+        // Read the module content to check for nested imports
+        try {
+            const fs = getFileSystemService();
+            const content = await fs.readFile(path);
+            const nestedResult = getUseStatements(content);
+
+            if (nestedResult.success) {
+                for (const nestedPath of nestedResult.paths) {
+                    if (!resolved.has(nestedPath)) {
+                        pending.add(nestedPath);
+                    }
+                }
+            }
+        } catch (e) {
+            // If we can't read the module content for nested imports, that's okay
+            // The module itself was already resolved
+            console.debug(`Could not check nested imports for '${path}': ${e}`);
+        }
+    }
+
+    if (failed.length > 0) {
+        console.warn(`Failed to resolve modules: ${failed.join(', ')}`);
+    }
+
+    return Array.from(resolved);
 }

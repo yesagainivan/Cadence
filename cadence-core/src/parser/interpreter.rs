@@ -623,10 +623,10 @@ impl Interpreter {
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
-                    Err(anyhow!(
-                        "Module imports are not yet supported in WASM: {}",
-                        path
-                    ))
+                    // In WASM, `use` statements are pre-resolved by JavaScript
+                    // via preResolveImports() before execution. Just skip them here.
+                    // The exports are already bound to the environment.
+                    Ok(ControlFlow::Normal)
                 }
             }
         }

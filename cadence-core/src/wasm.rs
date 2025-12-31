@@ -384,6 +384,89 @@ pub enum SymbolJS {
     },
 }
 
+/// Result of get_use_statements call
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct UseStatementsResult {
+    pub success: bool,
+    pub paths: Vec<String>,
+    pub error: Option<String>,
+}
+
+/// Get all `use` statement paths from Cadence source code.
+/// Used for pre-resolving imports before execution (async/sync bridge).
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn get_use_statements(code: &str) -> JsValue {
+    use crate::parser::ast::Statement;
+    use crate::parser::statement_parser::parse_statements;
+
+    // Parse the code
+    let program = match parse_statements(code) {
+        Ok(p) => p,
+        Err(e) => {
+            return serde_wasm_bindgen::to_value(&UseStatementsResult {
+                success: false,
+                paths: vec![],
+                error: Some(e.to_string()),
+            })
+            .unwrap_or(JsValue::NULL);
+        }
+    };
+
+    // Extract all use statement paths (including from nested structures)
+    fn collect_use_paths(statements: &[Statement], paths: &mut Vec<String>) {
+        for stmt in statements {
+            match stmt {
+                Statement::Use { path, .. } => {
+                    paths.push(path.clone());
+                }
+                // Check nested statements in blocks, loops, etc.
+                Statement::Loop { body } | Statement::Repeat { body, .. } => {
+                    collect_use_paths(body, paths);
+                }
+                Statement::For { body, .. } => {
+                    collect_use_paths(body, paths);
+                }
+                Statement::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    collect_use_paths(then_body, paths);
+                    if let Some(else_stmts) = else_body {
+                        collect_use_paths(else_stmts, paths);
+                    }
+                }
+                Statement::Block(stmts) => {
+                    collect_use_paths(stmts, paths);
+                }
+                Statement::FunctionDef { body, .. } => {
+                    collect_use_paths(body, paths);
+                }
+                Statement::Track { body, .. } => {
+                    collect_use_paths(&[(**body).clone()], paths);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut paths = Vec::new();
+    collect_use_paths(&program.statements, &mut paths);
+
+    // Deduplicate paths while preserving order
+    let mut seen = std::collections::HashSet::new();
+    paths.retain(|p| seen.insert(p.clone()));
+
+    serde_wasm_bindgen::to_value(&UseStatementsResult {
+        success: true,
+        paths,
+        error: None,
+    })
+    .unwrap_or(JsValue::NULL)
+}
+
 /// Result of get_symbols call
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -883,8 +966,26 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
     // Run the full program first to populate environment
     let mut interpreter = Interpreter::new();
     let program = spanned_program.to_program();
+
+    // Check if code has any use statements (imports)
+    // If so, we can't resolve them in the preview (requires async file I/O)
+    // So we'll be lenient with undefined variable errors
+    let has_imports = program
+        .statements
+        .iter()
+        .any(|s| matches!(s, Statement::Use { .. }));
+
     if let Err(e) = interpreter.run_program(&program) {
-        // Return interpreter errors (e.g., undefined variables)
+        let error_msg = e.to_string();
+
+        // If code has imports and error is about undefined variable, skip error display
+        // The user will see the correct behavior when they press Play
+        if has_imports && error_msg.contains("is not defined") {
+            // Silently return NULL - piano roll just won't show preview
+            return JsValue::NULL;
+        }
+
+        // Return interpreter errors for other cases
         return serde_wasm_bindgen::to_value(&PatternEventsJS {
             events: vec![],
             beats_per_cycle: beats(4).into(),
@@ -1607,13 +1708,15 @@ impl WasmInterpreter {
 
         // Extract exports (all top-level definitions)
         let mut exports = ModuleExports::new();
-        let temp_env = crate::parser::Environment::new();
         let evaluator = Evaluator::new();
+
+        // Use the interpreter's environment so evaluations have access to stdlib
+        let env_guard = self.interpreter.environment.read().unwrap();
 
         for stmt in &program.statements {
             match stmt {
                 crate::parser::Statement::Let { name, value } => {
-                    if let Ok(val) = evaluator.eval_with_env(value.clone(), Some(&temp_env)) {
+                    if let Ok(val) = evaluator.eval_with_env(value.clone(), Some(&env_guard)) {
                         exports.values.insert(name.clone(), val);
                     }
                 }
@@ -1627,6 +1730,9 @@ impl WasmInterpreter {
                 _ => {}
             }
         }
+
+        // Drop the read guard before getting write access
+        drop(env_guard);
 
         // Bind exports to interpreter environment
         if let Ok(mut env) = self.interpreter.environment.write() {

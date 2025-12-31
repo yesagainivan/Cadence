@@ -659,12 +659,13 @@ async function init(): Promise<void> {
 
   // Play button
   const playBtn = document.getElementById('play-btn');
-  playBtn?.addEventListener('click', () => {
+  playBtn?.addEventListener('click', async () => {
     const code = editor.state.doc.toString();
 
-    // Play script reactively
+    // Play script reactively (with async import resolution)
+    log('Resolving imports...');
+    await audioEngine.playScriptWithImports(code);
     log('Playing...');
-    audioEngine.playScript(code);
 
     // Start playhead animation
     if (pianoRoll) {

@@ -1,4 +1,4 @@
-import { type Action, WasmInterpreter, rationalToFloat, getUserFunctions } from './cadence-wasm';
+import { type Action, WasmInterpreter, rationalToFloat, getUserFunctions, preResolveImports } from './cadence-wasm';
 import { updateUserFunctions } from './hover';
 
 /** ADSR envelope parameters */
@@ -422,6 +422,82 @@ export class CadenceAudioEngine {
                 }
 
                 // Advance by 1 beat
+                this.currentBeat++;
+                this.lastBeatTime = nextBeatTime;
+                const beatDuration = 60 / this.tempo;
+                nextBeatTime += beatDuration;
+            }
+
+            const timeoutId = window.setTimeout(scheduler, SCHEDULE_INTERVAL);
+            this.scheduledTimeouts.push(timeoutId);
+        };
+
+        const timeoutId = window.setTimeout(scheduler, SCHEDULE_INTERVAL);
+        this.scheduledTimeouts.push(timeoutId);
+    }
+
+    /**
+     * Play script with async import resolution.
+     * This pre-resolves all `use` statements before executing the script,
+     * bridging the async/sync gap for module loading.
+     */
+    async playScriptWithImports(code: string): Promise<void> {
+        // Stop previous playback
+        this.stop();
+
+        const ctx = this.ensureContext();
+        this.isPlaying = true;
+        this.currentBeat = 0;
+        this.lastBeatTime = ctx.currentTime;
+
+        // Initialize interpreter
+        if (!this.interpreter) {
+            this.interpreter = new WasmInterpreter();
+        }
+
+        // Pre-resolve all imports BEFORE loading the script
+        try {
+            const resolved = await preResolveImports(this.interpreter, code);
+            if (resolved.length > 0) {
+                console.log(`🔗 Resolved modules: ${resolved.join(', ')}`);
+            }
+        } catch (e) {
+            console.warn('Module resolution warning:', e);
+            // Continue anyway - modules might not exist yet
+        }
+
+        // Load code and get initial actions
+        const result = this.interpreter.load(code);
+
+        // Update hover cache with user-defined functions from this script
+        updateUserFunctions(getUserFunctions(this.interpreter));
+
+        // Process initial actions (like Setup)
+        if (result.actions) {
+            for (const action of result.actions) {
+                this.handleAction(action as Action, ctx.currentTime);
+            }
+        }
+
+        // Start scheduler loop
+        const LOOKAHEAD = 0.1;
+        const SCHEDULE_INTERVAL = 25;
+        let nextBeatTime = ctx.currentTime + (60 / this.tempo);
+
+        const scheduler = () => {
+            if (!this.isPlaying || !this.interpreter) return;
+
+            const now = ctx.currentTime;
+
+            while (nextBeatTime < now + LOOKAHEAD) {
+                const result = this.interpreter.tick();
+
+                if (result.actions) {
+                    for (const action of result.actions) {
+                        this.handleAction(action as Action, nextBeatTime);
+                    }
+                }
+
                 this.currentBeat++;
                 this.lastBeatTime = nextBeatTime;
                 const beatDuration = 60 / this.tempo;
