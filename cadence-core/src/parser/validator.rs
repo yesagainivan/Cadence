@@ -33,7 +33,19 @@ impl<'a> Validator<'a> {
         let span = stmt.to_span();
         match &stmt.statement {
             Statement::Expression(expr) => self.visit_expression(expr, span),
-            Statement::Let { value, .. } => self.visit_expression(value, span),
+            Statement::Let { name, value } => {
+                // Check for direct self-reference (e.g., let x = x)
+                if self.expression_references_var(name, value) {
+                    self.errors.push(CadenceError::new(
+                        format!(
+                            "Variable '{}' cannot reference itself in its definition",
+                            name
+                        ),
+                        span.clone(),
+                    ));
+                }
+                self.visit_expression(value, span);
+            }
             Statement::Assign { value, .. } => self.visit_expression(value, span),
             Statement::FunctionDef { body, .. } => {
                 // Validate function body
@@ -250,6 +262,38 @@ impl<'a> Validator<'a> {
                 self.errors
                     .push(CadenceError::new(format!("Pattern error: {}", msg), span));
             }
+        }
+    }
+
+    /// Check if an expression references a specific variable (for self-reference detection)
+    fn expression_references_var(&self, var_name: &str, expr: &Expression) -> bool {
+        match expr {
+            Expression::Variable(name) => name == var_name,
+            Expression::FunctionCall { args, .. } => args
+                .iter()
+                .any(|arg| self.expression_references_var(var_name, arg)),
+            Expression::BinaryOp { left, right, .. }
+            | Expression::Comparison { left, right, .. }
+            | Expression::LogicalAnd { left, right }
+            | Expression::LogicalOr { left, right }
+            | Expression::Intersection { left, right }
+            | Expression::Union { left, right }
+            | Expression::Difference { left, right } => {
+                self.expression_references_var(var_name, left)
+                    || self.expression_references_var(var_name, right)
+            }
+            Expression::Transpose { target, .. } | Expression::LogicalNot(target) => {
+                self.expression_references_var(var_name, target)
+            }
+            Expression::Index { target, index } => {
+                self.expression_references_var(var_name, target)
+                    || self.expression_references_var(var_name, index)
+            }
+            Expression::Array(elements) => elements
+                .iter()
+                .any(|el| self.expression_references_var(var_name, el)),
+            // Primitives and other expressions don't reference variables
+            _ => false,
         }
     }
 }

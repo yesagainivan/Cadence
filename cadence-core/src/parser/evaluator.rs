@@ -4,6 +4,13 @@ use crate::{
 };
 // use crate::types::{chord::Chord, note::Note};
 use anyhow::{anyhow, Result};
+use std::cell::RefCell;
+use std::collections::HashSet;
+
+// Thread-local set to track variables currently being evaluated (for cycle detection)
+thread_local! {
+    static EVALUATING_VARS: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+}
 
 /// Evaluates parsed expressions into values
 pub struct Evaluator;
@@ -151,9 +158,32 @@ impl Evaluator {
                             expression,
                             env: thunk_env,
                         }) => {
+                            // Check for recursive evaluation (e.g., let x = x)
+                            let is_recursive =
+                                EVALUATING_VARS.with(|ev| ev.borrow().contains(&name));
+
+                            if is_recursive {
+                                return Err(anyhow!(
+                                    "Recursive variable definition: '{}' references itself",
+                                    name
+                                ));
+                            }
+
+                            // Mark variable as being evaluated
+                            EVALUATING_VARS.with(|ev| {
+                                ev.borrow_mut().insert(name.clone());
+                            });
+
                             // Re-evaluate thunk with its captured environment
                             let env_guard = thunk_env.read().map_err(|e| anyhow!("{}", e))?;
-                            self.eval_with_env(*expression, Some(&env_guard))
+                            let result = self.eval_with_env(*expression, Some(&env_guard));
+
+                            // Remove from evaluation stack (even on error)
+                            EVALUATING_VARS.with(|ev| {
+                                ev.borrow_mut().remove(&name);
+                            });
+
+                            result
                         }
                         Some(v) => Ok(v),
                         None => Err(anyhow!("Variable '{}' is not defined", name)),
@@ -1250,5 +1280,79 @@ mod evaluator_numeric_tests {
             }
             _ => panic!("Expected Progression value"),
         }
+    }
+
+    #[test]
+    fn test_self_referential_variable_error() {
+        // Test that `let x = x` correctly detects the cycle and errors
+        use crate::parser::interpreter::Interpreter;
+        use crate::parser::statement_parser::parse_statements;
+
+        let program = parse_statements("let x = x").unwrap();
+        let mut interpreter = Interpreter::new();
+        interpreter.run_program(&program).unwrap();
+
+        // Now try to access x - should get an error, not infinite loop
+        let env = interpreter.environment.read().unwrap();
+        let evaluator = Evaluator::new();
+
+        // Get 'x' and try to evaluate it
+        let result = evaluator.eval_with_env(
+            crate::parser::ast::Expression::Variable("x".to_string()),
+            Some(&env),
+        );
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Recursive variable definition"),
+            "Expected recursive error, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_self_referential_with_operation_error() {
+        // Test that `let a = a + 1` also detects the cycle
+        use crate::parser::interpreter::Interpreter;
+        use crate::parser::statement_parser::parse_statements;
+
+        let program = parse_statements("let a = a + 1").unwrap();
+        let mut interpreter = Interpreter::new();
+        interpreter.run_program(&program).unwrap();
+
+        let env = interpreter.environment.read().unwrap();
+        let evaluator = Evaluator::new();
+
+        let result = evaluator.eval_with_env(
+            crate::parser::ast::Expression::Variable("a".to_string()),
+            Some(&env),
+        );
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Recursive variable definition"),
+            "Expected recursive error, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_valid_reassignment_still_works() {
+        // Test that valid reassignment pattern `let a = [...]; a = a.something()` still works
+        use crate::parser::interpreter::Interpreter;
+        use crate::parser::statement_parser::parse_statements;
+
+        let program = parse_statements("let a = [C, E, G]\na = a + 12").unwrap();
+        let mut interpreter = Interpreter::new();
+        let result = interpreter.run_program(&program);
+
+        // This should succeed - reassignment is different from self-referential definition
+        assert!(
+            result.is_ok(),
+            "Reassignment should work, got: {:?}",
+            result
+        );
     }
 }
