@@ -17,7 +17,7 @@ features = []
 default = ["colored"]
 serde = ["dep:serde", "num-rational/serde"]
 colored = ["dep:colored"]
-wasm = ["dep:wasm-bindgen", "serde", "dep:serde-wasm-bindgen"]
+wasm = ["dep:wasm-bindgen", "serde", "dep:serde-wasm-bindgen", "dep:js-sys", "dep:serde_json"]
 
 [dependencies.serde]
 version = "1.0"
@@ -34,6 +34,14 @@ optional = true
 
 [dependencies.serde-wasm-bindgen]
 version = "0.6"
+optional = true
+
+[dependencies.js-sys]
+version = "0.3"
+optional = true
+
+[dependencies.serde_json]
+version = "1.0"
 optional = true
 
 [lib]

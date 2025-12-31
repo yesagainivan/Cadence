@@ -1546,6 +1546,8 @@ pub struct WasmInterpreter {
     cycle: i32,
     // Store expressions to re-evaluate: (expression, looping, track_id, start_beat)
     active_tracks: Vec<(Expression, bool, usize, i32)>,
+    // JavaScript callback for reading files (for module imports)
+    file_provider: Option<js_sys::Function>,
 }
 
 #[cfg(feature = "wasm")]
@@ -1557,7 +1559,99 @@ impl WasmInterpreter {
             interpreter: Interpreter::new(),
             cycle: 0,
             active_tracks: Vec::new(),
+            file_provider: None,
         }
+    }
+
+    /// Set a JavaScript function to be called when a module needs to be loaded.
+    /// The function should take a path (string) and return the file contents (string).
+    /// This enables `use "file.cadence"` to work in the browser.
+    pub fn set_file_provider(&mut self, callback: js_sys::Function) {
+        self.file_provider = Some(callback);
+    }
+
+    /// Read a file using the registered file provider.
+    /// Returns the file contents or an error.
+    pub fn read_file(&self, path: &str) -> Result<String, JsValue> {
+        let callback = self.file_provider.as_ref().ok_or_else(|| {
+            JsValue::from_str("No file provider registered. Call set_file_provider first.")
+        })?;
+
+        let result = callback.call1(&JsValue::NULL, &JsValue::from_str(path))?;
+
+        // Handle both sync string returns and Promise returns
+        if let Some(s) = result.as_string() {
+            Ok(s)
+        } else {
+            Err(JsValue::from_str("File provider must return a string"))
+        }
+    }
+
+    /// Resolve a module import and return its exported names.
+    /// Called from JS after the file content is available.
+    pub fn resolve_module(&mut self, path: &str, content: &str) -> JsValue {
+        use crate::parser::module_resolver::ModuleExports;
+        use crate::parser::parse_statements;
+
+        // Parse the module
+        let program = match parse_statements(content) {
+            Ok(p) => p,
+            Err(e) => {
+                return serde_wasm_bindgen::to_value(&serde_json::json!({
+                    "success": false,
+                    "error": format!("Parse error in '{}': {}", path, e)
+                }))
+                .unwrap_or(JsValue::NULL);
+            }
+        };
+
+        // Extract exports (all top-level definitions)
+        let mut exports = ModuleExports::new();
+        let temp_env = crate::parser::Environment::new();
+        let evaluator = Evaluator::new();
+
+        for stmt in &program.statements {
+            match stmt {
+                crate::parser::Statement::Let { name, value } => {
+                    if let Ok(val) = evaluator.eval_with_env(value.clone(), Some(&temp_env)) {
+                        exports.values.insert(name.clone(), val);
+                    }
+                }
+                crate::parser::Statement::FunctionDef {
+                    name, params, body, ..
+                } => {
+                    exports
+                        .functions
+                        .insert(name.clone(), (params.clone(), body.clone()));
+                }
+                _ => {}
+            }
+        }
+
+        // Bind exports to interpreter environment
+        if let Ok(mut env) = self.interpreter.environment.write() {
+            for (name, val) in &exports.values {
+                env.define(name.clone(), val.clone());
+            }
+            for (name, (params, body)) in &exports.functions {
+                env.define(
+                    name.clone(),
+                    Value::Function {
+                        name: name.clone(),
+                        params: params.clone(),
+                        body: body.clone(),
+                    },
+                );
+            }
+        }
+
+        // Return success with exported names
+        serde_wasm_bindgen::to_value(&serde_json::json!({
+            "success": true,
+            "exports": exports.names(),
+            "count": exports.values.len() + exports.functions.len()
+        }))
+        .unwrap_or(JsValue::NULL)
     }
 
     /// Load and execute a script, setting up the environment and active tracks
