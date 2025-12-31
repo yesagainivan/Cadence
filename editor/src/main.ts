@@ -102,6 +102,50 @@ const cadenceLinter = linter((view) => {
 });
 
 /**
+ * Save the current file to the virtual filesystem
+ * Called by Cmd+S / Ctrl+S keyboard shortcut
+ */
+function saveCurrentFile(): boolean {
+  const activeTab = tabBar?.getActiveTab();
+
+  if (!activeTab) {
+    // No file open - offer to create one
+    const name = prompt('Save as:', 'untitled.cadence');
+    if (name && editorView) {
+      const path = `/${name}`;
+      const content = editorView.state.doc.toString();
+      const fs = getFileSystemService();
+
+      fs.writeFile(path, content).then(() => {
+        tabBar?.openTab(path, content);
+        tabBar?.setDirty(path, false);
+        fileTree?.refresh();
+        log(`Saved as: ${path}`);
+      }).catch(e => {
+        log(`Save failed: ${e}`);
+      });
+    }
+    return true;
+  }
+
+  // Save existing file
+  if (editorView) {
+    const content = editorView.state.doc.toString();
+    const fs = getFileSystemService();
+
+    fs.writeFile(activeTab, content).then(() => {
+      tabBar?.setDirty(activeTab, false);
+      tabBar?.updateContent(activeTab, content);
+      log(`Saved: ${activeTab}`);
+    }).catch(e => {
+      log(`Save failed: ${e}`);
+    });
+  }
+
+  return true;  // Prevent browser default
+}
+
+/**
  * Create the CodeMirror editor
  */
 function createEditor(container: HTMLElement): EditorView {
@@ -129,6 +173,7 @@ function createEditor(container: HTMLElement): EditorView {
         ...closeBracketsKeymap,
         ...searchKeymap,
         { key: 'F12', run: gotoDefinition },
+        { key: 'Mod-s', run: saveCurrentFile, preventDefault: true },
       ]),
 
       // Cadence language support (WASM-powered highlighting)
