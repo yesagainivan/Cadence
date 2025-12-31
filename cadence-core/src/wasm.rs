@@ -357,6 +357,8 @@ pub enum SymbolJS {
         start: usize,
         /// UTF-16 span end
         end: usize,
+        /// Doc comment (from preceding /// lines)
+        doc_comment: Option<String>,
     },
     Variable {
         name: String,
@@ -365,6 +367,8 @@ pub enum SymbolJS {
         start: usize,
         /// UTF-16 span end
         end: usize,
+        /// Doc comment (from preceding /// lines)
+        doc_comment: Option<String>,
     },
 }
 
@@ -411,6 +415,7 @@ pub fn get_symbols(code: &str) -> JsValue {
             signature: func.signature(),
             start: func.span.utf16_start,
             end: func.span.utf16_end,
+            doc_comment: func.doc_comment.clone(),
         });
     }
 
@@ -420,6 +425,7 @@ pub fn get_symbols(code: &str) -> JsValue {
             value_type: var.value_type.clone(),
             start: var.span.utf16_start,
             end: var.span.utf16_end,
+            doc_comment: var.doc_comment.clone(),
         });
     }
 
@@ -457,6 +463,7 @@ pub fn get_symbol_at_position(code: &str, position: usize) -> JsValue {
             signature: func.signature(),
             start: func.span.utf16_start,
             end: func.span.utf16_end,
+            doc_comment: func.doc_comment.clone(),
         })
         .unwrap_or(JsValue::NULL),
         Some(Symbol::Variable(var)) => serde_wasm_bindgen::to_value(&SymbolJS::Variable {
@@ -464,6 +471,7 @@ pub fn get_symbol_at_position(code: &str, position: usize) -> JsValue {
             value_type: var.value_type.clone(),
             start: var.span.utf16_start,
             end: var.span.utf16_end,
+            doc_comment: var.doc_comment.clone(),
         })
         .unwrap_or(JsValue::NULL),
         None => JsValue::NULL,

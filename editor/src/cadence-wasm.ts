@@ -350,6 +350,7 @@ export interface FunctionSymbol {
     signature: string;
     start: number;  // UTF-16 position
     end: number;    // UTF-16 position
+    doc_comment: string | null;
 }
 
 /** A variable symbol from the source code */
@@ -359,6 +360,7 @@ export interface VariableSymbol {
     value_type: string | null;
     start: number;  // UTF-16 position
     end: number;    // UTF-16 position
+    doc_comment: string | null;
 }
 
 export type Symbol = FunctionSymbol | VariableSymbol;

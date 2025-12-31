@@ -205,9 +205,27 @@ impl StatementParser {
         let mut program = SpannedProgram::new();
 
         while !self.check(&Token::Eof) {
-            // Skip semicolons, newlines, and comments between statements
-            while self.is_skippable() {
-                self.advance();
+            // Collect doc comments (/// lines) before the statement
+            let mut doc_lines: Vec<String> = Vec::new();
+
+            // Skip semicolons, newlines, and regular comments; collect doc comments
+            loop {
+                match self.current() {
+                    Token::Semicolon | Token::Newline => {
+                        self.advance();
+                    }
+                    Token::Comment(text) => {
+                        // Doc comments start with / (making ///)
+                        if text.starts_with('/') {
+                            // Strip the leading / and optional space
+                            let doc_text = text[1..].trim_start();
+                            doc_lines.push(doc_text.to_string());
+                        }
+                        // Skip all comments (doc or regular)
+                        self.advance();
+                    }
+                    _ => break,
+                }
             }
 
             if self.check(&Token::Eof) {
@@ -226,13 +244,17 @@ impl StatementParser {
             let end = self.previous_token_end();
             let utf16_end = self.previous_token_utf16_end();
 
-            program.push(SpannedStatement::with_utf16(
-                stmt,
-                start,
-                end,
-                utf16_start,
-                utf16_end,
-            ));
+            // Build doc comment from collected lines (join with newlines)
+            let doc_comment = if doc_lines.is_empty() {
+                None
+            } else {
+                Some(doc_lines.join("\n"))
+            };
+
+            program.push(
+                SpannedStatement::with_utf16(stmt, start, end, utf16_start, utf16_end)
+                    .with_doc_comment(doc_comment),
+            );
         }
 
         Ok(program)

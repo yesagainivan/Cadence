@@ -53,6 +53,8 @@ pub struct SpannedStatement {
     pub utf16_start: usize,
     /// UTF-16 code unit offset of statement end
     pub utf16_end: usize,
+    /// Doc comment from preceding /// lines (if any)
+    pub doc_comment: Option<String>,
 }
 
 impl SpannedStatement {
@@ -63,6 +65,7 @@ impl SpannedStatement {
             end,
             utf16_start: 0,
             utf16_end: 0,
+            doc_comment: None,
         }
     }
 
@@ -80,7 +83,14 @@ impl SpannedStatement {
             end,
             utf16_start,
             utf16_end,
+            doc_comment: None,
         }
+    }
+
+    /// Builder method to attach a doc comment
+    pub fn with_doc_comment(mut self, doc_comment: Option<String>) -> Self {
+        self.doc_comment = doc_comment;
+        self
     }
 
     /// Check if a given position (byte offset) is within this statement

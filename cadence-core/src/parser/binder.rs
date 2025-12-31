@@ -67,7 +67,8 @@ impl Binder {
 
         match &spanned.statement {
             Statement::FunctionDef { name, params, body } => {
-                let func = FunctionSymbol::new(name.clone(), params.clone(), span);
+                let mut func = FunctionSymbol::new(name.clone(), params.clone(), span);
+                func.doc_comment = spanned.doc_comment.clone();
                 self.table.add_function(func);
 
                 // Bind nested statements inside the function body
@@ -82,7 +83,9 @@ impl Binder {
 
             Statement::Let { name, value } => {
                 let inferred_type = infer_type_from_expr(value);
-                let var = VariableSymbol::new(name.clone(), span).with_inferred_type(inferred_type);
+                let var = VariableSymbol::new(name.clone(), span)
+                    .with_inferred_type(inferred_type)
+                    .with_doc_comment(spanned.doc_comment.clone());
                 self.table.add_variable(var);
             }
 
@@ -263,5 +266,71 @@ fn minor(root) {
         assert_eq!(table.functions.len(), 1);
         assert!(table.get_function("major").is_none());
         assert!(table.get_function("minor").is_some());
+    }
+
+    #[test]
+    fn test_bind_function_with_doc_comment() {
+        let code = r#"
+/// Builds a major chord from root note
+fn major(root) {
+    return [root, root + 4, root + 7]
+}
+"#;
+        let program = parse_spanned_statements(code).unwrap();
+        let table = Binder::bind(&program);
+
+        let func = table.get_function("major").unwrap();
+        assert_eq!(
+            func.doc_comment,
+            Some("Builds a major chord from root note".to_string())
+        );
+    }
+
+    #[test]
+    fn test_bind_variable_with_doc_comment() {
+        let code = r#"
+/// The C major chord
+let Cmaj = [C, E, G]
+"#;
+        let program = parse_spanned_statements(code).unwrap();
+        let table = Binder::bind(&program);
+
+        let var = table.get_variable("Cmaj").unwrap();
+        assert_eq!(var.doc_comment, Some("The C major chord".to_string()));
+    }
+
+    #[test]
+    fn test_multiline_doc_comment() {
+        let code = r#"
+/// Builds a major chord
+/// @param root - the root note
+fn major(root) {
+    return [root, root + 4, root + 7]
+}
+"#;
+        let program = parse_spanned_statements(code).unwrap();
+        let table = Binder::bind(&program);
+
+        let func = table.get_function("major").unwrap();
+        assert_eq!(
+            func.doc_comment,
+            Some("Builds a major chord\n@param root - the root note".to_string())
+        );
+    }
+
+    #[test]
+    fn test_regular_comment_not_attached() {
+        let code = r#"
+// This is a regular comment
+fn major(root) {
+    return [root, root + 4, root + 7]
+}
+"#;
+        let program = parse_spanned_statements(code).unwrap();
+        let table = Binder::bind(&program);
+
+        let func = table.get_function("major").unwrap();
+        // Regular // comments should NOT be attached as doc comments
+        assert!(func.doc_comment.is_none());
     }
 }

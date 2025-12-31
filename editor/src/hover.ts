@@ -143,6 +143,11 @@ function createSymbolTooltip(symbol: Symbol): HTMLElement {
         color: #abb2bf;
     `;
 
+    // Build doc comment section if present
+    const docHtml = symbol.doc_comment
+        ? `<div style="color: #7f848e; margin-top: 4px; white-space: pre-wrap; font-size: 0.9em;">${escapeHtml(symbol.doc_comment)}</div>`
+        : '';
+
     if (symbol.kind === 'Function') {
         dom.innerHTML = `
             <div style="font-weight: bold; border-bottom: 1px solid #3a3f4b; margin-bottom: 4px; padding-bottom: 2px;">
@@ -150,6 +155,7 @@ function createSymbolTooltip(symbol: Symbol): HTMLElement {
                 <span style="float: right; color: #7f848e; font-size: 0.85em; font-weight: normal">User</span>
             </div>
             <div style="color: #98c379;">${symbol.signature}</div>
+            ${docHtml}
         `;
     } else {
         // Variable - show name and type
@@ -162,9 +168,20 @@ function createSymbolTooltip(symbol: Symbol): HTMLElement {
                 <span style="float: right; color: #7f848e; font-size: 0.85em; font-weight: normal">Variable</span>
             </div>
             <div style="color: #c678dd;">let ${symbol.name}${typeInfo}</div>
+            ${docHtml}
         `;
     }
     return dom;
+}
+
+/** Escape HTML special characters to prevent XSS */
+function escapeHtml(text: string): string {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 // Legacy export for backward compatibility (will be removed)

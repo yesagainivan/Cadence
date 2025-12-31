@@ -81,6 +81,8 @@ pub struct VariableSymbol {
     pub value_type: Option<String>,
     /// Where the variable is defined
     pub span: Span,
+    /// Doc comment (from preceding /// lines)
+    pub doc_comment: Option<String>,
 }
 
 impl VariableSymbol {
@@ -89,6 +91,7 @@ impl VariableSymbol {
             name,
             span,
             value_type: None,
+            doc_comment: None,
         }
     }
 
@@ -97,12 +100,19 @@ impl VariableSymbol {
             name,
             span,
             value_type: Some(value_type),
+            doc_comment: None,
         }
     }
 
     /// Builder method to add inferred type
     pub fn with_inferred_type(mut self, value_type: Option<String>) -> Self {
         self.value_type = value_type;
+        self
+    }
+
+    /// Builder method to add doc comment
+    pub fn with_doc_comment(mut self, doc_comment: Option<String>) -> Self {
+        self.doc_comment = doc_comment;
         self
     }
 }
