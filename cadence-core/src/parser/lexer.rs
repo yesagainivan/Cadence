@@ -44,6 +44,7 @@ pub enum Token {
     And,          // &&
     Or,           // ||
     Not,          // !
+    Arrow,        // -> (for return type annotations)
 
     // Keywords
     Let,      // let
@@ -117,6 +118,7 @@ impl fmt::Display for Token {
             Token::And => write!(f, "&&"),
             Token::Or => write!(f, "||"),
             Token::Not => write!(f, "!"),
+            Token::Arrow => write!(f, "->"),
             Token::Let => write!(f, "let"),
             Token::Fn => write!(f, "fn"),
             Token::Loop => write!(f, "loop"),
@@ -561,6 +563,13 @@ impl Lexer {
                 }
 
                 Some('-') => {
+                    // Check for arrow -> (return type annotation)
+                    if self.peek() == Some('>') {
+                        self.advance(); // consume -
+                        self.advance(); // consume >
+                        return Ok(Token::Arrow);
+                    }
+
                     // Check if this is part of an identifier (like "12-bar-blues")
                     if let Some(next_ch) = self.peek() {
                         if next_ch.is_alphanumeric() {

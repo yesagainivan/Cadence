@@ -54,6 +54,8 @@ pub struct FunctionSymbol {
     pub span: Span,
     /// Doc comment (from /// lines)
     pub doc_comment: Option<String>,
+    /// Return type annotation (from -> Type)
+    pub return_type: Option<String>,
 }
 
 impl FunctionSymbol {
@@ -63,12 +65,17 @@ impl FunctionSymbol {
             params,
             span,
             doc_comment: None,
+            return_type: None,
         }
     }
 
-    /// Get the function signature (e.g., "fn major(root)")
+    /// Get the function signature (e.g., "fn major(root)" or "fn major(root) -> Chord")
     pub fn signature(&self) -> String {
-        format!("fn {}({})", self.name, self.params.join(", "))
+        let base = format!("fn {}({})", self.name, self.params.join(", "));
+        match &self.return_type {
+            Some(rt) => format!("{} -> {}", base, rt),
+            None => base,
+        }
     }
 }
 

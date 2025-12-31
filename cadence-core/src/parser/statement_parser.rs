@@ -153,7 +153,8 @@ impl StatementParser {
             | Token::And
             | Token::Or
             | Token::DotDot
-            | Token::In => 2, // <=, >=, &&, ||, .., in
+            | Token::Arrow
+            | Token::In => 2, // <=, >=, &&, ||, .., ->, in
             Token::For => 3,
             Token::Wait => 4,
             Token::Eof => 0,
@@ -517,10 +518,34 @@ impl StatementParser {
 
         self.expect(&Token::RightParen)?;
 
+        // Parse optional return type annotation: -> Type
+        let return_type = if matches!(self.current(), Token::Arrow) {
+            self.advance(); // consume ->
+            match self.current().clone() {
+                Token::Identifier(type_name) => {
+                    self.advance();
+                    Some(type_name)
+                }
+                _ => {
+                    return Err(CadenceError::new(
+                        "Expected type name after '->'".to_string(),
+                        self.current_span(),
+                    ))
+                }
+            }
+        } else {
+            None
+        };
+
         // Parse function body
         let body = self.parse_block()?;
 
-        Ok(Statement::FunctionDef { name, params, body })
+        Ok(Statement::FunctionDef {
+            name,
+            params,
+            body,
+            return_type,
+        })
     }
 
     /// Parse: track <n> <statement> (or block)

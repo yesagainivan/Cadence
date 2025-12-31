@@ -7,7 +7,8 @@ use crate::parser::ast::{Expression, SpannedProgram, SpannedStatement, Statement
 use crate::parser::symbols::{FunctionSymbol, Span, SymbolTable, VariableSymbol};
 
 /// Infer a type hint from an AST expression (without evaluation)
-fn infer_type_from_expr(expr: &Expression) -> Option<String> {
+/// Optionally uses the symbol table to look up return types of user-defined functions
+fn infer_type_from_expr(expr: &Expression, table: Option<&SymbolTable>) -> Option<String> {
     match expr {
         Expression::Note(_) => Some("Note".to_string()),
         Expression::Chord(_) => Some("Chord".to_string()),
@@ -17,7 +18,15 @@ fn infer_type_from_expr(expr: &Expression) -> Option<String> {
         Expression::String(_) => Some("String".to_string()),
         Expression::Array(_) => Some("Chord".to_string()), // Arrays often become chords
         Expression::FunctionCall { name, .. } => {
-            // Some built-in functions have known return types
+            // First, check user-defined functions with return types
+            if let Some(tbl) = table {
+                if let Some(func) = tbl.get_function(name) {
+                    if func.return_type.is_some() {
+                        return func.return_type.clone();
+                    }
+                }
+            }
+            // Fall back to built-in functions with known return types
             match name.as_str() {
                 "major" | "minor" | "dim" | "aug" | "sus2" | "sus4" | "invert" | "bass" => {
                     Some("Chord".to_string())
@@ -27,7 +36,7 @@ fn infer_type_from_expr(expr: &Expression) -> Option<String> {
                 _ => None, // Unknown function, can't infer
             }
         }
-        Expression::Transpose { target, .. } => infer_type_from_expr(target),
+        Expression::Transpose { target, .. } => infer_type_from_expr(target, table),
         _ => None,
     }
 }
@@ -66,9 +75,15 @@ impl Binder {
         );
 
         match &spanned.statement {
-            Statement::FunctionDef { name, params, body } => {
+            Statement::FunctionDef {
+                name,
+                params,
+                body,
+                return_type,
+            } => {
                 let mut func = FunctionSymbol::new(name.clone(), params.clone(), span);
                 func.doc_comment = spanned.doc_comment.clone();
+                func.return_type = return_type.clone();
                 self.table.add_function(func);
 
                 // Bind nested statements inside the function body
@@ -82,7 +97,7 @@ impl Binder {
             }
 
             Statement::Let { name, value } => {
-                let inferred_type = infer_type_from_expr(value);
+                let inferred_type = infer_type_from_expr(value, Some(&self.table));
                 let var = VariableSymbol::new(name.clone(), span)
                     .with_inferred_type(inferred_type)
                     .with_doc_comment(spanned.doc_comment.clone());
@@ -332,5 +347,37 @@ fn major(root) {
         let func = table.get_function("major").unwrap();
         // Regular // comments should NOT be attached as doc comments
         assert!(func.doc_comment.is_none());
+    }
+
+    #[test]
+    fn test_function_with_return_type() {
+        let code = r#"
+fn major_pat(root) -> Pattern {
+    return "root root+4 root+7"
+}
+"#;
+        let program = parse_spanned_statements(code).unwrap();
+        let table = Binder::bind(&program);
+
+        let func = table.get_function("major_pat").unwrap();
+        assert_eq!(func.return_type, Some("Pattern".to_string()));
+        assert!(func.signature().contains("-> Pattern"));
+    }
+
+    #[test]
+    fn test_infer_type_from_user_function_return() {
+        let code = r#"
+fn major_pat(root) -> Pattern {
+    return "root root+4 root+7"
+}
+
+let my_pattern = major_pat(C)
+"#;
+        let program = parse_spanned_statements(code).unwrap();
+        let table = Binder::bind(&program);
+
+        // Variable should have inferred type from function return type
+        let var = table.get_variable("my_pattern").unwrap();
+        assert_eq!(var.value_type, Some("Pattern".to_string()));
     }
 }

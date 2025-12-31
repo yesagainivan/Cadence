@@ -723,7 +723,9 @@ impl Evaluator {
                     }
                 }
 
-                Statement::FunctionDef { name, params, body } => {
+                Statement::FunctionDef {
+                    name, params, body, ..
+                } => {
                     // Define nested function in local scope
                     let func = Value::Function {
                         name: name.clone(),

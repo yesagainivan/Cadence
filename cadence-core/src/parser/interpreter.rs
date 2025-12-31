@@ -493,7 +493,9 @@ impl Interpreter {
                 Ok(ControlFlow::Normal)
             }
 
-            Statement::FunctionDef { name, params, body } => {
+            Statement::FunctionDef {
+                name, params, body, ..
+            } => {
                 // Store the function as a Value::Function in the environment
                 let func_value = Value::Function {
                     name: name.clone(),
@@ -784,7 +786,9 @@ impl Interpreter {
             }
 
             // Function definitions inside functions - define in local scope
-            Statement::FunctionDef { name, params, body } => {
+            Statement::FunctionDef {
+                name, params, body, ..
+            } => {
                 let func_value = Value::Function {
                     name: name.clone(),
                     params: params.clone(),

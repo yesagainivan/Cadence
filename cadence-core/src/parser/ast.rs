@@ -229,10 +229,12 @@ pub enum Statement {
     Track { id: usize, body: Box<Statement> },
 
     /// Function definition: fn name(param1, param2) { body }
+    /// Optional return type annotation: fn name(param1) -> Type { body }
     FunctionDef {
         name: String,
         params: Vec<String>,
         body: Vec<Statement>,
+        return_type: Option<String>,
     },
 
     /// Wait statement: wait <beats> (advances virtual time)

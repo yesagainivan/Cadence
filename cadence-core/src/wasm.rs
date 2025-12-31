@@ -136,6 +136,9 @@ impl HighlightSpan {
             // Newline (not visible)
             Token::Newline => "".to_string(),
 
+            // Arrow (for return types)
+            Token::Arrow => "punctuation".to_string(),
+
             // EOF
             Token::Eof => "".to_string(),
         }
@@ -200,6 +203,7 @@ impl HighlightSpan {
             Token::And => "&&".to_string(),
             Token::Or => "||".to_string(),
             Token::Not => "!".to_string(),
+            Token::Arrow => "->".to_string(),
             Token::Newline => "\n".to_string(),
             Token::Comment(s) => format!("//{}\n", s), // Include // prefix
             Token::Eof => "".to_string(),
@@ -359,6 +363,8 @@ pub enum SymbolJS {
         end: usize,
         /// Doc comment (from preceding /// lines)
         doc_comment: Option<String>,
+        /// Return type annotation (from -> Type)
+        return_type: Option<String>,
     },
     Variable {
         name: String,
@@ -416,6 +422,7 @@ pub fn get_symbols(code: &str) -> JsValue {
             start: func.span.utf16_start,
             end: func.span.utf16_end,
             doc_comment: func.doc_comment.clone(),
+            return_type: func.return_type.clone(),
         });
     }
 
@@ -464,6 +471,7 @@ pub fn get_symbol_at_position(code: &str, position: usize) -> JsValue {
             start: func.span.utf16_start,
             end: func.span.utf16_end,
             doc_comment: func.doc_comment.clone(),
+            return_type: func.return_type.clone(),
         })
         .unwrap_or(JsValue::NULL),
         Some(Symbol::Variable(var)) => serde_wasm_bindgen::to_value(&SymbolJS::Variable {
@@ -1196,7 +1204,9 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                 }
             }
         }
-        Statement::FunctionDef { name, params, body } => {
+        Statement::FunctionDef {
+            name, params, body, ..
+        } => {
             // Show function signature nicely
             let signature = format!("fn {}({})", name, params.join(", "));
             let context = CursorContextJS {

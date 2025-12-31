@@ -351,6 +351,7 @@ export interface FunctionSymbol {
     start: number;  // UTF-16 position
     end: number;    // UTF-16 position
     doc_comment: string | null;
+    return_type: string | null;
 }
 
 /** A variable symbol from the source code */
