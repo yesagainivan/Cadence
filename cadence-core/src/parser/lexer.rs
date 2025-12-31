@@ -63,6 +63,9 @@ pub enum Token {
     Waveform, // waveform
     Queue,    // queue
     Load,     // load
+    Use,      // use (module import)
+    From,     // from (selective imports)
+    As,       // as (namespace alias)
     Track,    // track
     On,       // on (alias for track)
     For,      // for
@@ -135,6 +138,9 @@ impl fmt::Display for Token {
             Token::Waveform => write!(f, "waveform"),
             Token::Queue => write!(f, "queue"),
             Token::Load => write!(f, "load"),
+            Token::Use => write!(f, "use"),
+            Token::From => write!(f, "from"),
+            Token::As => write!(f, "as"),
             Token::Track => write!(f, "track"),
             Token::On => write!(f, "on"),
             Token::For => write!(f, "for"),
@@ -745,6 +751,9 @@ impl Lexer {
                         "waveform" => Token::Waveform,
                         "queue" => Token::Queue,
                         "load" => Token::Load,
+                        "use" => Token::Use,
+                        "from" => Token::From,
+                        "as" => Token::As,
                         "track" => Token::Track,
                         "on" => Token::On,
                         "for" => Token::For,

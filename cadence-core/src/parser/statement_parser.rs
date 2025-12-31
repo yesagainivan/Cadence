@@ -157,6 +157,9 @@ impl StatementParser {
             | Token::In => 2, // <=, >=, &&, ||, .., ->, in
             Token::For => 3,
             Token::Wait => 4,
+            Token::Use => 3,
+            Token::From => 4,
+            Token::As => 2,
             Token::Eof => 0,
         }
     }
@@ -274,6 +277,7 @@ impl StatementParser {
             Token::Volume => self.parse_volume_statement(),
             Token::Waveform => self.parse_waveform_statement(),
             Token::Load => self.parse_load_statement(),
+            Token::Use => self.parse_use_statement(),
             Token::Fn => self.parse_function_def(),
             Token::Track => self.parse_track_statement(),
             Token::On => self.parse_track_statement(), // 'on N' is alias for 'track N'
@@ -460,6 +464,133 @@ impl StatementParser {
         self.advance();
 
         Ok(Statement::Load(path))
+    }
+
+    /// Parse use statement variants:
+    /// - use "path/to/file.cadence"
+    /// - use "path/to/file.cadence" as alias
+    /// - use { name1, name2 } from "path/to/file.cadence"
+    /// - use { name1, name2 } from "path/to/file.cadence" as alias
+    fn parse_use_statement(&mut self) -> Result<Statement, CadenceError> {
+        self.expect(&Token::Use)?;
+
+        // Check if it starts with { (selective imports)
+        if self.check(&Token::LeftBrace) {
+            // use { name1, name2 } from "path"
+            self.advance(); // consume {
+
+            let mut imports = Vec::new();
+
+            // Parse first import name
+            if !self.check(&Token::RightBrace) {
+                match self.current().clone() {
+                    Token::Identifier(name) => {
+                        imports.push(name);
+                        self.advance();
+                    }
+                    _ => {
+                        return Err(CadenceError::new(
+                            "Expected identifier in import list".to_string(),
+                            self.current_span(),
+                        ))
+                    }
+                }
+
+                // Parse remaining imports
+                while self.check(&Token::Comma) {
+                    self.advance(); // consume ,
+                    match self.current().clone() {
+                        Token::Identifier(name) => {
+                            imports.push(name);
+                            self.advance();
+                        }
+                        _ => {
+                            return Err(CadenceError::new(
+                                "Expected identifier after ',' in import list".to_string(),
+                                self.current_span(),
+                            ))
+                        }
+                    }
+                }
+            }
+
+            self.expect(&Token::RightBrace)?;
+            self.expect(&Token::From)?;
+
+            // Parse path
+            let path = match self.current().clone() {
+                Token::StringLiteral(s) => s,
+                _ => {
+                    return Err(CadenceError::new(
+                        "Expected module path string after 'from'".to_string(),
+                        self.current_span(),
+                    ))
+                }
+            };
+            self.advance();
+
+            // Check for optional alias
+            let alias = if self.check(&Token::As) {
+                self.advance();
+                match self.current().clone() {
+                    Token::Identifier(name) => {
+                        self.advance();
+                        Some(name)
+                    }
+                    _ => {
+                        return Err(CadenceError::new(
+                            "Expected identifier after 'as'".to_string(),
+                            self.current_span(),
+                        ))
+                    }
+                }
+            } else {
+                None
+            };
+
+            Ok(Statement::Use {
+                path,
+                imports: Some(imports),
+                alias,
+            })
+        } else {
+            // use "path" or use "path" as alias
+            let path = match self.current().clone() {
+                Token::StringLiteral(s) => s,
+                _ => {
+                    return Err(CadenceError::new(
+                        "Expected module path string after 'use'".to_string(),
+                        self.current_span(),
+                    ))
+                }
+            };
+            self.advance();
+
+            // Check for optional alias
+            let alias = if self.check(&Token::As) {
+                self.advance();
+                match self.current().clone() {
+                    Token::Identifier(name) => {
+                        self.advance();
+                        Some(name)
+                    }
+                    _ => {
+                        return Err(CadenceError::new(
+                            "Expected identifier after 'as'".to_string(),
+                            self.current_span(),
+                        ))
+                    }
+                }
+            } else {
+                None
+            };
+
+            Ok(Statement::Use {
+                path,
+                imports: None,
+                alias,
+            })
+        }
     }
 
     /// Parse: fn name(param1, param2, ...) { body }
@@ -1309,6 +1440,87 @@ mod tests {
                 assert_eq!(path, "song.cadence");
             }
             _ => panic!("Expected Load statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_use_statement_simple() {
+        let program = parse_statements(r#"use "drums.cadence""#).unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            Statement::Use {
+                path,
+                imports,
+                alias,
+            } => {
+                assert_eq!(path, "drums.cadence");
+                assert!(imports.is_none());
+                assert!(alias.is_none());
+            }
+            _ => panic!("Expected Use statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_use_statement_with_alias() {
+        let program = parse_statements(r#"use "drums.cadence" as d"#).unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            Statement::Use {
+                path,
+                imports,
+                alias,
+            } => {
+                assert_eq!(path, "drums.cadence");
+                assert!(imports.is_none());
+                assert_eq!(alias.as_ref().unwrap(), "d");
+            }
+            _ => panic!("Expected Use statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_use_statement_selective() {
+        let program = parse_statements(r#"use { kick, snare } from "drums.cadence""#).unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            Statement::Use {
+                path,
+                imports,
+                alias,
+            } => {
+                assert_eq!(path, "drums.cadence");
+                let items = imports.as_ref().unwrap();
+                assert_eq!(items.len(), 2);
+                assert_eq!(items[0], "kick");
+                assert_eq!(items[1], "snare");
+                assert!(alias.is_none());
+            }
+            _ => panic!("Expected Use statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_use_statement_selective_with_alias() {
+        let program = parse_statements(r#"use { kick } from "drums.cadence" as d"#).unwrap();
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            Statement::Use {
+                path,
+                imports,
+                alias,
+            } => {
+                assert_eq!(path, "drums.cadence");
+                let items = imports.as_ref().unwrap();
+                assert_eq!(items.len(), 1);
+                assert_eq!(items[0], "kick");
+                assert_eq!(alias.as_ref().unwrap(), "d");
+            }
+            _ => panic!("Expected Use statement"),
         }
     }
 

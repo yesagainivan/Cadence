@@ -758,6 +758,9 @@ impl Evaluator {
                 Statement::Track { .. } => {
                     return Err(anyhow!("track is not supported inside pure functions"));
                 }
+                Statement::Use { .. } => {
+                    return Err(anyhow!("use/import is not supported inside functions"));
+                }
 
                 // No-ops
                 Statement::Break => {

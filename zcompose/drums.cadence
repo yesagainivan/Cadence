@@ -1,0 +1,14 @@
+// Example Cadence module: drums.cadence
+// This module provides drum pattern utilities
+
+let kick = "bd bd bd bd"
+let snare = "~ sn ~ sn"
+let hihat = "hh hh hh hh"
+
+fn four_on_floor() {
+    return "bd bd bd bd"
+}
+
+fn boom_bap() {
+    return "bd ~ sn bd ~ sn ~ ~"
+}

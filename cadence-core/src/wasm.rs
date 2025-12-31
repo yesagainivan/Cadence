@@ -66,6 +66,9 @@ impl HighlightSpan {
             | Token::Return
             | Token::Track
             | Token::Load
+            | Token::Use
+            | Token::From
+            | Token::As
             | Token::Fn
             | Token::On
             | Token::For
@@ -164,6 +167,9 @@ impl HighlightSpan {
             Token::Return => "return".to_string(),
             Token::Track => "track".to_string(),
             Token::Load => "load".to_string(),
+            Token::Use => "use".to_string(),
+            Token::From => "from".to_string(),
+            Token::As => "as".to_string(),
             Token::Fn => "fn".to_string(),
             Token::On => "on".to_string(),
             Token::For => "for".to_string(),
@@ -1440,6 +1446,33 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
                     utf16_end: spanned_stmt.utf16_end,
                 },
                 variable_name: None,
+            };
+            return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+        }
+        Statement::Use {
+            path,
+            imports,
+            alias,
+        } => {
+            let description = match (imports, alias) {
+                (None, None) => format!("use \"{}\"", path),
+                (None, Some(a)) => format!("use \"{}\" as {}", path, a),
+                (Some(items), None) => format!("use {{ {} }} from \"{}\"", items.join(", "), path),
+                (Some(items), Some(a)) => {
+                    format!("use {{ {} }} from \"{}\" as {}", items.join(", "), path, a)
+                }
+            };
+            let context = CursorContextJS {
+                statement_type: "use".to_string(),
+                value_type: Some("module".to_string()),
+                properties: None,
+                span: SpanInfoJS {
+                    start: spanned_stmt.start,
+                    end: spanned_stmt.end,
+                    utf16_start: spanned_stmt.utf16_start,
+                    utf16_end: spanned_stmt.utf16_end,
+                },
+                variable_name: Some(description),
             };
             return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
         }

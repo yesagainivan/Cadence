@@ -1,0 +1,3 @@
+// Test circular import - b.cadence imports a.cadence (circular!)
+use "a_circular.cadence"
+let y = 2

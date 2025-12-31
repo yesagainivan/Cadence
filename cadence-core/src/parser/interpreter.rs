@@ -5,6 +5,7 @@
 use crate::parser::ast::{Expression, Program, Statement, Value};
 use crate::parser::environment::{Environment, SharedEnvironment};
 use crate::parser::evaluator::Evaluator;
+use crate::parser::module_resolver::ModuleResolver;
 use crate::parser::statement_parser::parse_statements;
 use crate::types::{QueueMode, ScheduledAction, ScheduledEvent};
 use anyhow::{anyhow, Result};
@@ -68,6 +69,9 @@ pub struct Interpreter {
     pub virtual_time: f64,
     /// Scheduled events for future execution (Sonic Pi style)
     scheduled_events: Vec<ScheduledEvent>,
+    /// Module resolver for `use` statements (optional, created on first use)
+    #[cfg(not(target_arch = "wasm32"))]
+    module_resolver: Option<ModuleResolver>,
 }
 
 impl Interpreter {
@@ -84,6 +88,8 @@ impl Interpreter {
             actions: Vec::new(),
             virtual_time: 0.0,
             scheduled_events: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            module_resolver: None,
         }
     }
 
@@ -520,6 +526,109 @@ impl Interpreter {
                 self.virtual_time += beat_count;
                 Ok(ControlFlow::Normal)
             }
+
+            Statement::Use {
+                path,
+                imports,
+                alias,
+            } => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    // Initialize module resolver if needed
+                    if self.module_resolver.is_none() {
+                        self.module_resolver = Some(ModuleResolver::native()?);
+                    }
+
+                    let resolver = self.module_resolver.as_mut().unwrap();
+                    let exports = resolver.resolve(path)?;
+
+                    // Bind imports to current environment
+                    let mut env = self.environment.write().unwrap();
+
+                    match (imports, alias) {
+                        // use "path" - import all exports to current scope
+                        (None, None) => {
+                            for (name, val) in &exports.values {
+                                env.define(name.clone(), val.clone());
+                            }
+                            for (name, (params, body)) in &exports.functions {
+                                env.define(
+                                    name.clone(),
+                                    Value::Function {
+                                        name: name.clone(),
+                                        params: params.clone(),
+                                        body: body.clone(),
+                                    },
+                                );
+                            }
+                            println!(
+                                "Imported {} definitions from '{}'",
+                                exports.values.len() + exports.functions.len(),
+                                path
+                            );
+                        }
+                        // use "path" as ns - import as namespace (store exports as a module value)
+                        (None, Some(ns)) => {
+                            // For now, we'll flatten the namespace by prefixing names
+                            // Full namespace support would require a Module value type
+                            for (name, val) in &exports.values {
+                                env.define(format!("{}_{}", ns, name), val.clone());
+                            }
+                            for (name, (params, body)) in &exports.functions {
+                                env.define(
+                                    format!("{}_{}", ns, name),
+                                    Value::Function {
+                                        name: name.clone(),
+                                        params: params.clone(),
+                                        body: body.clone(),
+                                    },
+                                );
+                            }
+                            println!("Imported '{}' as namespace '{}'", path, ns);
+                        }
+                        // use { a, b } from "path" - import specific items
+                        (Some(names), None) => {
+                            for name in names {
+                                if let Some(val) = exports.get(name) {
+                                    env.define(name.clone(), val);
+                                } else {
+                                    return Err(anyhow!(
+                                        "Module '{}' does not export '{}'. Available: {:?}",
+                                        path,
+                                        name,
+                                        exports.names()
+                                    ));
+                                }
+                            }
+                            println!("Imported {} items from '{}'", names.len(), path);
+                        }
+                        // use { a, b } from "path" as ns - selective with alias (less common)
+                        (Some(names), Some(ns)) => {
+                            for name in names {
+                                if let Some(val) = exports.get(name) {
+                                    env.define(format!("{}_{}", ns, name), val);
+                                } else {
+                                    return Err(anyhow!(
+                                        "Module '{}' does not export '{}'",
+                                        path,
+                                        name
+                                    ));
+                                }
+                            }
+                            println!("Imported {} items from '{}' as '{}'", names.len(), path, ns);
+                        }
+                    }
+
+                    Ok(ControlFlow::Normal)
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    Err(anyhow!(
+                        "Module imports are not yet supported in WASM: {}",
+                        path
+                    ))
+                }
+            }
         }
     }
 
@@ -825,6 +934,10 @@ impl Interpreter {
                 self.virtual_time += beat_count;
                 Ok(ControlFlow::Normal)
             }
+
+            Statement::Use { .. } => Err(anyhow::anyhow!(
+                "use/import is not allowed inside functions"
+            )),
         }
     }
 }

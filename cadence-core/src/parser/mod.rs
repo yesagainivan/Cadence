@@ -8,6 +8,7 @@ pub mod error;
 pub mod evaluator;
 pub mod interpreter;
 pub mod lexer;
+pub mod module_resolver;
 pub mod statement_parser;
 pub mod symbols;
 pub mod validator;

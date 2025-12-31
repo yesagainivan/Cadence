@@ -239,6 +239,16 @@ pub enum Statement {
 
     /// Wait statement: wait <beats> (advances virtual time)
     Wait { beats: Expression },
+
+    /// Use/import module: use "path" or use { a, b } from "path" as ns
+    Use {
+        /// Path to the module file
+        path: String,
+        /// Specific items to import (None = import all exports)
+        imports: Option<Vec<String>>,
+        /// Optional namespace alias
+        alias: Option<String>,
+    },
 }
 
 impl fmt::Display for Statement {
@@ -287,6 +297,24 @@ impl fmt::Display for Statement {
                 write!(f, "fn {}({}) {{ ... }}", name, params.join(", "))
             }
             Statement::Wait { beats } => write!(f, "wait {}", beats),
+            Statement::Use {
+                path,
+                imports,
+                alias,
+            } => match (imports, alias) {
+                (None, None) => write!(f, "use \"{}\"", path),
+                (None, Some(a)) => write!(f, "use \"{}\" as {}", path, a),
+                (Some(items), None) => {
+                    write!(f, "use {{ {} }} from \"{}\"", items.join(", "), path)
+                }
+                (Some(items), Some(a)) => write!(
+                    f,
+                    "use {{ {} }} from \"{}\" as {}",
+                    items.join(", "),
+                    path,
+                    a
+                ),
+            },
         }
     }
 }

@@ -1533,6 +1533,14 @@ impl FunctionRegistry {
         );
 
         self.register(
+            "use",
+            "Keyword",
+            "Imports definitions from another Cadence module.",
+            "use \"<filepath>\" [as <alias>] or use { <names> } from \"<filepath>\"",
+            dummy_handler.clone(),
+        );
+
+        self.register(
             "break",
             "Keyword",
             "Exits the current loop early.",

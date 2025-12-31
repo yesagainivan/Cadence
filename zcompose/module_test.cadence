@@ -1,0 +1,10 @@
+// Test using module imports
+
+use "drums.cadence"
+
+// Now we can use the imported definitions
+play kick loop
+
+on 2 play snare loop
+
+on 3 play hihat loop
