@@ -1,7 +1,7 @@
 /**
  * Cadence Editor - Main Entry Point
  * 
- * A web-based editor for the Cadence music programming language
+ * A web-based single-file playground for the Cadence music programming language
  * with CodeMirror 6 integration and WASM-powered features.
  */
 
@@ -16,26 +16,22 @@ import { linter, lintGutter } from '@codemirror/lint';
 import type { Diagnostic } from '@codemirror/lint';
 import { cadenceWasm } from './lang-cadence-wasm';
 import { initWasm, parseCode, isWasmReady, getEventsAtPosition, getContextAtCursor } from './cadence-wasm';
-import { getInterpreterClient } from './interpreter-client';
 import { audioEngine } from './audio-engine';
 import { PianoRoll } from './piano-roll';
 import { PropertiesPanel } from './properties-panel';
 import { initTheme, getTheme, toggleTheme, onThemeChange, buildCMTheme } from './theme';
 import { debouncedRefreshSymbols } from './hover';
 import { gotoDefinition, gotoDefinitionPlugin, initGotoDefinitionCursor } from './gotoDefinition';
-import { initializeFileSystem, getFileSystemService, FileSystemService } from './filesystem-service';
-import { FileTreePanel } from './file-tree';
-import { TabBar } from './tab-bar';
 
 // Global instances
 let pianoRoll: PianoRoll | null = null;
 let propertiesPanel: PropertiesPanel | null = null;
-let fileTree: FileTreePanel | null = null;
-let tabBar: TabBar | null = null;
-let editorView: EditorView | null = null;
 
 // CodeMirror theme compartment for dynamic theme switching
 const themeCompartment = new Compartment();
+
+// localStorage key for persisting code
+const STORAGE_KEY = 'cadence_code';
 
 // Sample Cadence code
 const SAMPLE_CODE = `// Welcome to Cadence!
@@ -103,55 +99,14 @@ const cadenceLinter = linter((view) => {
 });
 
 /**
- * Save the current file to the virtual filesystem
- * Called by Cmd+S / Ctrl+S keyboard shortcut
- */
-function saveCurrentFile(): boolean {
-  const activeTab = tabBar?.getActiveTab();
-
-  if (!activeTab) {
-    // No file open - offer to create one
-    const name = prompt('Save as:', 'untitled.cadence');
-    if (name && editorView) {
-      const path = `/${name}`;
-      const content = editorView.state.doc.toString();
-      const fs = getFileSystemService();
-
-      fs.writeFile(path, content).then(() => {
-        tabBar?.openTab(path, content);
-        tabBar?.setDirty(path, false);
-        fileTree?.refresh();
-        log(`Saved as: ${path}`);
-      }).catch(e => {
-        log(`Save failed: ${e}`);
-      });
-    }
-    return true;
-  }
-
-  // Save existing file
-  if (editorView) {
-    const content = editorView.state.doc.toString();
-    const fs = getFileSystemService();
-
-    fs.writeFile(activeTab, content).then(() => {
-      tabBar?.setDirty(activeTab, false);
-      tabBar?.updateContent(activeTab, content);
-      log(`Saved: ${activeTab}`);
-    }).catch(e => {
-      log(`Save failed: ${e}`);
-    });
-  }
-
-  return true;  // Prevent browser default
-}
-
-/**
  * Create the CodeMirror editor
  */
 function createEditor(container: HTMLElement): EditorView {
+  // Load saved code or use sample
+  const savedCode = localStorage.getItem(STORAGE_KEY) || SAMPLE_CODE;
+
   const state = EditorState.create({
-    doc: SAMPLE_CODE,
+    doc: savedCode,
     extensions: [
       // Core
       lineNumbers(),
@@ -174,7 +129,6 @@ function createEditor(container: HTMLElement): EditorView {
         ...closeBracketsKeymap,
         ...searchKeymap,
         { key: 'F12', run: gotoDefinition },
-        { key: 'Mod-s', run: saveCurrentFile, preventDefault: true },
       ]),
 
       // Cadence language support (WASM-powered highlighting)
@@ -199,6 +153,8 @@ function createEditor(container: HTMLElement): EditorView {
           debouncedRefreshSymbols(code);
           // Debounced validation
           scheduleValidation(update.view);
+          // Auto-save to localStorage
+          localStorage.setItem(STORAGE_KEY, code);
         }
       }),
     ],
@@ -218,7 +174,7 @@ function createEditor(container: HTMLElement): EditorView {
 /**
  * Update cursor position display
  */
-async function updateCursorPosition(view: EditorView): Promise<void> {
+function updateCursorPosition(view: EditorView): void {
   const pos = view.state.selection.main.head;
   const line = view.state.doc.lineAt(pos);
   const col = pos - line.from + 1;
@@ -229,19 +185,8 @@ async function updateCursorPosition(view: EditorView): Promise<void> {
   }
 
   // Update properties panel with cursor context
-  // Try worker-based client first (has resolved imports), fall back to direct
   if (propertiesPanel && isWasmReady()) {
     const code = view.state.doc.toString();
-    try {
-      const client = getInterpreterClient();
-      if (client.isReady()) {
-        const context = await client.getContextAtCursor(code, pos);
-        propertiesPanel.update(context);
-        return;
-      }
-    } catch {
-      // Fall back to direct (no import resolution)
-    }
     const context = getContextAtCursor(code, pos);
     propertiesPanel.update(context);
   }
@@ -252,34 +197,21 @@ async function updateCursorPosition(view: EditorView): Promise<void> {
  */
 let currentCursorContext: { variable_name: string | null; span: { utf16_start: number } } | null = null;
 
-async function updatePianoRollAtCursor(view: EditorView): Promise<void> {
+function updatePianoRollAtCursor(view: EditorView): void {
   if (!pianoRoll || !isWasmReady()) return;
 
   const code = view.state.doc.toString();
   const cursorPos = view.state.selection.main.head;
 
-  // Get context for lock target info (can use direct for this)
+  // Get context for lock target info
   const context = getContextAtCursor(code, cursorPos);
   currentCursorContext = context ? {
     variable_name: context.variable_name,
     span: { utf16_start: context.span.utf16_start }
   } : null;
 
-  // Get pattern events - try worker-based client first (has resolved imports)
-  let patternEvents = null;
-  try {
-    const client = getInterpreterClient();
-    if (client.isReady()) {
-      patternEvents = await client.getEventsAtPosition(code, cursorPos);
-    }
-  } catch {
-    // Fall back to direct (no import resolution)
-  }
-
-  // Fall back to direct WASM call if client not ready
-  if (!patternEvents) {
-    patternEvents = getEventsAtPosition(code, cursorPos);
-  }
+  // Get pattern events via direct WASM call
+  const patternEvents = getEventsAtPosition(code, cursorPos);
 
   if (patternEvents && patternEvents.events && patternEvents.events.length > 0) {
     pianoRoll.update(patternEvents);
@@ -411,11 +343,6 @@ function log(message: string): void {
 }
 
 /**
- * Log an action to the output panel
- */
-
-
-/**
  * Initialize the editor and UI
  */
 async function init(): Promise<void> {
@@ -438,113 +365,7 @@ async function init(): Promise<void> {
     console.error('WASM init error:', e);
   }
 
-  // Initialize virtual filesystem (OPFS)
-  if (FileSystemService.isSupported()) {
-    try {
-      await initializeFileSystem();
-      log('File system initialized (OPFS)');
-    } catch (e) {
-      log(`File system failed: ${e}`);
-    }
-  } else {
-    log('OPFS not supported - file browser disabled');
-  }
-
-  // Initialize Web Worker-based interpreter client
-  // This provides import resolution for piano roll and properties panel
-  try {
-    const interpreterClient = getInterpreterClient();
-    await interpreterClient.initialize();
-    log('Interpreter client initialized (Web Worker)');
-  } catch (e) {
-    log(`Interpreter client failed: ${e}`);
-    // Continue anyway - will fall back to direct WASM calls
-  }
-
   const editor = createEditor(editorContainer);
-  editorView = editor;
-
-  // Initialize tab bar
-  const tabBarContainer = document.getElementById('tab-bar');
-  if (tabBarContainer) {
-    tabBar = new TabBar(tabBarContainer, {
-      onTabSelect: async (path) => {
-        // Load file content into editor
-        const content = tabBar?.getContent(path);
-        if (content !== null && content !== undefined && editorView) {
-          editorView.dispatch({
-            changes: { from: 0, to: editorView.state.doc.length, insert: content }
-          });
-        }
-        log(`Opened: ${path}`);
-      },
-      onTabClose: (path) => {
-        log(`Closed: ${path}`);
-        // If no more tabs, show sample code
-        if (tabBar && !tabBar.getActiveTab() && editorView) {
-          editorView.dispatch({
-            changes: { from: 0, to: editorView.state.doc.length, insert: SAMPLE_CODE }
-          });
-        }
-      },
-      onSaveRequest: async (path) => {
-        // Save current content to filesystem
-        const content = editorView?.state.doc.toString() || '';
-        const fs = getFileSystemService();
-        await fs.writeFile(path, content);
-        tabBar?.setDirty(path, false);
-        tabBar?.updateContent(path, content);
-        log(`Saved: ${path}`);
-      }
-    });
-  }
-
-  // Initialize file tree panel
-  const fileTreeContainer = document.getElementById('file-tree-panel');
-  if (fileTreeContainer && FileSystemService.isSupported()) {
-    fileTree = new FileTreePanel(fileTreeContainer, {
-      onFileSelect: async (path) => {
-        // Open file in tab
-        const fs = getFileSystemService();
-        try {
-          const content = await fs.readFile(path);
-          tabBar?.openTab(path, content);
-          // Load into editor
-          if (editorView) {
-            editorView.dispatch({
-              changes: { from: 0, to: editorView.state.doc.length, insert: content }
-            });
-          }
-        } catch (e) {
-          log(`Failed to open: ${e}`);
-        }
-      },
-      onFileCreate: (path) => {
-        log(`Created: ${path}`);
-      },
-      onFileDelete: (path) => {
-        tabBar?.removeTab(path);
-        log(`Deleted: ${path}`);
-      },
-      onFileRename: (oldPath, newPath) => {
-        tabBar?.renameTab(oldPath, newPath);
-        log(`Renamed: ${oldPath} → ${newPath}`);
-      }
-    });
-
-    // Initial refresh
-    await fileTree.refresh();
-  }
-
-  // Track dirty state on edits if a tab is open
-  editor.dom.addEventListener('input', () => {
-    const activeTab = tabBar?.getActiveTab();
-    if (activeTab) {
-      tabBar?.setDirty(activeTab, true);
-      // Update content in memory
-      tabBar?.updateContent(activeTab, editor.state.doc.toString());
-    }
-  });
 
   // Initialize piano roll
   try {
@@ -695,10 +516,9 @@ async function init(): Promise<void> {
   playBtn?.addEventListener('click', async () => {
     const code = editor.state.doc.toString();
 
-    // Play script reactively (with async import resolution)
-    log('Resolving imports...');
-    await audioEngine.playScriptWithImports(code);
+    // Play script (direct, no imports in browser)
     log('Playing...');
+    await audioEngine.playScript(code);
 
     // Start playhead animation
     if (pianoRoll) {
