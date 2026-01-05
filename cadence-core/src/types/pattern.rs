@@ -576,6 +576,7 @@ impl Pattern {
                 PatternStep::Group(steps) => steps.iter().any(step_has_variables),
                 PatternStep::Repeat(inner, _) => step_has_variables(inner),
                 PatternStep::Weighted(inner, _) => step_has_variables(inner),
+                PatternStep::Alternation(steps) => steps.iter().any(step_has_variables),
                 _ => false,
             }
         }
@@ -594,6 +595,11 @@ impl Pattern {
                 }
                 PatternStep::Repeat(inner, _) => collect_vars(inner, vars),
                 PatternStep::Weighted(inner, _) => collect_vars(inner, vars),
+                PatternStep::Alternation(steps) => {
+                    for s in steps {
+                        collect_vars(s, vars);
+                    }
+                }
                 _ => {}
             }
         }
@@ -655,6 +661,13 @@ impl Pattern {
                             *weight,
                         )])
                     }
+                }
+                PatternStep::Alternation(steps) => {
+                    let mut resolved = Vec::new();
+                    for s in steps {
+                        resolved.extend(resolve_step(s, lookup)?);
+                    }
+                    Ok(vec![PatternStep::Alternation(resolved)])
                 }
                 // Non-variable steps pass through unchanged
                 other => Ok(vec![other.clone()]),
