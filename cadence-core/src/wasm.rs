@@ -2015,7 +2015,7 @@ impl WasmInterpreter {
             let (events, envelope, waveform, pan) = match value {
                 Value::Pattern(ref pattern) => {
                     let evs = pattern
-                        .to_rich_events()
+                        .to_rich_events_for_cycle(pattern_cycle as usize)
                         .into_iter()
                         .map(|event| PlayEventJS {
                             notes: event.notes.iter().map(NoteInfoJS::from).collect(),
@@ -2072,7 +2072,7 @@ impl WasmInterpreter {
                     // Select the appropriate pattern based on pattern_cycle
                     let pattern = every.get_pattern_for_cycle(pattern_cycle as usize);
                     let evs = pattern
-                        .to_rich_events()
+                        .to_rich_events_for_cycle(pattern_cycle as usize)
                         .into_iter()
                         .map(|event| PlayEventJS {
                             notes: event.notes.iter().map(NoteInfoJS::from).collect(),

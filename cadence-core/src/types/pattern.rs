@@ -97,6 +97,8 @@ pub enum PatternStep {
     Drum(DrumSound),
     /// Weighted step: C@2 means C takes 2 units of duration
     Weighted(Box<PatternStep>, usize),
+    /// Cycle-based alternation: <C D E> plays one element per cycle
+    Alternation(Vec<PatternStep>),
 }
 
 impl PatternStep {
@@ -133,6 +135,11 @@ impl PatternStep {
             PatternStep::Drum(_) => vec![(vec![], false)],
             // Weighted delegates to inner (weight is handled at duration calculation)
             PatternStep::Weighted(inner, _) => inner.to_frequencies(),
+            // Alternation returns first step for static contexts (real selection happens at playback)
+            PatternStep::Alternation(steps) => steps
+                .first()
+                .map(|s| s.to_frequencies())
+                .unwrap_or_default(),
         }
     }
 
@@ -172,6 +179,10 @@ impl PatternStep {
             }
             // Weighted delegates to inner (weight is handled at duration calculation)
             PatternStep::Weighted(inner, _) => inner.to_note_infos(),
+            // Alternation returns first step for static contexts
+            PatternStep::Alternation(steps) => {
+                steps.first().map(|s| s.to_note_infos()).unwrap_or_default()
+            }
         }
     }
 
@@ -199,6 +210,51 @@ impl PatternStep {
             PatternStep::Drum(d) => vec![(vec![], vec![*d], false)],
             // Weighted delegates to inner (weight is handled at duration calculation)
             PatternStep::Weighted(inner, _) => inner.to_step_info(),
+            // Alternation returns first step for static contexts
+            PatternStep::Alternation(steps) => {
+                steps.first().map(|s| s.to_step_info()).unwrap_or_default()
+            }
+        }
+    }
+
+    /// Flatten this step into separate notes and drums for playback, with cycle-awareness.
+    /// For Alternation steps, selects the appropriate element based on the current cycle.
+    /// Returns (Vec<NoteInfo>, Vec<DrumSound>, is_rest) preserving type distinction.
+    pub fn to_step_info_for_cycle(
+        &self,
+        cycle: usize,
+    ) -> Vec<(Vec<NoteInfo>, Vec<DrumSound>, bool)> {
+        match self {
+            PatternStep::Note(n) => vec![(vec![NoteInfo::from_note(n)], vec![], false)],
+            PatternStep::Chord(c) => {
+                let notes: Vec<NoteInfo> = c.notes_vec().iter().map(NoteInfo::from_note).collect();
+                vec![(notes, vec![], false)]
+            }
+            PatternStep::Rest => vec![(vec![], vec![], true)],
+            PatternStep::Group(steps) => steps
+                .iter()
+                .flat_map(|s| s.to_step_info_for_cycle(cycle))
+                .collect(),
+            PatternStep::Repeat(step, count) => {
+                let inner = step.to_step_info_for_cycle(cycle);
+                (0..*count).flat_map(|_| inner.clone()).collect()
+            }
+            PatternStep::Variable(name) => {
+                panic!(
+                    "Unresolved variable '{}' in pattern - call resolve_variables() first",
+                    name
+                )
+            }
+            PatternStep::Drum(d) => vec![(vec![], vec![*d], false)],
+            PatternStep::Weighted(inner, _) => inner.to_step_info_for_cycle(cycle),
+            // Alternation: select element based on cycle
+            PatternStep::Alternation(steps) => {
+                if steps.is_empty() {
+                    return vec![];
+                }
+                let idx = cycle % steps.len();
+                steps[idx].to_step_info_for_cycle(cycle)
+            }
         }
     }
 
@@ -218,6 +274,9 @@ impl PatternStep {
             PatternStep::Drum(d) => PatternStep::Drum(*d), // Drums don't transpose
             PatternStep::Weighted(inner, weight) => {
                 PatternStep::Weighted(Box::new(inner.transpose(semitones)), *weight)
+            }
+            PatternStep::Alternation(steps) => {
+                PatternStep::Alternation(steps.iter().map(|s| s.transpose(semitones)).collect())
             }
         }
     }
@@ -243,6 +302,16 @@ impl fmt::Display for PatternStep {
             PatternStep::Variable(name) => write!(f, "{}", name),
             PatternStep::Drum(d) => write!(f, "{}", d),
             PatternStep::Weighted(inner, weight) => write!(f, "{}@{}", inner, weight),
+            PatternStep::Alternation(steps) => {
+                write!(f, "<")?;
+                for (i, s) in steps.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", s)?;
+                }
+                write!(f, ">")
+            }
         }
     }
 }
@@ -369,6 +438,51 @@ impl Pattern {
             let step_duration = unit_duration * step_weight;
 
             let step_info_list = step.to_step_info();
+            let sub_count = step_info_list.len() as i64;
+            let event_duration = if sub_count > 0 {
+                step_duration / sub_count
+            } else {
+                step_duration
+            };
+
+            for (notes, drums, is_rest) in step_info_list {
+                events.push(PlaybackEvent {
+                    notes,
+                    drums,
+                    start_beat: current_beat,
+                    duration: event_duration,
+                    is_rest,
+                });
+                current_beat = current_beat + event_duration;
+            }
+        }
+
+        events
+    }
+
+    /// Get rich playback events with cycle-aware alternation selection.
+    /// This is the method to use for actual playback, where Alternation steps
+    /// need to select the correct element based on the current cycle.
+    ///
+    /// # Arguments
+    /// * `cycle` - The current cycle number (0-indexed), used to select alternation elements
+    pub fn to_rich_events_for_cycle(&self, cycle: usize) -> Vec<PlaybackEvent> {
+        let mut events = Vec::new();
+
+        let total_weight: i64 = self.steps.iter().map(|s| s.weight() as i64).sum();
+        if total_weight == 0 {
+            return events;
+        }
+        let unit_duration = self.beats_per_cycle / total_weight;
+
+        let mut current_beat: Time = Ratio::from_integer(0);
+
+        for step in &self.steps {
+            let step_weight = step.weight() as i64;
+            let step_duration = unit_duration * step_weight;
+
+            // Use cycle-aware step info for alternation support
+            let step_info_list = step.to_step_info_for_cycle(cycle);
             let sub_count = step_info_list.len() as i64;
             let event_duration = if sub_count > 0 {
                 step_duration / sub_count
@@ -837,6 +951,11 @@ impl Pattern {
                 PatternStep::Variable(_) => {} // Variables don't contribute notes until resolved
                 PatternStep::Drum(_) => {}     // Drums don't contribute melodic notes
                 PatternStep::Weighted(inner, _) => collect_notes(inner, notes), // Delegate to inner
+                PatternStep::Alternation(steps) => {
+                    for s in steps {
+                        collect_notes(s, notes);
+                    }
+                }
             }
         }
 
@@ -1107,6 +1226,7 @@ fn has_non_variable_content(step: &PatternStep) -> bool {
         PatternStep::Group(steps) => steps.iter().any(has_non_variable_content),
         PatternStep::Repeat(inner, _) => has_non_variable_content(inner),
         PatternStep::Weighted(inner, _) => has_non_variable_content(inner),
+        PatternStep::Alternation(steps) => steps.iter().any(has_non_variable_content),
         PatternStep::Variable(_) => false,
     }
 }
@@ -1125,6 +1245,20 @@ fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
             '_' => {
                 chars.next();
                 let step = maybe_parse_weight_and_repeat(&mut chars, PatternStep::Rest)?;
+                steps.push(step);
+            }
+            // Alternation (slow): <C D E> plays one element per cycle
+            '<' => {
+                chars.next(); // consume '<'
+                let alt_content = take_until_angle_bracket(&mut chars)?;
+                let inner_steps = parse_steps(&alt_content)?;
+                if inner_steps.is_empty() {
+                    return Err(anyhow!("Alternation <> cannot be empty"));
+                }
+                let step = maybe_parse_weight_and_repeat(
+                    &mut chars,
+                    PatternStep::Alternation(inner_steps),
+                )?;
                 steps.push(step);
             }
             // Group start
@@ -1206,6 +1340,31 @@ fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
     }
 
     Ok(steps)
+}
+
+/// Take content until matching '>', handling nested angle brackets
+fn take_until_angle_bracket(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<String> {
+    let mut content = String::new();
+    let mut depth = 1;
+
+    while let Some(c) = chars.next() {
+        match c {
+            '<' => {
+                depth += 1;
+                content.push(c);
+            }
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(content);
+                }
+                content.push(c);
+            }
+            _ => content.push(c),
+        }
+    }
+
+    Err(anyhow!("Unclosed angle bracket in pattern"))
 }
 
 /// Take content until matching ']', handling nested brackets
@@ -1718,6 +1877,123 @@ mod tests {
             PatternStep::Note(n) => assert_eq!(n.pitch_class(), 4), // E
             _ => panic!("Expected Note E"),
         }
+    }
+
+    // ========================================================================
+    // Alternation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_parse_alternation_simple() {
+        // <C D E> should parse to Alternation with 3 notes
+        let p = Pattern::parse("<C D E>").unwrap();
+        assert_eq!(p.steps.len(), 1);
+        match &p.steps[0] {
+            PatternStep::Alternation(steps) => {
+                assert_eq!(steps.len(), 3);
+                // First should be C
+                match &steps[0] {
+                    PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0), // C
+                    _ => panic!("Expected Note C"),
+                }
+                // Second should be D
+                match &steps[1] {
+                    PatternStep::Note(n) => assert_eq!(n.pitch_class(), 2), // D
+                    _ => panic!("Expected Note D"),
+                }
+                // Third should be E
+                match &steps[2] {
+                    PatternStep::Note(n) => assert_eq!(n.pitch_class(), 4), // E
+                    _ => panic!("Expected Note E"),
+                }
+            }
+            _ => panic!("Expected Alternation"),
+        }
+    }
+
+    #[test]
+    fn test_parse_alternation_mixed() {
+        // C <D E> F should parse to Note, Alternation, Note
+        let p = Pattern::parse("C <D E> F").unwrap();
+        assert_eq!(p.steps.len(), 3);
+        assert!(matches!(&p.steps[0], PatternStep::Note(_)));
+        assert!(matches!(&p.steps[1], PatternStep::Alternation(_)));
+        assert!(matches!(&p.steps[2], PatternStep::Note(_)));
+    }
+
+    #[test]
+    fn test_parse_alternation_with_repeat() {
+        // <C D>*2 should parse to alternation with repeat modifier
+        let p = Pattern::parse("<C D>*2").unwrap();
+        assert_eq!(p.steps.len(), 1);
+        match &p.steps[0] {
+            PatternStep::Repeat(inner, count) => {
+                assert_eq!(*count, 2);
+                assert!(matches!(**inner, PatternStep::Alternation(_)));
+            }
+            _ => panic!("Expected Repeat"),
+        }
+    }
+
+    #[test]
+    fn test_alternation_display() {
+        let p = Pattern::parse("<C D E>").unwrap();
+        let display = format!("{}", p);
+        assert!(display.contains("<C"));
+        assert!(display.contains(">"));
+    }
+
+    #[test]
+    fn test_alternation_cycle_selection() {
+        // Test that to_step_info_for_cycle returns different elements for different cycles
+        let p = Pattern::parse("<C D E>").unwrap();
+        let alt_step = &p.steps[0];
+
+        // Cycle 0 should return C (pitch_class 0)
+        let info_0 = alt_step.to_step_info_for_cycle(0);
+        assert_eq!(info_0.len(), 1);
+        assert_eq!(info_0[0].0[0].pitch_class, 0); // C
+
+        // Cycle 1 should return D (pitch_class 2)
+        let info_1 = alt_step.to_step_info_for_cycle(1);
+        assert_eq!(info_1.len(), 1);
+        assert_eq!(info_1[0].0[0].pitch_class, 2); // D
+
+        // Cycle 2 should return E (pitch_class 4)
+        let info_2 = alt_step.to_step_info_for_cycle(2);
+        assert_eq!(info_2.len(), 1);
+        assert_eq!(info_2[0].0[0].pitch_class, 4); // E
+
+        // Cycle 3 should wrap back to C
+        let info_3 = alt_step.to_step_info_for_cycle(3);
+        assert_eq!(info_3[0].0[0].pitch_class, 0); // C
+    }
+
+    #[test]
+    fn test_alternation_rich_events_for_cycle() {
+        // Test that to_rich_events_for_cycle produces correct events
+        let p = Pattern::parse("<C D E>").unwrap();
+
+        // Cycle 0: should have C
+        let events_0 = p.to_rich_events_for_cycle(0);
+        assert_eq!(events_0.len(), 1);
+        assert_eq!(events_0[0].notes[0].pitch_class, 0); // C
+
+        // Cycle 1: should have D
+        let events_1 = p.to_rich_events_for_cycle(1);
+        assert_eq!(events_1[0].notes[0].pitch_class, 2); // D
+    }
+
+    #[test]
+    fn test_alternation_empty_fails() {
+        let result = Pattern::parse("<>");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_alternation_unclosed_fails() {
+        let result = Pattern::parse("<C D E");
+        assert!(result.is_err());
     }
 
     // ========================================================================

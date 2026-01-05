@@ -197,3 +197,32 @@ The web editor was simplified from a multi-file IDE to a **single-file playgroun
 3. **GitHub URL Imports** — Load libraries/samples via URL (e.g., `import "https://..."`)
 4. **AudioWorklet** — Lower latency audio scheduling *(stretch)*
 5. **Staff Notation** — VexFlow integration for traditional notation *(stretch)*
+
+---
+
+## Future: TidalCycles-Style Mini-Notation
+
+Additional mini-notation features from TidalCycles/Strudel to implement:
+
+| Feature | Syntax | Description | Priority |
+|---------|--------|-------------|----------|
+| **Slow alternation** | `<C D E>` | Cycle through elements, one per cycle | ✅ Implemented |
+| **Euclidean rhythms** | `C(3,8)` | Place 3 notes evenly in 8 slots | ⭐⭐⭐ High |
+| **Polyrhythm** | `{C D E, F G}` | Play sequences with different lengths | ⭐⭐ Medium |
+| **Stretch/Fit** | `C/2` or `C*0.5` | Stretch step over fractional slots | ⭐⭐ Medium |
+| **Random choice** | `C?` or `[C D]?` | Randomly include/exclude step | ⭐ Low |
+| **Degrade** | `degrade(pattern)` | Randomly drop events | ⭐ Low |
+| **Offset** | `C~0.5` | Offset timing by fraction | ⭐ Low |
+
+### Current Mini-Notation (Implemented)
+
+- Notes: `C`, `D#4`, `Bb3`
+- Rests: `_`
+- Chords: `[C, E, G]`
+- Grouping: `[C E]` (sub-divide slot)
+- Repeat: `C*3`
+- Weighted: `C@2` (duration weight)
+- Variables: `myVar`
+- Drums: `kick`, `snare`, `hh`
+- Alternation: `<C D E>` (one per cycle)
+

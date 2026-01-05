@@ -293,6 +293,9 @@ impl FunctionRegistry {
                                     )]),
                                 )),
                                 PatternStep::Weighted(inner, _) => step_to_value(inner),
+                                PatternStep::Alternation(steps) => Ok(Value::Pattern(
+                                    crate::types::Pattern::with_steps(steps.clone()),
+                                )),
                             }
                         }
                         step_to_value(&pattern.steps[actual_idx as usize])

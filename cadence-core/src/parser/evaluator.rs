@@ -355,6 +355,12 @@ impl Evaluator {
                                     // Unwrap weighted step and return its value
                                     step_to_value(inner)
                                 }
+                                PatternStep::Alternation(steps) => {
+                                    // Return as pattern containing the alternation steps
+                                    Ok(Value::Pattern(crate::types::Pattern::with_steps(
+                                        steps.clone(),
+                                    )))
+                                }
                             }
                         }
                         step_to_value(&pattern.steps[actual_idx as usize])
