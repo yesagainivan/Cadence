@@ -250,6 +250,7 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  height: 28px;
 }
 
 .output-mode-toggle {
@@ -257,26 +258,36 @@ body {
   background: var(--color-bg-inset);
   border-radius: var(--radius-sm);
   padding: 2px;
+  height: 100%;
+  gap: 1px;
 }
 
 .mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
-  padding: 4px 8px;
-  font-size: var(--font-size-sm);
+  padding: 0 8px;
+  height: 100%;
+  color: var(--color-fg-subtle);
   cursor: pointer;
-  border-radius: var(--radius-sm);
+  border-radius: 2px;
   transition: all 0.15s ease;
-  opacity: 0.6;
 }
 
 .mode-btn:hover {
-  opacity: 1;
+  color: var(--color-fg);
+  background: var(--color-bg-hover);
 }
 
 .mode-btn.active {
   background: var(--color-accent);
-  opacity: 1;
+  color: #fff;
+}
+
+.mode-btn svg {
+  display: block;
 }
 
 .midi-select {
@@ -284,7 +295,8 @@ body {
   color: var(--color-fg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: var(--space-xs) var(--space-sm);
+  padding: 0 var(--space-sm);
+  height: 100%;
   font-family: var(--font-sans);
   font-size: var(--font-size-xs);
   cursor: pointer;

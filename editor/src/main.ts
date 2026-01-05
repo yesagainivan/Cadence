@@ -23,6 +23,7 @@ import { initTheme, getTheme, onThemeChange, buildCMTheme } from './theme';
 import { Toolbar, StatusBar, setupResizablePanels } from './components';
 import { debouncedRefreshSymbols } from './hover';
 import { gotoDefinition, gotoDefinitionPlugin, initGotoDefinitionCursor } from './gotoDefinition';
+import { icon } from './icons';
 
 // Global instances
 let pianoRoll: PianoRoll | null = null;
@@ -565,6 +566,15 @@ async function init(): Promise<void> {
   const midiSelect = document.getElementById('midi-output') as HTMLSelectElement;
   const modeButtons = document.querySelectorAll('.mode-btn');
   const midiOutputService = audioEngine.getMidiOutput();
+
+  // Set icons for mode buttons
+  const btnAudio = document.getElementById('mode-audio');
+  const btnMidi = document.getElementById('mode-midi');
+  const btnBoth = document.getElementById('mode-both');
+
+  if (btnAudio) btnAudio.innerHTML = icon('speaker');
+  if (btnMidi) btnMidi.innerHTML = icon('piano');
+  if (btnBoth) btnBoth.innerHTML = `<div style="display: flex; gap: 2px;">${icon('speaker', 14)}${icon('piano', 14)}</div>`;
 
   // Populate MIDI devices
   midiOutputService.init().then((success) => {

@@ -56,8 +56,21 @@ export const ICON_UNLOCK = `<svg width="16" height="16" viewBox="0 0 24 24" fill
 
 export const ICON_MUSIC = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
   <path d="M9 18V5l12-2v13"/>
-  <circle cx="6" cy="18" r="3"/>
   <circle cx="18" cy="16" r="3"/>
+</svg>`;
+
+export const ICON_SPEAKER = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+  <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+  <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+</svg>`;
+
+export const ICON_PIANO = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+  <path d="M19 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/>
+  <path d="M9 4v16"/>
+  <path d="M15 4v16"/>
+  <path d="M7 4v9h2"/>
+  <path d="M13 4v9h2"/>
 </svg>`;
 
 // =============================================================================
@@ -90,6 +103,8 @@ const ICONS = {
     lock: ICON_LOCK,
     unlock: ICON_UNLOCK,
     music: ICON_MUSIC,
+    speaker: ICON_SPEAKER,
+    piano: ICON_PIANO,
 } as const;
 
 export type IconName = keyof typeof ICONS;
