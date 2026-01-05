@@ -166,6 +166,22 @@ A web-based editor for the Cadence music programming language with live syntax h
 14. **Statement span tracking** — `SpannedStatement`/`SpannedProgram` types with byte offset tracking
 15. **Cursor-aware piano roll** — `get_events_at_position()` WASM function shows statement at cursor
 16. **Go-to-Definition** — Cmd+Click and F12 to jump to symbol definition
+17. **Simplification to Single-File Playground** — Removed multi-file infrastructure (~2,000 lines):
+    - Deleted: `file-tree.ts`, `tab-bar.ts`, `filesystem-service.ts`, `cadence-worker.ts`, `interpreter-client.ts`
+    - Direct `WasmInterpreter` playback (no Web Worker)
+    - localStorage auto-save for code persistence
+    - `use` statements reserved for CLI/IDE only
+
+---
+
+## Design Decision: Single-File Playground
+
+The web editor was simplified from a multi-file IDE to a **single-file playground** (similar to Strudel):
+
+- **Goal**: Fast, focused live-coding experience
+- **Removed**: File tree, tabs, virtual filesystem, Web Worker bridge
+- **Preserved**: Piano roll, properties panel, syntax highlighting, live coding
+- **Module imports**: `use` statements work in CLI; future web imports via GitHub URLs
 
 ---
 
@@ -178,8 +194,6 @@ A web-based editor for the Cadence music programming language with live syntax h
 2. **Code Cleanup** — Refactor WASM API
    - Unify `get_context_at_cursor()` and `get_events_at_position()` via shared `get_visualizable_expression()` helper
    - Remove unused imports in `evaluator.rs` and `wasm.rs`
-   - Remove unused `take_note` function in `pattern.rs`
-3. **Pattern Editor** — Step sequencer view for pattern mini-notation *(stretch)*
+3. **GitHub URL Imports** — Load libraries/samples via URL (e.g., `import "https://..."`)
 4. **AudioWorklet** — Lower latency audio scheduling *(stretch)*
 5. **Staff Notation** — VexFlow integration for traditional notation *(stretch)*
-
