@@ -27,6 +27,13 @@ impl Environment {
         }
     }
 
+    /// Clear all scopes and reset to a fresh global scope
+    /// Used when reloading a script to ensure no stale imports/variables persist
+    pub fn clear(&mut self) {
+        self.scopes.clear();
+        self.scopes.push(HashMap::new());
+    }
+
     /// Push a new scope (e.g., when entering a block)
     pub fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());

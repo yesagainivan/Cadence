@@ -1,5 +1,5 @@
-import { type Action, WasmInterpreter, rationalToFloat, getUserFunctions, preResolveImports } from './cadence-wasm';
-import { updateUserFunctions } from './hover';
+import { type Action, rationalToFloat } from './cadence-wasm';
+import { getInterpreterClient, type InterpreterClient } from './interpreter-client';
 
 /** ADSR envelope parameters */
 export interface AdsrParams {
@@ -29,9 +29,10 @@ export class CadenceAudioEngine {
     private isPlaying: boolean = false;
     private activeOscillators: ActiveOscillator[] = [];
     private scheduledTimeouts: number[] = [];
-    private interpreter: WasmInterpreter | null = null;
+    private interpreterClient: InterpreterClient | null = null;
     private currentBeat: number = 0;       // Current beat counter
     private lastBeatTime: number = 0;      // AudioContext time of last beat (for smooth interpolation)
+    private schedulerRunning: boolean = false;  // Prevent overlapping scheduler calls
 
     // Per-track volume (0-1 scale)
     private trackVolumes: Map<number, number> = new Map();
@@ -366,80 +367,8 @@ export class CadenceAudioEngine {
     }
 
     /**
-     * Play script reactively using WasmInterpreter
-     */
-    playScript(code: string): void {
-        // Stop previous playback
-        this.stop();
-
-        const ctx = this.ensureContext();
-        this.isPlaying = true;
-        this.currentBeat = 0;
-        this.lastBeatTime = ctx.currentTime;
-
-        // Initialize interpreter
-        if (!this.interpreter) {
-            this.interpreter = new WasmInterpreter();
-        }
-
-        // Load code and get initial actions - this also pre-populates env including _cycle=0
-        const result = this.interpreter.load(code);
-
-        // Update hover cache with user-defined functions from this script
-        updateUserFunctions(getUserFunctions(this.interpreter));
-
-        // Process initial actions (like Setup)
-        if (result.actions) {
-            for (const action of result.actions) {
-                // If it's a Play action from load(), it's the beat 0 event
-                // We should schedule it immediately
-                this.handleAction(action as Action, ctx.currentTime);
-            }
-        }
-
-        // Start scheduler loop starting from next beat
-        // Current cycle 0 actions were already handled above.
-        // We need to advance to next beat.
-
-        const LOOKAHEAD = 0.1; // 100ms
-        const SCHEDULE_INTERVAL = 25; // 25ms
-        let nextBeatTime = ctx.currentTime + (60 / this.tempo); // Start next beat after 1 beat duration
-
-        const scheduler = () => {
-            if (!this.isPlaying || !this.interpreter) return;
-
-            const now = ctx.currentTime;
-
-            // Schedule beats that fall within lookahead window
-            while (nextBeatTime < now + LOOKAHEAD) {
-                // Tick interpreter for this beat (advances cycle)
-                const result = this.interpreter.tick();
-
-                if (result.actions) {
-                    for (const action of result.actions) {
-                        this.handleAction(action as Action, nextBeatTime);
-                    }
-                }
-
-                // Advance by 1 beat
-                this.currentBeat++;
-                this.lastBeatTime = nextBeatTime;
-                const beatDuration = 60 / this.tempo;
-                nextBeatTime += beatDuration;
-            }
-
-            const timeoutId = window.setTimeout(scheduler, SCHEDULE_INTERVAL);
-            this.scheduledTimeouts.push(timeoutId);
-        };
-
-        const timeoutId = window.setTimeout(scheduler, SCHEDULE_INTERVAL);
-        this.scheduledTimeouts.push(timeoutId);
-    }
-
-    /**
-     * Play script with async import resolution.
-     * This pre-resolves all `use` statements before executing the script,
-     * bridging the async/sync gap for module loading.
+     * Play script using the shared InterpreterClient (Web Worker).
+     * This is the only playScript method - all playback uses the shared interpreter.
      */
     async playScriptWithImports(code: string): Promise<void> {
         // Stop previous playback
@@ -450,52 +379,48 @@ export class CadenceAudioEngine {
         this.currentBeat = 0;
         this.lastBeatTime = ctx.currentTime;
 
-        // Initialize interpreter
-        if (!this.interpreter) {
-            this.interpreter = new WasmInterpreter();
-        }
+        // Get the shared interpreter client
+        this.interpreterClient = getInterpreterClient();
+        await this.interpreterClient.initialize();
 
-        // Pre-resolve all imports BEFORE loading the script
-        try {
-            const resolved = await preResolveImports(this.interpreter, code);
-            if (resolved.length > 0) {
-                console.log(`🔗 Resolved modules: ${resolved.join(', ')}`);
-            }
-        } catch (e) {
-            console.warn('Module resolution warning:', e);
-            // Continue anyway - modules might not exist yet
-        }
+        // Load code (client handles import resolution internally)
+        const result = await this.interpreterClient.load(code);
 
-        // Load code and get initial actions
-        const result = this.interpreter.load(code);
+        // Update hover cache with user-defined functions
+        // TODO: Add getUserFunctions to InterpreterClient
+        // updateUserFunctions(...);
 
-        // Update hover cache with user-defined functions from this script
-        updateUserFunctions(getUserFunctions(this.interpreter));
-
-        // Process initial actions (like Setup)
+        // Process initial actions (like Setup, Beat 0 events)
         if (result.actions) {
             for (const action of result.actions) {
                 this.handleAction(action as Action, ctx.currentTime);
             }
         }
 
-        // Start scheduler loop
-        const LOOKAHEAD = 0.1;
-        const SCHEDULE_INTERVAL = 25;
+        // Start async scheduler loop
+        const LOOKAHEAD = 0.15;  // 150ms lookahead (increased for async safety)
+        const SCHEDULE_INTERVAL = 25;  // Check every 25ms
         let nextBeatTime = ctx.currentTime + (60 / this.tempo);
 
-        const scheduler = () => {
-            if (!this.isPlaying || !this.interpreter) return;
+        const scheduler = async () => {
+            if (!this.isPlaying || !this.interpreterClient) return;
+            if (this.schedulerRunning) return;  // Prevent overlap
 
+            this.schedulerRunning = true;
             const now = ctx.currentTime;
 
+            // Process all beats that need scheduling
             while (nextBeatTime < now + LOOKAHEAD) {
-                const result = this.interpreter.tick();
+                try {
+                    const result = await this.interpreterClient.tick();
 
-                if (result.actions) {
-                    for (const action of result.actions) {
-                        this.handleAction(action as Action, nextBeatTime);
+                    if (result.actions) {
+                        for (const action of result.actions) {
+                            this.handleAction(action as Action, nextBeatTime);
+                        }
                     }
+                } catch (e) {
+                    console.warn('[AudioEngine] Tick error:', e);
                 }
 
                 this.currentBeat++;
@@ -504,10 +429,15 @@ export class CadenceAudioEngine {
                 nextBeatTime += beatDuration;
             }
 
-            const timeoutId = window.setTimeout(scheduler, SCHEDULE_INTERVAL);
-            this.scheduledTimeouts.push(timeoutId);
+            this.schedulerRunning = false;
+
+            if (this.isPlaying) {
+                const timeoutId = window.setTimeout(scheduler, SCHEDULE_INTERVAL);
+                this.scheduledTimeouts.push(timeoutId);
+            }
         };
 
+        // Start the scheduler
         const timeoutId = window.setTimeout(scheduler, SCHEDULE_INTERVAL);
         this.scheduledTimeouts.push(timeoutId);
     }
@@ -515,22 +445,26 @@ export class CadenceAudioEngine {
     /**
      * Update running script without resetting cycle (for live coding)
      */
-    updateScript(code: string): void {
-        if (!this.isPlaying || !this.interpreter) return;
+    async updateScript(code: string): Promise<void> {
+        if (!this.isPlaying || !this.interpreterClient) return;
 
-        // Call update on interpreter (preserves cycle count)
-        const result = this.interpreter.update(code);
+        try {
+            // Call update on interpreter (preserves cycle count)
+            const result = await this.interpreterClient.update(code);
 
-        // Handle any immediate actions from update (e.g. tempo change)
-        if (result.actions) {
-            const ctx = this.ensureContext();
-            for (const action of result.actions) {
-                // Only handle basic state changes immediately, ignore Play actions 
-                // as they will be picked up by the next tick()
-                if (action.type !== 'Play') {
-                    this.handleAction(action as Action, ctx.currentTime);
+            // Handle any immediate actions from update (e.g. tempo change)
+            if (result.actions) {
+                const ctx = this.ensureContext();
+                for (const action of result.actions) {
+                    // Only handle basic state changes immediately, ignore Play actions 
+                    // as they will be picked up by the next tick()
+                    if (action.type !== 'Play') {
+                        this.handleAction(action as Action, ctx.currentTime);
+                    }
                 }
             }
+        } catch (e) {
+            console.warn('[AudioEngine] Update error:', e);
         }
     }
 

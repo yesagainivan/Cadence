@@ -9,7 +9,7 @@
 *.bin
 *.DS_Store
 *.png
-/logo
+
 
 # all zip files
 *.zip

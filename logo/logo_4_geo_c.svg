@@ -1,0 +1,8 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="512" height="512" rx="120" fill="#020617"/>
+<path d="M256 120L360 180V300L256 360L152 300V180L256 120Z" stroke="#EC4899" stroke-width="20" stroke-linejoin="round"/>
+<path d="M190 200V280L256 320" stroke="#EC4899" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M190 200L256 160L320 200" stroke="#EC4899" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="256" cy="240" r="20" fill="#EC4899"/>
+<text x="50%" y="460" text-anchor="middle" fill="#FFFFFF" font-family="Arial, sans-serif" font-weight="bold" font-size="56" letter-spacing="4">CADENCE</text>
+</svg>

@@ -1769,10 +1769,13 @@ impl WasmInterpreter {
         self.cycle = 0;
         self.interpreter.clear_actions(); // Clear previous actions
 
-        // Reset environment cycle and beat to 0
+        // CRITICAL: Clear the environment completely to remove stale imports
+        // This ensures removed `use` statements don't leave dangling bindings
         if let Ok(mut env) = self.interpreter.environment.write() {
-            let _ = env.define("_cycle".to_string(), Value::Number(0));
-            let _ = env.define("_beat".to_string(), Value::Number(0));
+            env.clear();
+            // Reinitialize special variables
+            env.define("_cycle".to_string(), Value::Number(0));
+            env.define("_beat".to_string(), Value::Number(0));
         }
 
         // Parse
@@ -2177,6 +2180,324 @@ impl WasmInterpreter {
         // This would require parsing JSON to Value, simpler to just re-eval small snippets for now
         // or just expose a method to run a small statement.
         // For now, MVP: only load() and tick() are enough for reactive cycles.
+    }
+
+    /// Get events for a statement at cursor position, using the interpreter's environment.
+    /// This is the key method that enables piano roll preview for code with imports!
+    /// Unlike get_events_at_position (stateless), this uses resolved modules.
+    pub fn get_events_for_statement(&self, code: &str, position: usize) -> JsValue {
+        use crate::parser::ast::{Statement, Value};
+        use crate::parser::evaluator::Evaluator;
+        use crate::parser::statement_parser::parse_spanned_statements;
+
+        // Parse with span tracking
+        let spanned_program = match parse_spanned_statements(code) {
+            Ok(p) => p,
+            Err(e) => {
+                return serde_wasm_bindgen::to_value(&PatternEventsJS {
+                    events: vec![],
+                    beats_per_cycle: beats(4).into(),
+                    error: Some(format!("Parse error: {}", e)),
+                })
+                .unwrap_or(JsValue::NULL);
+            }
+        };
+
+        // Find statement containing cursor position
+        let spanned_stmt = match spanned_program.statement_at_utf16(position) {
+            Some(s) => s,
+            None => return JsValue::NULL,
+        };
+
+        // Get the interpreter's environment (which has resolved imports!)
+        let env = self.interpreter.environment.read().unwrap();
+        let evaluator = Evaluator::new();
+
+        // Run the program to define any local variables
+        // We use a temporary interpreter to avoid mutating self
+        let program = spanned_program.to_program();
+        let mut temp_interpreter = crate::parser::interpreter::Interpreter::new();
+
+        // Copy resolved modules from our environment to the temp interpreter
+        {
+            let mut temp_env = temp_interpreter.environment.write().unwrap();
+            for (name, value) in env.all_bindings() {
+                temp_env.define(name.clone(), value.clone());
+            }
+        }
+
+        // Run to populate local vars
+        if let Err(e) = temp_interpreter.run_program(&program) {
+            return serde_wasm_bindgen::to_value(&PatternEventsJS {
+                events: vec![],
+                beats_per_cycle: beats(4).into(),
+                error: Some(format!("Runtime error: {}", e)),
+            })
+            .unwrap_or(JsValue::NULL);
+        }
+
+        let temp_env = temp_interpreter.environment.read().unwrap();
+
+        // Extract the expression to visualize
+        let expr = match &spanned_stmt.statement {
+            Statement::Play { target, .. } => target.clone(),
+            Statement::Expression(e) => e.clone(),
+            Statement::Let { value, .. } => value.clone(),
+            Statement::Assign { value, .. } => value.clone(),
+            Statement::Track { body, .. } => match body.as_ref() {
+                Statement::Play { target, .. } => target.clone(),
+                _ => return JsValue::NULL,
+            },
+            _ => return JsValue::NULL,
+        };
+
+        // Evaluate using temp environment (has both imports and local vars)
+        let value = match evaluator.eval_with_env(expr, Some(&temp_env)) {
+            Ok(v) => v,
+            Err(e) => {
+                return serde_wasm_bindgen::to_value(&PatternEventsJS {
+                    events: vec![],
+                    beats_per_cycle: beats(4).into(),
+                    error: Some(e.to_string()),
+                })
+                .unwrap_or(JsValue::NULL);
+            }
+        };
+
+        // Convert to events
+        let result: PatternEventsJS = match value {
+            Value::Pattern(ref p) => {
+                let events = p
+                    .to_rich_events()
+                    .iter()
+                    .map(|e| PlayEventJS {
+                        notes: e
+                            .notes
+                            .iter()
+                            .map(|n| NoteInfoJS {
+                                midi: n.midi,
+                                frequency: n.frequency,
+                                name: n.name.clone(),
+                                pitch_class: n.pitch_class,
+                                octave: n.octave,
+                            })
+                            .collect(),
+                        frequencies: e.notes.iter().map(|n| n.frequency).collect(),
+                        drums: e.drums.iter().map(|d| d.short_name().to_string()).collect(),
+                        start_beat: e.start_beat.into(),
+                        duration: e.duration.into(),
+                        is_rest: e.is_rest,
+                    })
+                    .collect();
+                PatternEventsJS {
+                    events,
+                    beats_per_cycle: p.beats_per_cycle.into(),
+                    error: None,
+                }
+            }
+            Value::Chord(c) => {
+                let notes: Vec<NoteInfoJS> = c
+                    .notes_vec()
+                    .iter()
+                    .map(|n| NoteInfoJS {
+                        midi: n.midi_note(),
+                        frequency: n.frequency(),
+                        name: n.full_name(),
+                        pitch_class: n.pitch_class(),
+                        octave: n.octave(),
+                    })
+                    .collect();
+                PatternEventsJS {
+                    events: vec![PlayEventJS {
+                        notes,
+                        frequencies: c.notes_vec().iter().map(|n| n.frequency()).collect(),
+                        drums: vec![],
+                        start_beat: beats(0).into(),
+                        duration: beats(1).into(),
+                        is_rest: false,
+                    }],
+                    beats_per_cycle: beats(1).into(),
+                    error: None,
+                }
+            }
+            Value::Note(n) => PatternEventsJS {
+                events: vec![PlayEventJS {
+                    notes: vec![NoteInfoJS {
+                        midi: n.midi_note(),
+                        frequency: n.frequency(),
+                        name: n.full_name(),
+                        pitch_class: n.pitch_class(),
+                        octave: n.octave(),
+                    }],
+                    frequencies: vec![n.frequency()],
+                    drums: vec![],
+                    start_beat: beats(0).into(),
+                    duration: beats(1).into(),
+                    is_rest: false,
+                }],
+                beats_per_cycle: beats(1).into(),
+                error: None,
+            },
+            Value::EveryPattern(ref every) => {
+                let p = &every.base;
+                let events = p
+                    .to_rich_events()
+                    .iter()
+                    .map(|e| PlayEventJS {
+                        notes: e
+                            .notes
+                            .iter()
+                            .map(|n| NoteInfoJS {
+                                midi: n.midi,
+                                frequency: n.frequency,
+                                name: n.name.clone(),
+                                pitch_class: n.pitch_class,
+                                octave: n.octave,
+                            })
+                            .collect(),
+                        frequencies: e.notes.iter().map(|n| n.frequency).collect(),
+                        drums: e.drums.iter().map(|d| d.short_name().to_string()).collect(),
+                        start_beat: e.start_beat.into(),
+                        duration: e.duration.into(),
+                        is_rest: e.is_rest,
+                    })
+                    .collect();
+                PatternEventsJS {
+                    events,
+                    beats_per_cycle: p.beats_per_cycle.into(),
+                    error: None,
+                }
+            }
+            _ => return JsValue::NULL,
+        };
+
+        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+    }
+
+    /// Get context for statement at cursor position, using interpreter's environment.
+    /// Enables properties panel to work with imported symbols.
+    pub fn get_context_for_statement(&self, code: &str, position: usize) -> JsValue {
+        use crate::parser::ast::{Statement, Value};
+        use crate::parser::evaluator::Evaluator;
+        use crate::parser::statement_parser::parse_spanned_statements;
+
+        // Parse with span tracking
+        let spanned_program = match parse_spanned_statements(code) {
+            Ok(p) => p,
+            Err(_) => return JsValue::NULL,
+        };
+
+        // Find statement at cursor
+        let spanned_stmt = match spanned_program.statement_at_utf16(position) {
+            Some(s) => s,
+            None => return JsValue::NULL,
+        };
+
+        // Get interpreter's environment (has resolved imports)
+        let env = self.interpreter.environment.read().unwrap();
+        let evaluator = Evaluator::new();
+
+        // Run program to populate local vars (similar to get_events_for_statement)
+        let program = spanned_program.to_program();
+        let mut temp_interpreter = crate::parser::interpreter::Interpreter::new();
+
+        {
+            let mut temp_env = temp_interpreter.environment.write().unwrap();
+            for (name, value) in env.all_bindings() {
+                temp_env.define(name.clone(), value.clone());
+            }
+        }
+
+        let _ = temp_interpreter.run_program(&program);
+        let temp_env = temp_interpreter.environment.read().unwrap();
+
+        // Extract statement type, expression, and variable name
+        let (statement_type, expr_opt, variable_name) = match &spanned_stmt.statement {
+            Statement::Let { name, value } => {
+                ("let".to_string(), Some(value.clone()), Some(name.clone()))
+            }
+            Statement::Assign { name, value } => (
+                "assign".to_string(),
+                Some(value.clone()),
+                Some(name.clone()),
+            ),
+            Statement::Play { target, .. } => ("play".to_string(), Some(target.clone()), None),
+            Statement::Expression(e) => ("expression".to_string(), Some(e.clone()), None),
+            Statement::Tempo(e) => {
+                let tempo_val = evaluator
+                    .eval_with_env(e.clone(), Some(&temp_env))
+                    .ok()
+                    .and_then(|v| {
+                        if let Value::Number(n) = v {
+                            Some(n as f32)
+                        } else {
+                            None
+                        }
+                    });
+                let context = CursorContextJS {
+                    statement_type: "tempo".to_string(),
+                    value_type: Some("bpm".to_string()),
+                    properties: Some(EditablePropertiesJS {
+                        waveform: None,
+                        envelope: None,
+                        tempo: tempo_val,
+                        volume: None,
+                        beats_per_cycle: None,
+                    }),
+                    span: SpanInfoJS {
+                        start: spanned_stmt.start,
+                        end: spanned_stmt.end,
+                        utf16_start: spanned_stmt.utf16_start,
+                        utf16_end: spanned_stmt.utf16_end,
+                    },
+                    variable_name: None,
+                };
+                return serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL);
+            }
+            _ => return JsValue::NULL,
+        };
+
+        // Evaluate expression if we have one
+        let (value_type, properties) = if let Some(expr) = expr_opt {
+            match evaluator.eval_with_env(expr, Some(&temp_env)) {
+                Ok(value) => match value {
+                    Value::Pattern(ref p) => {
+                        let props = EditablePropertiesJS {
+                            waveform: p.waveform.as_ref().map(|w| w.name().to_string()),
+                            envelope: p.envelope.map(|(a, d, s, r)| [a, d, s, r]),
+                            tempo: None,
+                            volume: None,
+                            beats_per_cycle: Some(p.beats_per_cycle_f32()),
+                        };
+                        (Some("pattern".to_string()), Some(props))
+                    }
+                    Value::Chord(_) => (Some("chord".to_string()), None),
+                    Value::Note(_) => (Some("note".to_string()), None),
+                    Value::Number(_) => (Some("number".to_string()), None),
+                    Value::String(_) => (Some("string".to_string()), None),
+                    Value::Function { .. } => (Some("function".to_string()), None),
+                    _ => (None, None),
+                },
+                Err(_) => (None, None),
+            }
+        } else {
+            (None, None)
+        };
+
+        let context = CursorContextJS {
+            statement_type,
+            value_type,
+            properties,
+            span: SpanInfoJS {
+                start: spanned_stmt.start,
+                end: spanned_stmt.end,
+                utf16_start: spanned_stmt.utf16_start,
+                utf16_end: spanned_stmt.utf16_end,
+            },
+            variable_name,
+        };
+
+        serde_wasm_bindgen::to_value(&context).unwrap_or(JsValue::NULL)
     }
 }
 

@@ -1,0 +1,23 @@
+<svg width="256" height="256" viewBox="0 0 256 256"
+     xmlns="http://www.w3.org/2000/svg">
+
+  <!-- Background (optional, remove if you want transparency) -->
+  <!-- <rect width="256" height="256" rx="32" fill="#F4EFEA"/> -->
+
+  <!-- Panel 1 -->
+  <rect x="56" y="64" width="144" height="40" rx="20"
+        fill="#8D9F87" opacity="0.85"/>
+
+  <!-- Panel 2 -->
+  <rect x="48" y="96" width="160" height="40" rx="20"
+        fill="#B7B08E" opacity="0.75"/>
+
+  <!-- Panel 3 -->
+  <rect x="64" y="128" width="128" height="40" rx="20"
+        fill="#C97C5D" opacity="0.65"/>
+
+  <!-- Panel 4 -->
+  <!-- <rect x="64" y="160" width="128" height="32" rx="20"
+        fill="#6b7e53ff" opacity="0.65"/>  -->
+
+</svg>

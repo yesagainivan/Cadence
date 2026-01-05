@@ -16,6 +16,7 @@ import { linter, lintGutter } from '@codemirror/lint';
 import type { Diagnostic } from '@codemirror/lint';
 import { cadenceWasm } from './lang-cadence-wasm';
 import { initWasm, parseCode, isWasmReady, getEventsAtPosition, getContextAtCursor } from './cadence-wasm';
+import { getInterpreterClient } from './interpreter-client';
 import { audioEngine } from './audio-engine';
 import { PianoRoll } from './piano-roll';
 import { PropertiesPanel } from './properties-panel';
@@ -217,7 +218,7 @@ function createEditor(container: HTMLElement): EditorView {
 /**
  * Update cursor position display
  */
-function updateCursorPosition(view: EditorView): void {
+async function updateCursorPosition(view: EditorView): Promise<void> {
   const pos = view.state.selection.main.head;
   const line = view.state.doc.lineAt(pos);
   const col = pos - line.from + 1;
@@ -228,8 +229,19 @@ function updateCursorPosition(view: EditorView): void {
   }
 
   // Update properties panel with cursor context
+  // Try worker-based client first (has resolved imports), fall back to direct
   if (propertiesPanel && isWasmReady()) {
     const code = view.state.doc.toString();
+    try {
+      const client = getInterpreterClient();
+      if (client.isReady()) {
+        const context = await client.getContextAtCursor(code, pos);
+        propertiesPanel.update(context);
+        return;
+      }
+    } catch {
+      // Fall back to direct (no import resolution)
+    }
     const context = getContextAtCursor(code, pos);
     propertiesPanel.update(context);
   }
@@ -240,24 +252,34 @@ function updateCursorPosition(view: EditorView): void {
  */
 let currentCursorContext: { variable_name: string | null; span: { utf16_start: number } } | null = null;
 
-function updatePianoRollAtCursor(view: EditorView): void {
+async function updatePianoRollAtCursor(view: EditorView): Promise<void> {
   if (!pianoRoll || !isWasmReady()) return;
 
   const code = view.state.doc.toString();
   const cursorPos = view.state.selection.main.head;
 
-  // Get context for lock target info
+  // Get context for lock target info (can use direct for this)
   const context = getContextAtCursor(code, cursorPos);
   currentCursorContext = context ? {
     variable_name: context.variable_name,
     span: { utf16_start: context.span.utf16_start }
   } : null;
 
-  // Get pattern events with cycle timing for the statement at cursor position
-  const patternEvents = getEventsAtPosition(code, cursorPos);
+  // Get pattern events - try worker-based client first (has resolved imports)
+  let patternEvents = null;
+  try {
+    const client = getInterpreterClient();
+    if (client.isReady()) {
+      patternEvents = await client.getEventsAtPosition(code, cursorPos);
+    }
+  } catch {
+    // Fall back to direct (no import resolution)
+  }
 
-  // Debug: uncomment to trace cursor positions
-  // console.log(`🎹 Piano roll: cursor=${cursorPos}, events=${patternEvents?.events?.length ?? 'null'}, cycle=${patternEvents?.beats_per_cycle}`);
+  // Fall back to direct WASM call if client not ready
+  if (!patternEvents) {
+    patternEvents = getEventsAtPosition(code, cursorPos);
+  }
 
   if (patternEvents && patternEvents.events && patternEvents.events.length > 0) {
     pianoRoll.update(patternEvents);
@@ -426,6 +448,17 @@ async function init(): Promise<void> {
     }
   } else {
     log('OPFS not supported - file browser disabled');
+  }
+
+  // Initialize Web Worker-based interpreter client
+  // This provides import resolution for piano roll and properties panel
+  try {
+    const interpreterClient = getInterpreterClient();
+    await interpreterClient.initialize();
+    log('Interpreter client initialized (Web Worker)');
+  } catch (e) {
+    log(`Interpreter client failed: ${e}`);
+    // Continue anyway - will fall back to direct WASM calls
   }
 
   const editor = createEditor(editorContainer);

@@ -1,0 +1,12 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%">
+<stop offset="0%" stop-color="#3B82F6"/>
+<stop offset="100%" stop-color="#10B981"/>
+</linearGradient>
+</defs>
+<rect width="512" height="512" rx="120" fill="#F0F9FF"/>
+<path d="M120 300C120 300 160 160 256 160C352 160 392 300 392 300" stroke="url(#g2)" stroke-width="48" stroke-linecap="round"/>
+<path d="M160 280C160 280 200 220 256 220C312 220 352 280 352 280" stroke="url(#g2)" stroke-width="32" stroke-linecap="round" stroke-opacity="0.6"/>
+<text x="50%" y="420" text-anchor="middle" fill="#0F172A" font-family="Verdana, sans-serif" font-weight="bold" font-size="64" letter-spacing="2">CADENCE</text>
+</svg>
