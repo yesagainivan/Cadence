@@ -1,4 +1,5 @@
 import { type Action, rationalToFloat, WasmInterpreter } from './cadence-wasm';
+import { midiOutput } from './midi-output';
 
 /** ADSR envelope parameters */
 export interface AdsrParams {
@@ -10,6 +11,9 @@ export interface AdsrParams {
 
 /** Waveform type for oscillators */
 export type WaveformType = 'sine' | 'square' | 'sawtooth' | 'triangle';
+
+/** Output mode: audio only, MIDI only, or both */
+export type OutputMode = 'audio' | 'midi' | 'both';
 
 /** Active oscillator for cleanup */
 interface ActiveOscillator {
@@ -35,6 +39,9 @@ export class CadenceAudioEngine {
     private currentBeat: number = 0;       // Current beat counter
     private lastBeatTime: number = 0;      // AudioContext time of last beat (for smooth interpolation)
     private schedulerRunning: boolean = false;  // Prevent overlapping scheduler calls
+
+    // Output mode: 'audio' (default), 'midi', or 'both'
+    private outputMode: OutputMode = 'audio';
 
     // Per-track volume (0-1 scale)
     private trackVolumes: Map<number, number> = new Map();
@@ -65,6 +72,8 @@ export class CadenceAudioEngine {
      */
     setTempo(bpm: number): void {
         this.tempo = Math.max(20, Math.min(300, bpm));
+        // Update MIDI clock tempo if running
+        midiOutput.setClockTempo(this.tempo);
         console.log(`🎵 Tempo: ${this.tempo} BPM`);
     }
 
@@ -73,6 +82,22 @@ export class CadenceAudioEngine {
      */
     setVolume(vol: number): void {
         this.volume = Math.max(0, Math.min(1, vol));
+    }
+
+    /**
+     * Set the output mode: 'audio' (internal synth only), 'midi' (MIDI only), or 'both'
+     * When mode is 'midi', the audio path is completely disabled for performance.
+     */
+    setOutputMode(mode: OutputMode): void {
+        this.outputMode = mode;
+        console.log(`🔊 Output mode: ${mode}`);
+    }
+
+    /**
+     * Get the current output mode
+     */
+    getOutputMode(): OutputMode {
+        return this.outputMode;
     }
 
     /**
@@ -381,6 +406,12 @@ export class CadenceAudioEngine {
         this.currentBeat = 0;
         this.lastBeatTime = ctx.currentTime;
 
+        // Start MIDI transport and clock (only if MIDI mode or both)
+        if (this.outputMode !== 'audio' && midiOutput.isEnabled()) {
+            midiOutput.sendStart();
+            midiOutput.startClock(this.tempo);
+        }
+
         // Create a new interpreter for this playback session
         this.interpreter = new WasmInterpreter();
 
@@ -535,13 +566,26 @@ export class CadenceAudioEngine {
                         const noteCount = event.frequencies.length;
                         const normalizedGain = trackVolume / Math.sqrt(noteCount);
 
-                        for (const freq of event.frequencies) {
-                            this.scheduleNote(freq, eventTime, durationSec, normalizedGain, actionWaveform, actionAdsr, actionPan);
+                        // Schedule Web Audio (if not MIDI-only mode)
+                        if (this.outputMode !== 'midi') {
+                            for (const freq of event.frequencies) {
+                                this.scheduleNote(freq, eventTime, durationSec, normalizedGain, actionWaveform, actionAdsr, actionPan);
+                            }
+                        }
+
+                        // Send MIDI output (if MIDI mode or both, and device selected)
+                        if (this.outputMode !== 'audio' && midiOutput.isEnabled() && event.notes && this.audioContext) {
+                            const delayMs = (eventTime - this.audioContext.currentTime) * 1000;
+                            const durationMs = durationSec * 1000;
+                            const velocity = Math.round(trackVolume * 127);
+                            for (const note of event.notes) {
+                                midiOutput.scheduleNote(note.midi, delayMs, durationMs, velocity);
+                            }
                         }
                     }
 
-                    // Play drum sounds
-                    if (event.drums && event.drums.length > 0) {
+                    // Play drum sounds (only if not MIDI-only mode)
+                    if (this.outputMode !== 'midi' && event.drums && event.drums.length > 0) {
                         for (const drumType of event.drums) {
                             this.scheduleDrum(drumType, eventTime, trackVolume, actionPan);
                         }
@@ -566,10 +610,23 @@ export class CadenceAudioEngine {
     }
 
     /**
+     * Get MIDI output service for external access
+     */
+    getMidiOutput() {
+        return midiOutput;
+    }
+
+    /**
      * Stop all playback
      */
     stop(): void {
         this.isPlaying = false;
+
+        // Stop MIDI transport and clock (only if MIDI mode or both)
+        if (this.outputMode !== 'audio' && midiOutput.isEnabled()) {
+            midiOutput.sendStop();
+            midiOutput.stopClock();
+        }
 
         // Clear scheduled loops
         for (const id of this.scheduledTimeouts) {

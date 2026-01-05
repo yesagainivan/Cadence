@@ -36,6 +36,16 @@
           <span id="tempo-value">120</span>
           <span class="tempo-label">BPM</span>
         </div>
+        <div class="output-mode-control">
+          <div class="output-mode-toggle" title="Output Mode">
+            <button id="mode-audio" class="mode-btn active" data-mode="audio">🔊</button>
+            <button id="mode-midi" class="mode-btn" data-mode="midi">🎹</button>
+            <button id="mode-both" class="mode-btn" data-mode="both">🔊🎹</button>
+          </div>
+          <select id="midi-output" class="midi-select hidden" title="MIDI Output Device">
+            <option value="">Select MIDI...</option>
+          </select>
+        </div>
         <button id="theme-toggle" class="btn btn-icon" title="Toggle theme">
           <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2">

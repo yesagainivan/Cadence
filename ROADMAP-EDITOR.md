@@ -105,6 +105,32 @@ A web-based editor for the Cadence music programming language with live syntax h
 
 ---
 
+## Phase 5: WebMIDI Output ✅ Complete
+
+### 5.1 MIDI Output Service ✅
+- [x] `midi-output.ts` — WebMIDI access & device management
+- [x] Note On/Off message scheduling (velocity from track volume)
+- [x] All Notes Off (CC 123) on stop
+
+### 5.2 MIDI Transport ✅
+- [x] MIDI Start (0xFA) on Play
+- [x] MIDI Stop (0xFC) on Stop
+- [x] MIDI Continue (0xFB) support
+
+### 5.3 MIDI Clock ✅
+- [x] 24 pulses per quarter note (0xF8)
+- [x] Tempo-synced clock interval
+- [x] Auto-restart clock on tempo change
+
+### 5.4 Output Mode Toggle ✅
+- [x] `OutputMode` type: `'audio'` | `'midi'` | `'both'`
+- [x] Mode buttons in toolbar (🔊/🎹/🔊🎹)
+- [x] Audio path completely skipped when mode is `'midi'` (performance)
+- [x] MIDI device selector shown only when MIDI active
+- [x] Auto-selects first MIDI device when switching to MIDI mode
+
+---
+
 ## Architecture
 
 ```

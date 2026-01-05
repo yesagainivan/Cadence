@@ -561,6 +561,68 @@ async function init(): Promise<void> {
   // Initialize status bar
   statusBar = new StatusBar();
 
+  // Initialize output mode toggle and MIDI device selector
+  const midiSelect = document.getElementById('midi-output') as HTMLSelectElement;
+  const modeButtons = document.querySelectorAll('.mode-btn');
+  const midiOutputService = audioEngine.getMidiOutput();
+
+  // Populate MIDI devices
+  midiOutputService.init().then((success) => {
+    if (success) {
+      const outputs = midiOutputService.getOutputs();
+      for (const output of outputs) {
+        const option = document.createElement('option');
+        option.value = output.id;
+        option.textContent = output.name ?? output.id;
+        midiSelect.appendChild(option);
+      }
+      if (outputs.length > 0) {
+        log(`🎹 Found ${outputs.length} MIDI output(s)`);
+      }
+    } else {
+      // Disable MIDI modes if not supported
+      document.getElementById('mode-midi')?.classList.add('disabled');
+      document.getElementById('mode-both')?.classList.add('disabled');
+    }
+  });
+
+  // Handle MIDI device selection
+  midiSelect.addEventListener('change', () => {
+    midiOutputService.selectOutput(midiSelect.value);
+    if (midiSelect.value) {
+      log(`🎹 MIDI: ${midiSelect.options[midiSelect.selectedIndex].text}`);
+    }
+  });
+
+  // Handle output mode toggle
+  modeButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const mode = (btn as HTMLElement).dataset.mode as 'audio' | 'midi' | 'both';
+
+      // Update engine mode
+      audioEngine.setOutputMode(mode);
+
+      // Update button states
+      modeButtons.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      // Show/hide MIDI device selector
+      if (mode === 'midi' || mode === 'both') {
+        midiSelect.classList.remove('hidden');
+        // Auto-select first device if none selected
+        if (!midiSelect.value && midiSelect.options.length > 1) {
+          midiSelect.value = midiSelect.options[1].value;
+          midiOutputService.selectOutput(midiSelect.value);
+          log(`🎹 MIDI: ${midiSelect.options[midiSelect.selectedIndex].text}`);
+        }
+      } else {
+        midiSelect.classList.add('hidden');
+      }
+
+      log(`🔊 Output: ${mode}`);
+    });
+  });
+
   // Subscribe to theme changes to update CodeMirror
   onThemeChange((theme) => {
     editor.dispatch({
