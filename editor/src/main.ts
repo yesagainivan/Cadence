@@ -19,13 +19,16 @@ import { initWasm, parseCode, isWasmReady, getEventsAtPosition, getContextAtCurs
 import { audioEngine } from './audio-engine';
 import { PianoRoll } from './piano-roll';
 import { PropertiesPanel } from './properties-panel';
-import { initTheme, getTheme, toggleTheme, onThemeChange, buildCMTheme } from './theme';
+import { initTheme, getTheme, onThemeChange, buildCMTheme } from './theme';
+import { Toolbar, StatusBar, setupResizablePanels } from './components';
 import { debouncedRefreshSymbols } from './hover';
 import { gotoDefinition, gotoDefinitionPlugin, initGotoDefinitionCursor } from './gotoDefinition';
 
 // Global instances
 let pianoRoll: PianoRoll | null = null;
 let propertiesPanel: PropertiesPanel | null = null;
+let toolbar: Toolbar | null = null;
+let statusBar: StatusBar | null = null;
 
 // CodeMirror theme compartment for dynamic theme switching
 const themeCompartment = new Compartment();
@@ -96,7 +99,7 @@ const cadenceLinter = linter((view) => {
   }
 
   return [];
-});
+}, { delay: 100 });  // Fast 100ms delay for responsive error feedback
 
 /**
  * Create the CodeMirror editor
@@ -215,24 +218,12 @@ function updatePianoRollAtCursor(view: EditorView): void {
 
   if (patternEvents && patternEvents.events && patternEvents.events.length > 0) {
     pianoRoll.update(patternEvents);
-
-    // Clear error status if valid events
-    const statusEl = document.getElementById('status');
-    if (statusEl && statusEl.textContent?.startsWith('Error:')) {
-      statusEl.innerHTML = '<span class="status-dot"></span>Valid';
-      const dot = statusEl.querySelector('.status-dot') as HTMLElement;
-      if (dot) dot.style.backgroundColor = '#7fb069';
-    }
+    // Status is managed by validateCode, no need to update here
 
   } else {
     // Check if there was an error in the pattern evaluation (e.g. arity error)
     if (patternEvents?.error) {
-      const statusEl = document.getElementById('status');
-      if (statusEl) {
-        statusEl.innerHTML = `<span class="status-dot"></span>Error: ${patternEvents.error}`;
-        const dot = statusEl.querySelector('.status-dot') as HTMLElement;
-        if (dot) dot.style.backgroundColor = '#c9736f';
-      }
+      statusBar?.setError(`Error: ${patternEvents.error}`);
     }
 
     // Clear piano roll if no events
@@ -292,39 +283,26 @@ function scheduleValidation(view: EditorView): void {
     if (result && result.success && audioEngine.playing) {
       audioEngine.updateScript(code);
     }
-  }, 200);
+  }, 100);  // 100ms debounce for responsive validation
 }
 
 /**
  * Validate code using WASM parser
  */
 function validateCode(view: EditorView): ReturnType<typeof parseCode> | null {
-  const statusEl = document.getElementById('status');
-
   if (!isWasmReady()) {
-    if (statusEl) statusEl.textContent = 'WASM loading...';
+    statusBar?.setStatus('WASM loading...', 'info');
     return null;
   }
 
   const code = view.state.doc.toString();
   const result = parseCode(code);
 
-  if (statusEl) {
-    // Update status dot color based on result
-    const statusDot = statusEl.querySelector('.status-dot') as HTMLElement | null;
-
-    if (result.success) {
-      statusEl.innerHTML = '<span class="status-dot"></span>Valid';
-      if (statusDot || statusEl.querySelector('.status-dot')) {
-        (statusEl.querySelector('.status-dot') as HTMLElement).style.backgroundColor = '#7fb069'; // --color-success
-      }
-    } else {
-      const msg = result.error ? result.error.message : 'Parse error';
-      statusEl.innerHTML = `<span class="status-dot"></span>${msg}`;
-      if (statusEl.querySelector('.status-dot')) {
-        (statusEl.querySelector('.status-dot') as HTMLElement).style.backgroundColor = '#c9736f'; // --color-error
-      }
-    }
+  if (result.success) {
+    statusBar?.setValid();
+  } else {
+    const msg = result.error ? result.error.message : 'Parse error';
+    statusBar?.setError(msg);
   }
 
   return result;
@@ -511,60 +489,84 @@ async function init(): Promise<void> {
   validateCode(editor);
   scheduleValidation(editor);
 
-  // Play button
-  const playBtn = document.getElementById('play-btn');
-  playBtn?.addEventListener('click', async () => {
-    const code = editor.state.doc.toString();
+  // Initialize resizable panels
+  const editorEl = document.getElementById('editor');
+  const pianoRollContainerEl = document.getElementById('piano-roll-container');
+  const editorContainerEl = document.querySelector('.editor-container') as HTMLElement;
+  const sidebarEl = document.getElementById('sidebar');
+  const mainEl = document.querySelector('.editor-main') as HTMLElement;
 
-    // Play script (direct, no imports in browser)
-    log('Playing...');
-    await audioEngine.playScript(code);
+  // Editor / Piano Roll vertical resize
+  // We want to resize piano-roll (the second panel, below editor)
+  if (editorEl && pianoRollContainerEl && editorContainerEl) {
+    setupResizablePanels({
+      container: editorContainerEl,
+      firstPanel: editorEl,
+      secondPanel: pianoRollContainerEl,
+      direction: 'horizontal',
+      storageKey: 'cadence_piano_roll_height',
+      minFirstSize: 150,
+      minSecondSize: 100,
+      defaultSize: 160,
+      resizeSecond: true,  // Resize the piano roll, not the editor
+    });
+  }
 
-    // Start playhead animation
-    if (pianoRoll) {
-      pianoRoll.startAnimation(() => {
-        const pos = audioEngine.getPlaybackPosition();
-        return pos.isPlaying ? pos.beat : null;
-      });
-    }
+  // Main / Sidebar horizontal resize  
+  // We want to resize sidebar (the second panel, on right)
+  if (editorContainerEl && sidebarEl && mainEl) {
+    setupResizablePanels({
+      container: mainEl,
+      firstPanel: editorContainerEl,
+      secondPanel: sidebarEl,
+      direction: 'vertical',
+      storageKey: 'cadence_sidebar_width',
+      minFirstSize: 300,
+      minSecondSize: 200,
+      defaultSize: 280,
+      resizeSecond: true,  // Resize the sidebar, not the main editor
+    });
+  }
+
+  // Initialize toolbar with callbacks
+  toolbar = new Toolbar();
+  toolbar.setCallbacks({
+    onPlay: async () => {
+      const code = editor.state.doc.toString();
+      log('Playing...');
+      await audioEngine.playScript(code);
+
+      // Start playhead animation
+      if (pianoRoll) {
+        pianoRoll.startAnimation(() => {
+          const pos = audioEngine.getPlaybackPosition();
+          return pos.isPlaying ? pos.beat : null;
+        });
+      }
+    },
+    onStop: () => {
+      audioEngine.stop();
+      log('Stopped');
+
+      // Stop playhead animation
+      if (pianoRoll) {
+        pianoRoll.stopAnimation();
+      }
+    },
+    onTempoChange: (bpm) => {
+      audioEngine.setTempo(bpm);
+    },
   });
 
-  // Stop button
-  const stopBtn = document.getElementById('stop-btn');
-  stopBtn?.addEventListener('click', () => {
-    audioEngine.stop();
-    log('Stopped');
-
-    // Stop playhead animation
-    if (pianoRoll) {
-      pianoRoll.stopAnimation();
-    }
-  });
-
-  // Tempo slider
-  const tempoSlider = document.getElementById('tempo') as HTMLInputElement;
-  const tempoValue = document.getElementById('tempo-value');
-  tempoSlider?.addEventListener('input', () => {
-    const bpm = parseInt(tempoSlider.value, 10);
-    if (tempoValue) {
-      tempoValue.textContent = tempoSlider.value;
-    }
-    audioEngine.setTempo(bpm);
-  });
-
-  // Theme toggle - use centralized theme system
-  const themeToggle = document.getElementById('theme-toggle');
-  themeToggle?.addEventListener('click', () => {
-    toggleTheme();
-    log(`Theme: ${getTheme().name}`);
-  });
+  // Initialize status bar
+  statusBar = new StatusBar();
 
   // Subscribe to theme changes to update CodeMirror
   onThemeChange((theme) => {
     editor.dispatch({
       effects: themeCompartment.reconfigure(buildCMTheme(theme))
     });
-    // Piano roll and ADSR will subscribe separately
+    log(`Theme: ${theme.name}`);
   });
 
   // Initial log

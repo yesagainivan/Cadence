@@ -174,11 +174,35 @@ body {
   background: transparent;
   color: var(--color-fg-muted);
   border: none;
+  border-radius: var(--radius-sm);
 }
 
 .btn-icon:hover {
   color: var(--color-fg);
   background: var(--color-bg-hover);
+}
+
+/* Play button accent */
+.btn-play {
+  color: var(--color-success);
+}
+
+.btn-play:hover {
+  color: #fff;
+  background: var(--color-success);
+}
+
+/* Theme toggle sun/moon icons */
+#theme-toggle .icon-moon {
+  display: none;
+}
+
+[data-theme="light"] #theme-toggle .icon-sun {
+  display: none;
+}
+
+[data-theme="light"] #theme-toggle .icon-moon {
+  display: block;
 }
 
 /* === TEMPO CONTROL === */
@@ -216,6 +240,44 @@ body {
   text-align: right;
 }
 
+.tempo-label {
+  color: var(--color-fg-subtle);
+  font-size: var(--font-size-xs);
+}
+
+/* === RESIZE HANDLES === */
+.resize-handle {
+  background: transparent;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+
+.resize-handle:hover {
+  background: var(--color-accent);
+}
+
+.resize-handle.active {
+  background: var(--color-accent);
+}
+
+/* Horizontal resize (row-resize cursor for vertical split) */
+.resize-handle-h {
+  height: 6px;
+  cursor: row-resize;
+  margin: -2px 0;
+  position: relative;
+  z-index: 10;
+}
+
+/* Vertical resize (col-resize cursor for horizontal split) */
+.resize-handle-v {
+  width: 6px;
+  cursor: col-resize;
+  margin: 0 -2px;
+  position: relative;
+  z-index: 10;
+}
+
 /* === MAIN LAYOUT === */
 .editor-main {
   flex: 1;
@@ -239,7 +301,9 @@ body {
 /* === PIANO ROLL === */
 #piano-roll-container {
   height: 160px;
+  /* Default, will be overridden by JS */
   min-height: 100px;
+  flex-shrink: 0;
   background: var(--color-bg-inset);
   border-top: 1px solid var(--color-border);
   position: relative;
@@ -374,6 +438,9 @@ body {
 /* === SIDEBAR === */
 #sidebar {
   width: var(--sidebar-width);
+  /* Default, will be overridden by JS */
+  min-width: 200px;
+  flex-shrink: 0;
   background: var(--color-bg-elevated);
   border-left: 1px solid var(--color-border);
   display: flex;
@@ -653,4 +720,74 @@ body {
 /* === GO-TO-DEFINITION === */
 .cm-goto-definition-active .cm-content {
   cursor: pointer;
+}
+
+/* === LINTING === */
+/* Error underline */
+.cm-lintRange-error {
+  background-image: none;
+  border-bottom: 2px wavy var(--color-error);
+}
+
+.cm-lintRange-warning {
+  background-image: none;
+  border-bottom: 2px wavy var(--color-warning);
+}
+
+/* Gutter error markers - override CodeMirror's default SVG */
+.cm-lint-marker {
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 50% !important;
+  display: inline-block !important;
+  content: "" !important;
+}
+
+.cm-lint-marker-error {
+  content: "" !important;
+  background: var(--color-error) !important;
+}
+
+.cm-lint-marker-warning {
+  content: "" !important;
+  background: var(--color-warning) !important;
+}
+
+/* Diagnostic tooltip */
+.cm-diagnosticText {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.cm-diagnostic-error {
+  border-left: 3px solid var(--color-error);
+  padding-left: var(--space-sm);
+}
+
+.cm-diagnostic-warning {
+  border-left: 3px solid var(--color-warning);
+  padding-left: var(--space-sm);
+}
+
+/* Lint tooltip panel */
+.cm-tooltip-lint {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.cm-panel.cm-panel-lint {
+  background: var(--color-bg-elevated);
+  border-top: 1px solid var(--color-border);
+}
+
+.cm-panel.cm-panel-lint ul {
+  padding: 0;
+  margin: 0;
+}
+
+.cm-panel.cm-panel-lint li {
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: 1px solid var(--color-border-subtle);
 }

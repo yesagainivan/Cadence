@@ -21,30 +21,33 @@
         <span class="logo-text">Cadence</span>
       </div>
       <div class="controls">
+        <button id="play-btn" class="btn btn-icon btn-play" title="Play (Cmd+Enter)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5,3 19,12 5,21" />
+          </svg>
+        </button>
+        <button id="stop-btn" class="btn btn-icon" title="Stop">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="4" y="4" width="16" height="16" rx="2" />
+          </svg>
+        </button>
+        <div class="tempo-control">
+          <input type="range" id="tempo" min="60" max="200" value="120" />
+          <span id="tempo-value">120</span>
+          <span class="tempo-label">BPM</span>
+        </div>
         <button id="theme-toggle" class="btn btn-icon" title="Toggle theme">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2">
             <circle cx="12" cy="12" r="5" />
             <path
               d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
           </svg>
-        </button>
-        <button id="play-btn" class="btn btn-primary">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <polygon points="5,3 19,12 5,21" />
+          <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" style="display: none;">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
           </svg>
-          Play
         </button>
-        <button id="stop-btn" class="btn btn-secondary">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="4" y="4" width="16" height="16" rx="2" />
-          </svg>
-          Stop
-        </button>
-        <label class="tempo-control">
-          <span>BPM</span>
-          <input type="range" id="tempo" min="60" max="200" value="120" />
-          <span id="tempo-value">120</span>
-        </label>
       </div>
     </header>
     <main class="editor-main">

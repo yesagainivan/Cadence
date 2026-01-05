@@ -323,5 +323,38 @@ export function buildCMTheme(theme: Theme): Extension {
         '.cm-activeLine': {
             backgroundColor: c.bgHover,
         },
+        // Syntax highlighting - dynamic colors for theme switching
+        '.cm-cadence-keyword': {
+            color: c.synKeyword,
+            fontWeight: '700',
+        },
+        '.cm-cadence-keyword-control': {
+            color: c.synKeywordControl,
+            fontWeight: '600',
+            fontStyle: 'italic',
+        },
+        '.cm-cadence-note': {
+            color: c.synNote,
+            fontWeight: '600',
+        },
+        '.cm-cadence-number': {
+            color: c.synNumber,
+        },
+        '.cm-cadence-string': {
+            color: c.synString,
+        },
+        '.cm-cadence-variable': {
+            color: c.synVariable,
+        },
+        '.cm-cadence-operator': {
+            color: c.synOperator,
+        },
+        '.cm-cadence-punctuation': {
+            color: c.synPunctuation,
+        },
+        '.cm-cadence-comment': {
+            color: c.synComment,
+            fontStyle: 'italic',
+        },
     }, { dark: isDark });
 }
