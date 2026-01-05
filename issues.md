@@ -115,37 +115,46 @@ But I noticed it only worked on
 
 //
 
-Okay, it now goes through, but doesnt behave as expected! We hear the chord sustain, things arent changing every beats, we do hear a G at a point. We expected to hear the created pattern slowed. but I realize this might be a issue in my logic..
+---
 
-Slowing down happens at the beat level:
+## `every()` Method Call Argument Order ✅ Fixed
+
+**Status**: Resolved via auto-detecting calling convention
+
+**Problem**: When calling `every()` as a method, the arguments were in the wrong order.
+```cadence
+"C D E".every(2, rev)  // Error: every() expects a number as first argument
 ```
-fn evolving() {
-  // return "[C,G,E4] D G D".at(beat()%4) // this works fine!
-  return "[C,G,E4] D G D".at((beat()/4)%4) // this also works! produces a "stuttered", slowed progression!
+
+**Root cause**:
+- Method call `pattern.every(n, transform)` desugars to `every(pattern, n, transform)`
+- But the function expected `every(n, transform, pattern)`
+
+**Fix Applied**:
+- Modified `every()` handler to detect calling convention based on first argument type
+- If first arg is Number → function style: `(n, transform, pattern)`
+- If first arg is Pattern/String → method style: `(pattern, n, transform)`
+
+**Impact**: Both syntaxes now work:
+- `"C D E".every(2, rev)` (method style)
+- `every(2, rev, "C D E")` (function style)
+
+---
+
+## `beat()` in Variable Assignments - Note
+
+**Status**: Previously documented behavior, now works correctly
+
+The pattern:
+```cadence
+let john = "[C,G,E4] D G D".at(beat()%4)
+play john loop
+```
+
+Now works as expected with lazy evaluation support. If issues persist, functions are the recommended workaround:
+```cadence
+fn dynamic_pattern() {
+  return "[C,G,E4] D G D".at(beat()%4)
 }
-```
-
-//
-
-```
-// "Csus".every(2, "Bbmaj Fmaj") // Error: Runtime error: every() expects a number as first argument
-```
-
-And I still think there is a strange behavior; it seems 
-```
-// play "[C,G,E4] D G D".at(beat()%4) loop // this works fine
-
-let john = "[C,G,E4] D G D".at(beat()%4) // we create a variable
-
-play john loop // this is now flawed
-```
-
-What is happening?
-
-//
-
-
-```
-run_statements_in_local_env
- to use thunks. However, for pure function evaluation within the evaluator, I'll keep it eagerly evaluated since local environments don't support SharedEnvironment. Let me run a quick build check:
+play dynamic_pattern() loop
 ```

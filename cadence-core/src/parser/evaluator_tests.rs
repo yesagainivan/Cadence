@@ -81,4 +81,34 @@ mod pattern_operator_tests {
             _ => panic!("Expected EveryPattern"),
         }
     }
+
+    #[test]
+    fn test_eval_every_method_style() {
+        use crate::parser::ast::Value;
+        use crate::parser::evaluator::Evaluator;
+
+        // Method style: "C D E".every(2, "rev") desugars to every("C D E", 2, "rev")
+        let expr = parse("\"C D E\".every(2, \"rev\")").unwrap();
+        let result = Evaluator::new().eval(expr).unwrap();
+
+        // Should work identically to function-call style
+        match result {
+            Value::EveryPattern(every) => {
+                // Test cycle 0: base pattern "C D E"
+                let p0 = every.get_pattern_for_cycle(0);
+                match &p0.steps[0] {
+                    crate::types::PatternStep::Note(n) => assert_eq!(n.pitch_class(), 0), // C
+                    _ => panic!("Expected Note C at cycle 0"),
+                }
+
+                // Test cycle 1: transformed pattern "E D C"
+                let p1 = every.get_pattern_for_cycle(1);
+                match &p1.steps[0] {
+                    crate::types::PatternStep::Note(n) => assert_eq!(n.pitch_class(), 4), // E
+                    _ => panic!("Expected Note E at cycle 1"),
+                }
+            }
+            _ => panic!("Expected EveryPattern"),
+        }
+    }
 }

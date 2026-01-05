@@ -678,16 +678,38 @@ impl FunctionRegistry {
                     ));
                 }
 
-                // 1. Parse the interval (every N cycles)
-                let n_val = evaluator.eval_with_env(args[0].clone(), env)?;
-                let n = match n_val {
-                    Value::Note(note) => note.pitch_class() as usize,
-                    Value::Number(num) => num.max(1) as usize,
-                    _ => return Err(anyhow!("every() expects a number as first argument")),
+                // Detect calling convention based on first argument type:
+                // - Function style: every(n, transform, pattern)
+                // - Method style:   every(pattern, n, transform) (desugared from pattern.every(n, transform))
+                let first_val = evaluator.eval_with_env(args[0].clone(), env)?;
+                
+                let (n, transform_arg_idx, pattern_val) = match first_val {
+                    // Function call style: every(n, transform, pattern)
+                    Value::Number(num) => {
+                        let n = num.max(1) as usize;
+                        let pattern_val = evaluator.eval_with_env(args[2].clone(), env)?;
+                        (n, 1usize, pattern_val)
+                    }
+                    Value::Note(note) => {
+                        let n = note.pitch_class() as usize;
+                        let pattern_val = evaluator.eval_with_env(args[2].clone(), env)?;
+                        (n, 1usize, pattern_val)
+                    }
+                    // Method call style: every(pattern, n, transform)
+                    Value::Pattern(_) | Value::String(_) => {
+                        let n_val = evaluator.eval_with_env(args[1].clone(), env)?;
+                        let n = match n_val {
+                            Value::Number(num) => num.max(1) as usize,
+                            Value::Note(note) => note.pitch_class() as usize,
+                            _ => return Err(anyhow!("every() expects interval as second argument when called as method")),
+                        };
+                        (n, 2usize, first_val)
+                    }
+                    _ => return Err(anyhow!("every() first argument must be a number (function style) or pattern (method style)")),
                 };
 
-                // 2. Extract the transform function name
-                let transform_name = match &args[1] {
+                // Extract the transform function name from the appropriate argument
+                let transform_name = match &args[transform_arg_idx] {
                     Expression::Variable(name) => name.clone(),
                     Expression::String(s) => s.clone(),
                     Expression::Pattern(p) => p.to_string(),
@@ -697,13 +719,12 @@ impl FunctionRegistry {
                     } if internal_args.is_empty() => name.clone(),
                     _ => {
                         return Err(anyhow!(
-                            "every() expects a function name as second argument"
+                            "every() expects a function name as transform argument"
                         ));
                     }
                 };
 
-                // 3. Evaluate the base pattern
-                let pattern_val = evaluator.eval_with_env(args[2].clone(), env)?;
+                // Parse the base pattern
                 let base_pattern = match pattern_val {
                     Value::Pattern(p) => p,
                     Value::String(s) => match crate::types::Pattern::parse(&s) {
@@ -725,7 +746,7 @@ impl FunctionRegistry {
                             }
                         },
                     },
-                    _ => return Err(anyhow!("every() expects a pattern as third argument")),
+                    _ => return Err(anyhow!("every() expects a pattern")),
                 };
 
                 // 4. Pre-compute the transformed pattern by calling the transform function
