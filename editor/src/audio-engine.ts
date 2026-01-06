@@ -465,6 +465,7 @@ export class CadenceAudioEngine {
                     for (const action of actions) {
                         this.handleAction(action, nextBeatTime);
                     }
+
                 } catch (e) {
                     console.warn('[AudioEngine] Tick error:', e);
                 }

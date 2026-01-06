@@ -2012,7 +2012,8 @@ impl WasmInterpreter {
             drop(env_read);
 
             // Convert to rich events (with full note identity)
-            let (events, envelope, waveform, pan) = match value {
+            // Also capture the exact beats_per_cycle to avoid floating-point accumulation errors
+            let (events, envelope, waveform, pan, beats_per_cycle) = match value {
                 Value::Pattern(ref pattern) => {
                     let evs = pattern
                         .to_rich_events_for_cycle(pattern_cycle as usize)
@@ -2033,7 +2034,8 @@ impl WasmInterpreter {
                     let env = pattern.envelope;
                     let wav = pattern.waveform.as_ref().map(|w| w.name().to_string());
                     let pan = pattern.pan;
-                    (evs, env, wav, pan)
+                    let bpc = pattern.beats_per_cycle_f32();
+                    (evs, env, wav, pan, bpc)
                 }
                 Value::Chord(chord) => {
                     let note_infos: Vec<NoteInfo> =
@@ -2050,6 +2052,7 @@ impl WasmInterpreter {
                         None,
                         None,
                         None,
+                        1.0, // Chords have 1-beat duration
                     )
                 }
                 Value::Note(note) => {
@@ -2066,6 +2069,7 @@ impl WasmInterpreter {
                         None,
                         None,
                         None,
+                        1.0, // Notes have 1-beat duration
                     )
                 }
                 Value::EveryPattern(ref every) => {
@@ -2090,13 +2094,14 @@ impl WasmInterpreter {
                     let env = pattern.envelope;
                     let wav = pattern.waveform.as_ref().map(|w| w.name().to_string());
                     let pan = pattern.pan;
-                    (evs, env, wav, pan)
+                    let bpc = pattern.beats_per_cycle_f32();
+                    (evs, env, wav, pan, bpc)
                 }
                 _ => continue,
             };
 
-            // Calculate total duration
-            let total_duration: f32 = events.iter().map(|e| e.duration.to_f32()).sum();
+            // Use the pattern's exact beats_per_cycle (avoids floating-point accumulation errors)
+            let total_duration = beats_per_cycle;
             let total_duration_int = total_duration.ceil() as i32;
 
             // Calculate local beat index
@@ -2126,7 +2131,10 @@ impl WasmInterpreter {
                 // This effectively "consumes" 1 beat of the pattern.
 
                 // Note: this assumes `tick` handles exactly 1 beat.
-                if current_time >= effective_beat && current_time < (effective_beat + 0.99) {
+                // Use small epsilon (0.001) for floating-point tolerance at boundaries
+                if current_time >= effective_beat - 0.001
+                    && current_time < effective_beat + 1.0 - 0.001
+                {
                     beat_events.push(event.clone());
                 }
                 current_time += event.duration.to_f32();

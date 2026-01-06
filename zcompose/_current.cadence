@@ -1,0 +1,46 @@
+// Welcome to Cadence!
+// A music programming language for live coding
+
+// Set the tempo
+tempo 120
+
+// Define a simple chord progression
+let cmaj = [C, E, G]
+let fmaj = [F, A, C]
+let Bbmaj = [Bb3, D, F]
+let gmaj = [G, B, D]
+let amin = [A, C, E]
+let dmin = [D, F, A]
+
+// Create a pattern
+let pattern = "C E G _ E G C _".wave("sine").env(1, 16, 0, 35)
+
+// Play a chord
+//let john = "<cmaj fmaj> D <G D>".at(beat()%4)
+// let john = "<cmaj fmaj> D <G D>"
+// let john = smooth("Bbmaj fmaj").slow(4)
+// let john = "<cmaj fmaj> <D A3> <[G, E4] [B3, D]>".fast(1)
+let john = "<cmaj Bbmaj> <D A3> <[G, E4] [A3, D]>".fast(1)
+//let john = "<[C, E, G] [C, D, G]> fmaj".every(2, rev)
+//let john = "<[C, E, G] [C, D, G]> fmaj"
+
+// let bip = "_ [_ C5 _]"
+let bip = "[C, G] [_ C5 _ _ _ _]"
+
+// let song = bip + john
+
+// on 1 play john loop
+on 2 play bip loop
+
+
+on 2 volume 23
+
+// Play with a pattern (uncomment to try)
+// play pattern loop
+
+// Try some transformations:
+// play cmaj + 2     // transpose up 2 semitones
+// play invert(cmaj) // first inversion
+
+//play "<C D E>" loop     // Alternates C → D → E each cycle
+//play "G <C5 D B> A" loop   // G, then alternating C/D, then A
