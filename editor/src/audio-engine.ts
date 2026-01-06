@@ -74,7 +74,7 @@ export class CadenceAudioEngine {
         this.tempo = Math.max(20, Math.min(300, bpm));
         // Update MIDI clock tempo if running
         midiOutput.setClockTempo(this.tempo);
-        console.log(`🎵 Tempo: ${this.tempo} BPM`);
+        // console.log(`🎵 Tempo: ${this.tempo} BPM`);
     }
 
     /**

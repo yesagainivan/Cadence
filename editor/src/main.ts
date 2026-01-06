@@ -426,7 +426,7 @@ async function init(): Promise<void> {
               insert: `.wave("${waveformValue}")`,
             },
           });
-          console.log(`✏️ Replaced waveform: ${match[0]} → .wave("${waveformValue}")`);
+          // console.log(`✏️ Replaced waveform: ${match[0]} → .wave("${waveformValue}")`);
         } else {
           // Insert .wave(...) at correct position (before loop/queue if present)
           const insertPos = findInsertionPoint();
@@ -437,7 +437,7 @@ async function init(): Promise<void> {
               insert: `.wave("${waveformValue}")`,
             },
           });
-          console.log(`✏️ Added waveform at pos ${insertPos}: .wave("${waveformValue}")`);
+          // console.log(`✏️ Added waveform at pos ${insertPos}: .wave("${waveformValue}")`);
         }
 
         editor.dispatch(transaction);
@@ -461,7 +461,7 @@ async function init(): Promise<void> {
               insert: `.env(${a}, ${d}, ${s}, ${r})`,
             },
           });
-          console.log(`✏️ Replaced envelope: ${match[0]} → .env(${a}, ${d}, ${s}, ${r})`);
+          // console.log(`✏️ Replaced envelope: ${match[0]} → .env(${a}, ${d}, ${s}, ${r})`);
         } else {
           // Insert .env(...) at correct position (before loop/queue if present)
           const insertPos = findInsertionPoint();
@@ -472,7 +472,7 @@ async function init(): Promise<void> {
               insert: `.env(${a}, ${d}, ${s}, ${r})`,
             },
           });
-          console.log(`✏️ Added envelope at pos ${insertPos}: .env(${a}, ${d}, ${s}, ${r})`);
+          // console.log(`✏️ Added envelope at pos ${insertPos}: .env(${a}, ${d}, ${s}, ${r})`);
         }
 
         editor.dispatch(transaction);
