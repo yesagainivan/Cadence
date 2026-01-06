@@ -361,6 +361,12 @@ impl Evaluator {
                                         steps.clone(),
                                     )))
                                 }
+                                PatternStep::Euclidean(inner, pulses, steps) => {
+                                    // Return as pattern containing the euclidean step
+                                    Ok(Value::Pattern(crate::types::Pattern::with_steps(vec![
+                                        PatternStep::Euclidean(inner.clone(), *pulses, *steps),
+                                    ])))
+                                }
                             }
                         }
                         step_to_value(&pattern.steps[actual_idx as usize])

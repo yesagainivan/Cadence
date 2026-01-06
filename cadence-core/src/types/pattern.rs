@@ -99,6 +99,8 @@ pub enum PatternStep {
     Weighted(Box<PatternStep>, usize),
     /// Cycle-based alternation: <C D E> plays one element per cycle
     Alternation(Vec<PatternStep>),
+    /// Euclidean rhythm: C(3,8) distributes 3 pulses evenly across 8 slots
+    Euclidean(Box<PatternStep>, usize, usize), // (inner, pulses, steps)
 }
 
 impl PatternStep {
@@ -140,6 +142,21 @@ impl PatternStep {
                 .first()
                 .map(|s| s.to_frequencies())
                 .unwrap_or_default(),
+            // Euclidean: expand using Bjorklund algorithm
+            PatternStep::Euclidean(inner, pulses, steps) => {
+                let rhythm = bjorklund(*pulses, *steps);
+                let inner_freq = inner.to_frequencies();
+                rhythm
+                    .into_iter()
+                    .map(|is_pulse| {
+                        if is_pulse {
+                            inner_freq.first().cloned().unwrap_or((vec![], true))
+                        } else {
+                            (vec![], true) // rest
+                        }
+                    })
+                    .collect()
+            }
         }
     }
 
@@ -183,6 +200,21 @@ impl PatternStep {
             PatternStep::Alternation(steps) => {
                 steps.first().map(|s| s.to_note_infos()).unwrap_or_default()
             }
+            // Euclidean: expand using Bjorklund algorithm
+            PatternStep::Euclidean(inner, pulses, steps) => {
+                let rhythm = bjorklund(*pulses, *steps);
+                let inner_info = inner.to_note_infos();
+                rhythm
+                    .into_iter()
+                    .map(|is_pulse| {
+                        if is_pulse {
+                            inner_info.first().cloned().unwrap_or((vec![], true))
+                        } else {
+                            (vec![], true) // rest
+                        }
+                    })
+                    .collect()
+            }
         }
     }
 
@@ -213,6 +245,24 @@ impl PatternStep {
             // Alternation returns first step for static contexts
             PatternStep::Alternation(steps) => {
                 steps.first().map(|s| s.to_step_info()).unwrap_or_default()
+            }
+            // Euclidean: expand using Bjorklund algorithm
+            PatternStep::Euclidean(inner, pulses, steps) => {
+                let rhythm = bjorklund(*pulses, *steps);
+                let inner_info = inner.to_step_info();
+                rhythm
+                    .into_iter()
+                    .map(|is_pulse| {
+                        if is_pulse {
+                            inner_info
+                                .first()
+                                .cloned()
+                                .unwrap_or((vec![], vec![], true))
+                        } else {
+                            (vec![], vec![], true) // rest
+                        }
+                    })
+                    .collect()
             }
         }
     }
@@ -255,6 +305,24 @@ impl PatternStep {
                 let idx = cycle % steps.len();
                 steps[idx].to_step_info_for_cycle(cycle)
             }
+            // Euclidean: expand using Bjorklund algorithm
+            PatternStep::Euclidean(inner, pulses, steps) => {
+                let rhythm = bjorklund(*pulses, *steps);
+                let inner_info = inner.to_step_info_for_cycle(cycle);
+                rhythm
+                    .into_iter()
+                    .map(|is_pulse| {
+                        if is_pulse {
+                            inner_info
+                                .first()
+                                .cloned()
+                                .unwrap_or((vec![], vec![], true))
+                        } else {
+                            (vec![], vec![], true) // rest
+                        }
+                    })
+                    .collect()
+            }
         }
     }
 
@@ -277,6 +345,9 @@ impl PatternStep {
             }
             PatternStep::Alternation(steps) => {
                 PatternStep::Alternation(steps.iter().map(|s| s.transpose(semitones)).collect())
+            }
+            PatternStep::Euclidean(inner, pulses, steps) => {
+                PatternStep::Euclidean(Box::new(inner.transpose(semitones)), *pulses, *steps)
             }
         }
     }
@@ -311,6 +382,9 @@ impl fmt::Display for PatternStep {
                     write!(f, "{}", s)?;
                 }
                 write!(f, ">")
+            }
+            PatternStep::Euclidean(inner, pulses, steps) => {
+                write!(f, "{}({},{})", inner, pulses, steps)
             }
         }
     }
@@ -969,6 +1043,7 @@ impl Pattern {
                         collect_notes(s, notes);
                     }
                 }
+                PatternStep::Euclidean(inner, _, _) => collect_notes(inner, notes),
             }
         }
 
@@ -1240,6 +1315,7 @@ fn has_non_variable_content(step: &PatternStep) -> bool {
         PatternStep::Repeat(inner, _) => has_non_variable_content(inner),
         PatternStep::Weighted(inner, _) => has_non_variable_content(inner),
         PatternStep::Alternation(steps) => steps.iter().any(has_non_variable_content),
+        PatternStep::Euclidean(inner, _, _) => has_non_variable_content(inner),
         PatternStep::Variable(_) => false,
     }
 }
@@ -1471,13 +1547,79 @@ fn take_identifier(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
     ident
 }
 
-/// Parse optional @N weight and *N repetition suffixes
-/// Weight is parsed first, then repeat (e.g., C@2*3 means weighted C repeated 3 times)
+/// Generate a Euclidean rhythm pattern using Bjorklund's algorithm.
+/// Distributes `pulses` evenly across `steps` slots.
+/// Returns a Vec<bool> where `true` = pulse, `false` = rest.
+fn bjorklund(pulses: usize, steps: usize) -> Vec<bool> {
+    if steps == 0 {
+        return vec![];
+    }
+    if pulses >= steps {
+        return vec![true; steps];
+    }
+    if pulses == 0 {
+        return vec![false; steps];
+    }
+
+    // Standard Bjorklund algorithm using Euclidean division
+    let mut pattern: Vec<Vec<bool>> = Vec::new();
+    let mut remainder: Vec<Vec<bool>> = Vec::new();
+
+    for _ in 0..pulses {
+        pattern.push(vec![true]);
+    }
+    for _ in 0..(steps - pulses) {
+        remainder.push(vec![false]);
+    }
+
+    while remainder.len() > 1 {
+        let mut new_pattern = Vec::new();
+        let min_len = pattern.len().min(remainder.len());
+
+        for i in 0..min_len {
+            let mut combined = pattern[i].clone();
+            combined.extend(remainder[i].clone());
+            new_pattern.push(combined);
+        }
+
+        let leftover_pattern: Vec<_> = pattern.into_iter().skip(min_len).collect();
+        let leftover_remainder: Vec<_> = remainder.into_iter().skip(min_len).collect();
+
+        pattern = new_pattern;
+        remainder = if leftover_pattern.is_empty() {
+            leftover_remainder
+        } else {
+            leftover_pattern
+        };
+    }
+
+    // Combine remaining pattern and remainder
+    let mut result: Vec<bool> = Vec::new();
+    for seq in pattern {
+        result.extend(seq);
+    }
+    for seq in remainder {
+        result.extend(seq);
+    }
+    result
+}
+
+/// Parse optional (n,k) Euclidean, @N weight, and *N repetition suffixes
+/// Order: Euclidean first, then weight, then repeat (e.g., C(3,8)@2*3)
 fn maybe_parse_weight_and_repeat(
     chars: &mut std::iter::Peekable<std::str::Chars>,
     step: PatternStep,
 ) -> Result<PatternStep> {
-    // Check for @N weight first
+    // Check for (n,k) Euclidean pattern first
+    let step = if chars.peek() == Some(&'(') {
+        chars.next(); // consume '('
+        let (pulses, steps) = parse_euclidean_params(chars)?;
+        PatternStep::Euclidean(Box::new(step), pulses, steps)
+    } else {
+        step
+    };
+
+    // Check for @N weight
     let step = if chars.peek() == Some(&'@') {
         chars.next(); // consume '@'
         let mut weight_str = String::new();
@@ -1519,6 +1661,58 @@ fn maybe_parse_weight_and_repeat(
     } else {
         Ok(step)
     }
+}
+
+/// Parse the (pulses,steps) parameters for Euclidean rhythms
+fn parse_euclidean_params(
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+) -> Result<(usize, usize)> {
+    // Parse first number (pulses)
+    let mut pulses_str = String::new();
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() {
+            pulses_str.push(chars.next().unwrap());
+        } else {
+            break;
+        }
+    }
+
+    if pulses_str.is_empty() {
+        return Err(anyhow!("Expected number for Euclidean pulses"));
+    }
+
+    // Expect comma
+    if chars.next() != Some(',') {
+        return Err(anyhow!("Expected ',' in Euclidean pattern (n,k)"));
+    }
+
+    // Parse second number (steps)
+    let mut steps_str = String::new();
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() {
+            steps_str.push(chars.next().unwrap());
+        } else {
+            break;
+        }
+    }
+
+    if steps_str.is_empty() {
+        return Err(anyhow!("Expected number for Euclidean steps"));
+    }
+
+    // Expect closing paren
+    if chars.next() != Some(')') {
+        return Err(anyhow!("Expected ')' to close Euclidean pattern"));
+    }
+
+    let pulses: usize = pulses_str.parse()?;
+    let steps: usize = steps_str.parse()?;
+
+    if steps == 0 {
+        return Err(anyhow!("Euclidean steps must be > 0"));
+    }
+
+    Ok((pulses, steps))
 }
 
 // ============================================================================
@@ -2296,5 +2490,177 @@ mod tests {
         let result = Pattern::parse("C@0 D");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("@0"));
+    }
+
+    // ============================================================================
+    // Euclidean Rhythm Tests
+    // ============================================================================
+
+    #[test]
+    fn test_bjorklund_classic_patterns() {
+        // E(3,8) - Cuban tresillo: 3 pulses evenly distributed across 8 slots
+        let e38 = bjorklund(3, 8);
+        assert_eq!(e38.len(), 8);
+        assert_eq!(e38.iter().filter(|&&x| x).count(), 3);
+
+        // E(5,8) - Cuban cinquillo: 5 pulses across 8 slots
+        let e58 = bjorklund(5, 8);
+        assert_eq!(e58.len(), 8);
+        assert_eq!(e58.iter().filter(|&&x| x).count(), 5);
+
+        // E(3,4) - 3 pulses across 4 slots
+        let e34 = bjorklund(3, 4);
+        assert_eq!(e34.len(), 4);
+        assert_eq!(e34.iter().filter(|&&x| x).count(), 3);
+
+        // E(1,4) - 1 pulse across 4 slots
+        let e14 = bjorklund(1, 4);
+        assert_eq!(e14.len(), 4);
+        assert_eq!(e14.iter().filter(|&&x| x).count(), 1);
+    }
+
+    #[test]
+    fn test_bjorklund_edge_cases() {
+        // E(0,4) - all rests
+        assert_eq!(bjorklund(0, 4), vec![false, false, false, false]);
+
+        // E(4,4) - all pulses
+        assert_eq!(bjorklund(4, 4), vec![true, true, true, true]);
+
+        // E(5,4) - more pulses than steps, cap to all true
+        assert_eq!(bjorklund(5, 4), vec![true, true, true, true]);
+
+        // E(0,0) - empty
+        assert_eq!(bjorklund(0, 0), Vec::<bool>::new());
+    }
+
+    #[test]
+    fn test_euclidean_parse_simple() {
+        let p = Pattern::parse("C(3,8)").unwrap();
+        assert_eq!(p.steps.len(), 1);
+        match &p.steps[0] {
+            PatternStep::Euclidean(inner, pulses, steps) => {
+                assert_eq!(*pulses, 3);
+                assert_eq!(*steps, 8);
+                assert!(matches!(inner.as_ref(), PatternStep::Note(_)));
+            }
+            _ => panic!("Expected Euclidean step"),
+        }
+    }
+
+    #[test]
+    fn test_euclidean_parse_with_weight() {
+        let p = Pattern::parse("C(3,8)@2").unwrap();
+        assert_eq!(p.steps.len(), 1);
+        match &p.steps[0] {
+            PatternStep::Weighted(inner_weighted, weight) => {
+                assert_eq!(*weight, 2);
+                match inner_weighted.as_ref() {
+                    PatternStep::Euclidean(_, pulses, steps) => {
+                        assert_eq!(*pulses, 3);
+                        assert_eq!(*steps, 8);
+                    }
+                    _ => panic!("Expected Euclidean inside Weighted"),
+                }
+            }
+            _ => panic!("Expected Weighted step"),
+        }
+    }
+
+    #[test]
+    fn test_euclidean_parse_with_repeat() {
+        let p = Pattern::parse("C(3,8)*2").unwrap();
+        assert_eq!(p.steps.len(), 1);
+        match &p.steps[0] {
+            PatternStep::Repeat(inner, count) => {
+                assert_eq!(*count, 2);
+                assert!(matches!(inner.as_ref(), PatternStep::Euclidean(_, 3, 8)));
+            }
+            _ => panic!("Expected Repeat step"),
+        }
+    }
+
+    #[test]
+    fn test_euclidean_display() {
+        let p = Pattern::parse("C(3,8) D").unwrap();
+        let display = format!("{}", p);
+        // Display format shows base note with Euclidean suffix
+        assert!(
+            display.contains("(3,8)"),
+            "Display should show (3,8): got {}",
+            display
+        );
+    }
+
+    #[test]
+    fn test_euclidean_transpose() {
+        let p = Pattern::parse("C(3,8)").unwrap();
+        let transposed = p.transpose(2);
+
+        match &transposed.steps[0] {
+            PatternStep::Euclidean(inner, pulses, steps) => {
+                assert_eq!(*pulses, 3);
+                assert_eq!(*steps, 8);
+                match inner.as_ref() {
+                    PatternStep::Note(n) => assert_eq!(n.pitch_class(), 2), // D
+                    _ => panic!("Expected Note inside Euclidean"),
+                }
+            }
+            _ => panic!("Expected Euclidean step"),
+        }
+    }
+
+    #[test]
+    fn test_euclidean_to_step_info_expansion() {
+        let p = Pattern::parse("C(3,8)").unwrap();
+
+        // Get the step info for the Euclidean pattern
+        let step = &p.steps[0];
+        let events = step.to_step_info_for_cycle(0);
+
+        // Should expand to 8 events: 3 notes and 5 rests
+        assert_eq!(events.len(), 8, "Euclidean(3,8) should expand to 8 steps");
+
+        let pulses: usize = events
+            .iter()
+            .filter(|(notes, _, is_rest)| !is_rest && !notes.is_empty())
+            .count();
+        let rests: usize = events
+            .iter()
+            .filter(|(notes, _, is_rest)| *is_rest || notes.is_empty())
+            .count();
+
+        assert_eq!(pulses, 3, "Should have 3 pulses");
+        assert_eq!(rests, 5, "Should have 5 rests");
+    }
+
+    #[test]
+    fn test_euclidean_invalid_syntax() {
+        // Missing closing paren
+        assert!(Pattern::parse("C(3,8").is_err());
+
+        // Missing comma
+        assert!(Pattern::parse("C(38)").is_err());
+
+        // Missing numbers
+        assert!(Pattern::parse("C(,8)").is_err());
+        assert!(Pattern::parse("C(3,)").is_err());
+
+        // Zero steps
+        assert!(Pattern::parse("C(3,0)").is_err());
+    }
+
+    #[test]
+    fn test_euclidean_drum() {
+        let p = Pattern::parse("kick(3,8)").unwrap();
+        assert_eq!(p.steps.len(), 1);
+        match &p.steps[0] {
+            PatternStep::Euclidean(inner, pulses, steps) => {
+                assert_eq!(*pulses, 3);
+                assert_eq!(*steps, 8);
+                assert!(matches!(inner.as_ref(), PatternStep::Drum(_)));
+            }
+            _ => panic!("Expected Euclidean step with drum"),
+        }
     }
 }

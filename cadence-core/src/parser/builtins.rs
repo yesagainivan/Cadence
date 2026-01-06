@@ -296,6 +296,13 @@ impl FunctionRegistry {
                                 PatternStep::Alternation(steps) => Ok(Value::Pattern(
                                     crate::types::Pattern::with_steps(steps.clone()),
                                 )),
+                                PatternStep::Euclidean(inner, pulses, steps) => Ok(Value::Pattern(
+                                    crate::types::Pattern::with_steps(vec![PatternStep::Euclidean(
+                                        inner.clone(),
+                                        *pulses,
+                                        *steps,
+                                    )]),
+                                )),
                             }
                         }
                         step_to_value(&pattern.steps[actual_idx as usize])
