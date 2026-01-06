@@ -2012,7 +2012,7 @@ impl WasmInterpreter {
             drop(env_read);
 
             // Convert to rich events (with full note identity)
-            // Also capture the exact beats_per_cycle to avoid floating-point accumulation errors
+            // Also capture the exact beats_per_cycle to avoid floating-point accumulation errors (e.g., 6 * 0.333... = 3.999... | Sneaky bug)
             let (events, envelope, waveform, pan, beats_per_cycle) = match value {
                 Value::Pattern(ref pattern) => {
                     let evs = pattern
