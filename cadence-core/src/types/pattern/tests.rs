@@ -948,3 +948,227 @@ fn test_euclidean_drum() {
         _ => panic!("Expected Euclidean step with drum"),
     }
 }
+
+// ========================================================================
+// Stack Tests
+// ========================================================================
+
+#[test]
+fn test_stack_two_patterns() {
+    let p1 = Pattern::parse("C D").unwrap();
+    let p2 = Pattern::parse("E F").unwrap();
+    let stacked = Pattern::stack(vec![p1, p2]);
+
+    // Should have 2 steps, each a chord
+    assert_eq!(stacked.steps.len(), 2);
+
+    // First step: C+E chord
+    match &stacked.steps[0] {
+        PatternStep::Chord(c) => {
+            assert_eq!(c.len(), 2);
+            let notes: Vec<u8> = c.notes_vec().iter().map(|n| n.pitch_class()).collect();
+            assert!(notes.contains(&0)); // C
+            assert!(notes.contains(&4)); // E
+        }
+        _ => panic!("Expected Chord for first step"),
+    }
+
+    // Second step: D+F chord
+    match &stacked.steps[1] {
+        PatternStep::Chord(c) => {
+            assert_eq!(c.len(), 2);
+            let notes: Vec<u8> = c.notes_vec().iter().map(|n| n.pitch_class()).collect();
+            assert!(notes.contains(&2)); // D
+            assert!(notes.contains(&5)); // F
+        }
+        _ => panic!("Expected Chord for second step"),
+    }
+}
+
+#[test]
+fn test_stack_different_lengths() {
+    let p1 = Pattern::parse("C D E").unwrap(); // 3 steps
+    let p2 = Pattern::parse("F G").unwrap(); // 2 steps
+    let stacked = Pattern::stack(vec![p1, p2]);
+
+    // Should have 3 steps (max length), p2 cycles
+    assert_eq!(stacked.steps.len(), 3);
+
+    // Third step: E+F (F cycles from position 0 of p2)
+    match &stacked.steps[2] {
+        PatternStep::Chord(c) => {
+            let notes: Vec<u8> = c.notes_vec().iter().map(|n| n.pitch_class()).collect();
+            assert!(notes.contains(&4)); // E
+            assert!(notes.contains(&5)); // F (cycled)
+        }
+        _ => panic!("Expected Chord for third step"),
+    }
+}
+
+#[test]
+fn test_stack_with_rests() {
+    let p1 = Pattern::parse("C _").unwrap();
+    let p2 = Pattern::parse("E F").unwrap();
+    let stacked = Pattern::stack(vec![p1, p2]);
+
+    // First step: C+E
+    match &stacked.steps[0] {
+        PatternStep::Chord(c) => assert_eq!(c.len(), 2),
+        _ => panic!("Expected Chord"),
+    }
+
+    // Second step: just F (p1 has rest)
+    match &stacked.steps[1] {
+        PatternStep::Note(n) => assert_eq!(n.pitch_class(), 5), // F
+        _ => panic!("Expected single Note F"),
+    }
+}
+
+// ========================================================================
+// Polyrhythm Tests
+// ========================================================================
+
+#[test]
+fn test_parse_polyrhythm_simple() {
+    let p = Pattern::parse("{C D, E F}").unwrap();
+    assert_eq!(p.steps.len(), 1);
+    match &p.steps[0] {
+        PatternStep::Polyrhythm(subs) => {
+            assert_eq!(subs.len(), 2);
+            assert_eq!(subs[0].len(), 2); // C D
+            assert_eq!(subs[1].len(), 2); // E F
+        }
+        _ => panic!("Expected Polyrhythm"),
+    }
+}
+
+#[test]
+fn test_parse_polyrhythm_three_tracks() {
+    let p = Pattern::parse("{C, D, E}").unwrap();
+    match &p.steps[0] {
+        PatternStep::Polyrhythm(subs) => {
+            assert_eq!(subs.len(), 3);
+        }
+        _ => panic!("Expected Polyrhythm"),
+    }
+}
+
+#[test]
+fn test_parse_polyrhythm_different_lengths() {
+    let p = Pattern::parse("{C D E, F G}").unwrap();
+    match &p.steps[0] {
+        PatternStep::Polyrhythm(subs) => {
+            assert_eq!(subs[0].len(), 3); // 3 notes
+            assert_eq!(subs[1].len(), 2); // 2 notes
+        }
+        _ => panic!("Expected Polyrhythm"),
+    }
+}
+
+#[test]
+fn test_polyrhythm_display() {
+    let p = Pattern::parse("{C D, E F}").unwrap();
+    let display = format!("{}", p);
+    assert!(display.contains("{"));
+    assert!(display.contains("}"));
+}
+
+#[test]
+fn test_polyrhythm_event_timing() {
+    // {C E, F G} should produce 4 distinct events:
+    // Sub 1 (2 notes): C at 0, E at 1/2 of cycle
+    // Sub 2 (2 notes): F at 0, G at 1/2 of cycle
+    let p = Pattern::parse("{C E, F G}").unwrap();
+    let events = p.to_rich_events();
+
+    // Print for debugging
+    for (i, e) in events.iter().enumerate() {
+        let note_names: Vec<_> = e.notes.iter().map(|n| n.name.as_str()).collect();
+        eprintln!(
+            "Event {}: start={:?}, notes={:?}, is_rest={}",
+            i, e.start_beat, note_names, e.is_rest
+        );
+    }
+
+    // Should have 2 merged events (concurrent notes combined at same start_beat)
+    assert_eq!(
+        events.len(),
+        2,
+        "Should have 2 merged events from polyrhythm"
+    );
+
+    // Check we have all 4 notes across the 2 events
+    let all_notes: Vec<String> = events
+        .iter()
+        .flat_map(|e| e.notes.iter().map(|n| n.name.clone()))
+        .collect();
+    assert!(
+        all_notes.contains(&"C4".to_string()),
+        "Should have C, got {:?}",
+        all_notes
+    );
+    assert!(
+        all_notes.contains(&"E4".to_string()),
+        "Should have E, got {:?}",
+        all_notes
+    );
+    assert!(
+        all_notes.contains(&"F4".to_string()),
+        "Should have F, got {:?}",
+        all_notes
+    );
+    assert!(
+        all_notes.contains(&"G4".to_string()),
+        "Should have G, got {:?}",
+        all_notes
+    );
+
+    // First event should have C and F (both at beat 0)
+    assert_eq!(
+        events[0].notes.len(),
+        2,
+        "First merged event should have 2 notes"
+    );
+    // Second event should have E and G (both at beat 2)
+    assert_eq!(
+        events[1].notes.len(),
+        2,
+        "Second merged event should have 2 notes"
+    );
+}
+
+#[test]
+fn test_polyrhythm_3_over_2() {
+    // {C D E, F G} - 3 over 2 polyrhythm
+    // Sub 1 (3 notes): C at 0, D at 4/3, E at 8/3
+    // Sub 2 (2 notes): F at 0, G at 2
+    let p = Pattern::parse("{C D E, F G}").unwrap();
+    let events = p.to_rich_events();
+
+    // Print events for debugging
+    for (i, e) in events.iter().enumerate() {
+        let notes: Vec<_> = e.notes.iter().map(|n| n.name.as_str()).collect();
+        eprintln!(
+            "Event {}: start={:?} (≈{:.2}), notes={:?}",
+            i,
+            e.start_beat,
+            (*e.start_beat.numer() as f64) / (*e.start_beat.denom() as f64),
+            notes
+        );
+    }
+
+    // All 5 notes should appear
+    let all_notes: Vec<String> = events
+        .iter()
+        .flat_map(|e| e.notes.iter().map(|n| n.name.clone()))
+        .collect();
+    assert!(all_notes.contains(&"C4".to_string()), "Missing C");
+    assert!(all_notes.contains(&"D4".to_string()), "Missing D");
+    assert!(
+        all_notes.contains(&"E4".to_string()),
+        "Missing E, got {:?}",
+        all_notes
+    );
+    assert!(all_notes.contains(&"F4".to_string()), "Missing F");
+    assert!(all_notes.contains(&"G4".to_string()), "Missing G");
+}

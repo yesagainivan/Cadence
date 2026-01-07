@@ -1,0 +1,10 @@
+// Instead of building an array:
+let len = chords.len()   // (Assuming 'chords' is a Pattern)
+let result = ""          // Start with empty pattern
+for i in 0..len {
+    let item = at(chords, i)
+    // Transform item...
+    let part = fast(item, 1) // Wrap item in a 1-step pattern
+    // Concat creates a NEW pattern (since patterns are immutable)
+    result = concat(result, part)
+}

@@ -15,6 +15,9 @@ pub fn has_non_variable_content(step: &PatternStep) -> bool {
         PatternStep::Weighted(inner, _) => has_non_variable_content(inner),
         PatternStep::Alternation(steps) => steps.iter().any(has_non_variable_content),
         PatternStep::Euclidean(inner, _, _) => has_non_variable_content(inner),
+        PatternStep::Polyrhythm(sub_patterns) => sub_patterns
+            .iter()
+            .any(|sub| sub.iter().any(has_non_variable_content)),
         PatternStep::Variable(_) => false,
     }
 }
@@ -46,6 +49,29 @@ pub fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
                 let step = maybe_parse_weight_and_repeat(
                     &mut chars,
                     PatternStep::Alternation(inner_steps),
+                )?;
+                steps.push(step);
+            }
+            // Polyrhythm: {C D E, F G} plays multiple patterns simultaneously at their own tempos
+            '{' => {
+                chars.next(); // consume '{'
+                let poly_content = take_until_brace(&mut chars)?;
+                // Split by comma to get sub-patterns
+                let sub_pattern_strs: Vec<&str> = poly_content.split(',').collect();
+                if sub_pattern_strs.is_empty() {
+                    return Err(anyhow!("Polyrhythm {{}} cannot be empty"));
+                }
+                let mut sub_patterns: Vec<Vec<PatternStep>> = Vec::new();
+                for sub_str in sub_pattern_strs {
+                    let sub_steps = parse_steps(sub_str.trim())?;
+                    if sub_steps.is_empty() {
+                        return Err(anyhow!("Polyrhythm sub-pattern cannot be empty"));
+                    }
+                    sub_patterns.push(sub_steps);
+                }
+                let step = maybe_parse_weight_and_repeat(
+                    &mut chars,
+                    PatternStep::Polyrhythm(sub_patterns),
                 )?;
                 steps.push(step);
             }
@@ -178,6 +204,31 @@ fn take_until_bracket(chars: &mut std::iter::Peekable<std::str::Chars>) -> Resul
     }
 
     Err(anyhow!("Unclosed bracket in pattern"))
+}
+
+/// Take content until matching '}', handling nested braces
+fn take_until_brace(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<String> {
+    let mut content = String::new();
+    let mut depth = 1;
+
+    while let Some(c) = chars.next() {
+        match c {
+            '{' => {
+                depth += 1;
+                content.push(c);
+            }
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(content);
+                }
+                content.push(c);
+            }
+            _ => content.push(c),
+        }
+    }
+
+    Err(anyhow!("Unclosed brace in pattern"))
 }
 
 /// Take a note token OR a longer identifier (for variable names)

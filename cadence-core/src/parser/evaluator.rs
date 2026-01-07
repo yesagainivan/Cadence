@@ -367,6 +367,12 @@ impl Evaluator {
                                         PatternStep::Euclidean(inner.clone(), *pulses, *steps),
                                     ])))
                                 }
+                                PatternStep::Polyrhythm(sub_patterns) => {
+                                    // Return as pattern containing the polyrhythm step
+                                    Ok(Value::Pattern(crate::types::Pattern::with_steps(vec![
+                                        PatternStep::Polyrhythm(sub_patterns.clone()),
+                                    ])))
+                                }
                             }
                         }
                         step_to_value(&pattern.steps[actual_idx as usize])

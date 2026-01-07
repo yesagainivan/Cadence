@@ -11,6 +11,52 @@ use num_rational::Ratio;
 use std::fmt;
 use std::str::FromStr;
 
+/// Merge events that start at the same beat into combined events.
+/// This is essential for polyrhythm where multiple notes from different
+/// sub-patterns may trigger simultaneously.
+/// Also clips durations so events don't overlap the next event's start.
+fn merge_concurrent_events(events: Vec<PlaybackEvent>) -> Vec<PlaybackEvent> {
+    if events.is_empty() {
+        return events;
+    }
+
+    // Events should already be sorted by start_beat
+    let mut merged: Vec<PlaybackEvent> = Vec::new();
+
+    for event in events {
+        // Check if last event has the same start_beat
+        if let Some(last) = merged.last_mut() {
+            if last.start_beat == event.start_beat {
+                // Merge notes and drums into the existing event
+                last.notes.extend(event.notes);
+                last.drums.extend(event.drums);
+                // If either is not a rest, the merged event is not a rest
+                last.is_rest = last.is_rest && event.is_rest;
+                // Use shorter duration (for safety)
+                if event.duration < last.duration {
+                    last.duration = event.duration;
+                }
+                continue;
+            }
+        }
+        // Different start_beat, add as new event
+        merged.push(event);
+    }
+
+    // After merging, clip each event's duration so it doesn't extend past the next event's start
+    // This is critical for the dispatcher to correctly transition between events
+    for i in 0..merged.len().saturating_sub(1) {
+        let next_start = merged[i + 1].start_beat;
+        let current_end = merged[i].start_beat + merged[i].duration;
+        if current_end > next_start {
+            // Clip duration to end at next event's start
+            merged[i].duration = next_start - merged[i].start_beat;
+        }
+    }
+
+    merged
+}
+
 /// A cycle-based pattern
 ///
 /// All steps in a pattern fit into one cycle (default 4 beats).
@@ -132,27 +178,69 @@ impl Pattern {
             let step_weight = step.weight() as i64;
             let step_duration = unit_duration * step_weight;
 
-            let step_info_list = step.to_step_info();
-            let sub_count = step_info_list.len() as i64;
-            let event_duration = if sub_count > 0 {
-                step_duration / sub_count
-            } else {
-                step_duration
-            };
+            // Special handling for Polyrhythm - each sub-pattern plays at its own tempo
+            if let PatternStep::Polyrhythm(sub_patterns) = step {
+                // Generate events for each sub-pattern independently
+                // Each sub-pattern fits within step_duration but at its own rate
+                for sub_steps in sub_patterns {
+                    if sub_steps.is_empty() {
+                        continue;
+                    }
+                    // Each sub-pattern's notes are evenly distributed within step_duration
+                    let sub_event_duration = step_duration / sub_steps.len() as i64;
+                    let mut sub_current_beat = current_beat;
 
-            for (notes, drums, is_rest) in step_info_list {
-                events.push(PlaybackEvent {
-                    notes,
-                    drums,
-                    start_beat: current_beat,
-                    duration: event_duration,
-                    is_rest,
-                });
-                current_beat = current_beat + event_duration;
+                    for sub_step in sub_steps {
+                        let step_info_list = sub_step.to_step_info();
+                        let sub_count = step_info_list.len() as i64;
+                        let event_duration = if sub_count > 0 {
+                            sub_event_duration / sub_count
+                        } else {
+                            sub_event_duration
+                        };
+
+                        for (notes, drums, is_rest) in step_info_list {
+                            events.push(PlaybackEvent {
+                                notes,
+                                drums,
+                                start_beat: sub_current_beat,
+                                duration: event_duration,
+                                is_rest,
+                            });
+                            sub_current_beat = sub_current_beat + event_duration;
+                        }
+                    }
+                }
+                // Advance past the entire polyrhythm step
+                current_beat = current_beat + step_duration;
+            } else {
+                // Normal step handling
+                let step_info_list = step.to_step_info();
+                let sub_count = step_info_list.len() as i64;
+                let event_duration = if sub_count > 0 {
+                    step_duration / sub_count
+                } else {
+                    step_duration
+                };
+
+                for (notes, drums, is_rest) in step_info_list {
+                    events.push(PlaybackEvent {
+                        notes,
+                        drums,
+                        start_beat: current_beat,
+                        duration: event_duration,
+                        is_rest,
+                    });
+                    current_beat = current_beat + event_duration;
+                }
             }
         }
 
-        events
+        // Sort events by start_beat to interleave polyrhythm events properly
+        events.sort_by(|a, b| a.start_beat.cmp(&b.start_beat));
+
+        // Merge events at the same start_beat into combined events
+        merge_concurrent_events(events)
     }
 
     /// Get rich playback events with cycle-aware alternation selection.
@@ -176,28 +264,69 @@ impl Pattern {
             let step_weight = step.weight() as i64;
             let step_duration = unit_duration * step_weight;
 
-            // Use cycle-aware step info for alternation support
-            let step_info_list = step.to_step_info_for_cycle(cycle);
-            let sub_count = step_info_list.len() as i64;
-            let event_duration = if sub_count > 0 {
-                step_duration / sub_count
-            } else {
-                step_duration
-            };
+            // Special handling for Polyrhythm - each sub-pattern plays at its own tempo
+            if let PatternStep::Polyrhythm(sub_patterns) = step {
+                // Generate events for each sub-pattern independently
+                // Each sub-pattern fits within step_duration but at its own rate
+                for sub_steps in sub_patterns {
+                    if sub_steps.is_empty() {
+                        continue;
+                    }
+                    // Each sub-pattern's notes are evenly distributed within step_duration
+                    let sub_event_duration = step_duration / sub_steps.len() as i64;
+                    let mut sub_current_beat = current_beat;
 
-            for (notes, drums, is_rest) in step_info_list {
-                events.push(PlaybackEvent {
-                    notes,
-                    drums,
-                    start_beat: current_beat,
-                    duration: event_duration,
-                    is_rest,
-                });
-                current_beat = current_beat + event_duration;
+                    for sub_step in sub_steps {
+                        let step_info_list = sub_step.to_step_info_for_cycle(cycle);
+                        let sub_count = step_info_list.len() as i64;
+                        let event_duration = if sub_count > 0 {
+                            sub_event_duration / sub_count
+                        } else {
+                            sub_event_duration
+                        };
+
+                        for (notes, drums, is_rest) in step_info_list {
+                            events.push(PlaybackEvent {
+                                notes,
+                                drums,
+                                start_beat: sub_current_beat,
+                                duration: event_duration,
+                                is_rest,
+                            });
+                            sub_current_beat = sub_current_beat + event_duration;
+                        }
+                    }
+                }
+                // Advance past the entire polyrhythm step
+                current_beat = current_beat + step_duration;
+            } else {
+                // Normal step handling
+                let step_info_list = step.to_step_info_for_cycle(cycle);
+                let sub_count = step_info_list.len() as i64;
+                let event_duration = if sub_count > 0 {
+                    step_duration / sub_count
+                } else {
+                    step_duration
+                };
+
+                for (notes, drums, is_rest) in step_info_list {
+                    events.push(PlaybackEvent {
+                        notes,
+                        drums,
+                        start_beat: current_beat,
+                        duration: event_duration,
+                        is_rest,
+                    });
+                    current_beat = current_beat + event_duration;
+                }
             }
         }
 
-        events
+        // Sort events by start_beat to interleave polyrhythm events properly
+        events.sort_by(|a, b| a.start_beat.cmp(&b.start_beat));
+
+        // Merge events at the same start_beat into combined events
+        merge_concurrent_events(events)
     }
 
     /// Transform: speed up by factor (plays N times per cycle)
@@ -665,6 +794,13 @@ impl Pattern {
                     }
                 }
                 PatternStep::Euclidean(inner, _, _) => collect_notes(inner, notes),
+                PatternStep::Polyrhythm(sub_patterns) => {
+                    for sub in sub_patterns {
+                        for s in sub {
+                            collect_notes(s, notes);
+                        }
+                    }
+                }
             }
         }
 
@@ -757,6 +893,90 @@ impl Pattern {
         self.steps.extend(other.steps);
         self.beats_per_cycle += other.beats_per_cycle;
         self
+    }
+
+    /// Stack multiple patterns to play simultaneously at the same tempo.
+    /// Notes from corresponding steps are merged into chords.
+    /// If patterns have different lengths, shorter ones cycle.
+    ///
+    /// Example: stack(["C D", "E F"]) plays [C+E, D+F] as chords
+    pub fn stack(patterns: Vec<Pattern>) -> Self {
+        if patterns.is_empty() {
+            return Pattern::new();
+        }
+        if patterns.len() == 1 {
+            return patterns.into_iter().next().unwrap();
+        }
+
+        // Find the maximum number of steps across all patterns
+        let max_steps = patterns.iter().map(|p| p.steps.len()).max().unwrap_or(0);
+        if max_steps == 0 {
+            return Pattern::new();
+        }
+
+        // Merge steps from all patterns at each position
+        let mut merged_steps = Vec::with_capacity(max_steps);
+        for i in 0..max_steps {
+            let mut merged_notes: Vec<Note> = Vec::new();
+            let mut has_rest = true;
+
+            for pattern in &patterns {
+                if pattern.steps.is_empty() {
+                    continue;
+                }
+                // Cycle pattern if it's shorter
+                let step = &pattern.steps[i % pattern.steps.len()];
+
+                match step {
+                    PatternStep::Note(n) => {
+                        merged_notes.push(*n);
+                        has_rest = false;
+                    }
+                    PatternStep::Chord(c) => {
+                        merged_notes.extend(c.notes_vec());
+                        has_rest = false;
+                    }
+                    PatternStep::Rest => {
+                        // Rest doesn't add notes but doesn't prevent playing others
+                    }
+                    // For complex steps, flatten to notes
+                    other => {
+                        for (notes_info, _, is_rest) in other.to_step_info() {
+                            if !is_rest {
+                                has_rest = false;
+                                for note_info in notes_info {
+                                    if let Ok(note) = Note::new(note_info.midi) {
+                                        merged_notes.push(note);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if merged_notes.is_empty() && has_rest {
+                merged_steps.push(PatternStep::Rest);
+            } else if merged_notes.len() == 1 {
+                merged_steps.push(PatternStep::Note(merged_notes[0]));
+            } else {
+                merged_steps.push(PatternStep::Chord(Chord::from_notes(merged_notes)));
+            }
+        }
+
+        // Use the cycle length of the first pattern
+        let beats_per_cycle = patterns[0].beats_per_cycle;
+        let envelope = patterns[0].envelope;
+        let waveform = patterns[0].waveform.clone();
+        let pan = patterns[0].pan;
+
+        Pattern {
+            steps: merged_steps,
+            beats_per_cycle,
+            envelope,
+            waveform,
+            pan,
+        }
     }
 
     /// Parse from mini-notation string

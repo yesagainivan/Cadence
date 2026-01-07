@@ -303,6 +303,11 @@ impl FunctionRegistry {
                                         *steps,
                                     )]),
                                 )),
+                                PatternStep::Polyrhythm(sub_patterns) => Ok(Value::Pattern(
+                                    crate::types::Pattern::with_steps(vec![PatternStep::Polyrhythm(
+                                        sub_patterns.clone(),
+                                    )]),
+                                )),
                             }
                         }
                         step_to_value(&pattern.steps[actual_idx as usize])
@@ -592,55 +597,130 @@ impl FunctionRegistry {
 
         self.register(
             "len",
-            "Pattern",
-            "Returns the number of steps in a pattern.",
-            "len(pattern: Pattern) -> Number",
+            "Core",
+            "Returns the length of a pattern, chord, or array.",
+            "len(target: Pattern | Chord | Array) -> Number",
             Arc::new(|evaluator, args, env| {
                 if args.len() != 1 {
-                    return Err(anyhow!("len() expects 1 argument: pattern"));
+                    return Err(anyhow!("len() expects 1 argument"));
                 }
 
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let value = evaluator.eval_with_env(args[0].clone(), env)?;
 
-                let pattern = match pattern_value {
-                    Value::Pattern(p) => p,
-                    Value::String(s) => crate::types::Pattern::parse(&s)
-                        .map_err(|e| anyhow!("len(): invalid pattern: {}", e))?,
-                    _ => return Err(anyhow!("len() argument must be a pattern")),
+                let length = match value {
+                    Value::Pattern(p) => p.len() as i32,
+                    Value::String(s) => {
+                        let pattern = crate::types::Pattern::parse(&s)
+                            .map_err(|e| anyhow!("len(): invalid pattern: {}", e))?;
+                        pattern.len() as i32
+                    }
+                    Value::Chord(c) => c.len() as i32,
+                    Value::Array(a) => a.len() as i32,
+                    _ => return Err(anyhow!("len() argument must be a pattern, chord, or array")),
                 };
 
-                Ok(Value::Number(pattern.len() as i32))
+                Ok(Value::Number(length))
             }),
         );
 
+        // cat - variadic pattern concatenation (replaces concat)
+        self.register(
+            "cat",
+            "Pattern",
+            "Concatenates multiple patterns together in sequence.",
+            "cat(p1: Pattern, p2: Pattern, ...) -> Pattern",
+            Arc::new(|evaluator, args, env| {
+                if args.len() < 2 {
+                    return Err(anyhow!("cat() expects at least 2 arguments"));
+                }
+
+                // Convert all args to patterns
+                let mut patterns: Vec<crate::types::Pattern> = Vec::new();
+                for (i, arg) in args.into_iter().enumerate() {
+                    let val = evaluator.eval_with_env(arg, env)?;
+                    let pattern = match val {
+                        Value::Pattern(p) => p,
+                        Value::String(s) => crate::types::Pattern::parse(&s)
+                            .map_err(|e| anyhow!("cat(): invalid pattern at position {}: {}", i + 1, e))?,
+                        Value::Note(n) => crate::types::Pattern::with_steps(vec![
+                            crate::types::PatternStep::Note(n),
+                        ]),
+                        Value::Chord(c) => crate::types::Pattern::with_steps(vec![
+                            crate::types::PatternStep::Chord(c),
+                        ]),
+                        _ => return Err(anyhow!("cat(): argument {} must be a pattern, note, or chord", i + 1)),
+                    };
+                    patterns.push(pattern);
+                }
+
+                // Fold all patterns together
+                let result = patterns.into_iter().reduce(|acc, p| acc.concat(p))
+                    .unwrap(); // Safe: we checked len >= 2
+                Ok(Value::Pattern(result))
+            }),
+        );
+
+        // Keep concat as alias for backwards compatibility
         self.register(
             "concat",
             "Pattern",
-            "Concatenates two patterns together.",
-            "concat(pattern1: Pattern, pattern2: Pattern) -> Pattern",
+            "Concatenates two patterns (alias for cat).",
+            "concat(p1: Pattern, p2: Pattern) -> Pattern",
             Arc::new(|evaluator, args, env| {
                 if args.len() != 2 {
-                    return Err(anyhow!("concat() expects 2 arguments: pattern1, pattern2"));
+                    return Err(anyhow!("concat() expects 2 arguments"));
                 }
-
-                let p1_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let p2_value = evaluator.eval_with_env(args[1].clone(), env)?;
-
-                let p1 = match p1_value {
+                let p1_val = evaluator.eval_with_env(args[0].clone(), env)?;
+                let p2_val = evaluator.eval_with_env(args[1].clone(), env)?;
+                let p1 = match p1_val {
                     Value::Pattern(p) => p,
                     Value::String(s) => crate::types::Pattern::parse(&s)
                         .map_err(|e| anyhow!("concat(): invalid first pattern: {}", e))?,
-                    _ => return Err(anyhow!("concat() first argument must be a pattern")),
+                    _ => return Err(anyhow!("concat(): first argument must be a pattern")),
                 };
-
-                let p2 = match p2_value {
+                let p2 = match p2_val {
                     Value::Pattern(p) => p,
                     Value::String(s) => crate::types::Pattern::parse(&s)
                         .map_err(|e| anyhow!("concat(): invalid second pattern: {}", e))?,
-                    _ => return Err(anyhow!("concat() second argument must be a pattern")),
+                    _ => return Err(anyhow!("concat(): second argument must be a pattern")),
                 };
-
                 Ok(Value::Pattern(p1.concat(p2)))
+            }),
+        );
+
+        // stack - layer patterns to play simultaneously at the same speed
+        self.register(
+            "stack",
+            "Pattern",
+            "Layers multiple patterns to play simultaneously (same cycle speed).",
+            "stack(p1: Pattern, p2: Pattern, ...) -> Pattern",
+            Arc::new(|evaluator, args, env| {
+                if args.len() < 2 {
+                    return Err(anyhow!("stack() expects at least 2 arguments"));
+                }
+
+                // Convert all args to patterns
+                let mut patterns: Vec<crate::types::Pattern> = Vec::new();
+                for (i, arg) in args.into_iter().enumerate() {
+                    let val = evaluator.eval_with_env(arg, env)?;
+                    let pattern = match val {
+                        Value::Pattern(p) => p,
+                        Value::String(s) => crate::types::Pattern::parse(&s)
+                            .map_err(|e| anyhow!("stack(): invalid pattern at position {}: {}", i + 1, e))?,
+                        Value::Note(n) => crate::types::Pattern::with_steps(vec![
+                            crate::types::PatternStep::Note(n),
+                        ]),
+                        Value::Chord(c) => crate::types::Pattern::with_steps(vec![
+                            crate::types::PatternStep::Chord(c),
+                        ]),
+                        _ => return Err(anyhow!("stack(): argument {} must be a pattern, note, or chord", i + 1)),
+                    };
+                    patterns.push(pattern);
+                }
+
+                // Create a stacked pattern by merging steps
+                let result = crate::types::Pattern::stack(patterns);
+                Ok(Value::Pattern(result))
             }),
         );
 

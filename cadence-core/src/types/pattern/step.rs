@@ -28,6 +28,9 @@ pub enum PatternStep {
     Alternation(Vec<PatternStep>),
     /// Euclidean rhythm: C(3,8) distributes 3 pulses evenly across 8 slots
     Euclidean(Box<PatternStep>, usize, usize), // (inner, pulses, steps)
+    /// Polyrhythm: {C D E, F G} plays multiple patterns simultaneously,
+    /// each at its own tempo (3-step pattern plays 3 notes/cycle, 2-step plays 2 notes/cycle)
+    Polyrhythm(Vec<Vec<PatternStep>>), // Each inner Vec is a sub-pattern's steps
 }
 
 impl PatternStep {
@@ -83,6 +86,25 @@ impl PatternStep {
                         }
                     })
                     .collect()
+            }
+            // Polyrhythm: merge frequencies from all sub-patterns
+            PatternStep::Polyrhythm(sub_patterns) => {
+                // For static evaluation, merge all first events from each sub-pattern
+                let mut merged_freqs: Vec<f32> = Vec::new();
+                for sub in sub_patterns {
+                    for step in sub {
+                        for (freqs, is_rest) in step.to_frequencies() {
+                            if !is_rest {
+                                merged_freqs.extend(freqs);
+                            }
+                        }
+                    }
+                }
+                if merged_freqs.is_empty() {
+                    vec![(vec![], true)]
+                } else {
+                    vec![(merged_freqs, false)]
+                }
             }
         }
     }
@@ -142,6 +164,24 @@ impl PatternStep {
                     })
                     .collect()
             }
+            // Polyrhythm: merge note info from all sub-patterns
+            PatternStep::Polyrhythm(sub_patterns) => {
+                let mut merged_notes: Vec<NoteInfo> = Vec::new();
+                for sub in sub_patterns {
+                    for step in sub {
+                        for (notes, is_rest) in step.to_note_infos() {
+                            if !is_rest {
+                                merged_notes.extend(notes);
+                            }
+                        }
+                    }
+                }
+                if merged_notes.is_empty() {
+                    vec![(vec![], true)]
+                } else {
+                    vec![(merged_notes, false)]
+                }
+            }
         }
     }
 
@@ -190,6 +230,26 @@ impl PatternStep {
                         }
                     })
                     .collect()
+            }
+            // Polyrhythm: merge step info from all sub-patterns
+            PatternStep::Polyrhythm(sub_patterns) => {
+                let mut merged_notes: Vec<NoteInfo> = Vec::new();
+                let mut merged_drums: Vec<DrumSound> = Vec::new();
+                for sub in sub_patterns {
+                    for step in sub {
+                        for (notes, drums, is_rest) in step.to_step_info() {
+                            if !is_rest {
+                                merged_notes.extend(notes);
+                                merged_drums.extend(drums);
+                            }
+                        }
+                    }
+                }
+                if merged_notes.is_empty() && merged_drums.is_empty() {
+                    vec![(vec![], vec![], true)]
+                } else {
+                    vec![(merged_notes, merged_drums, false)]
+                }
             }
         }
     }
@@ -250,6 +310,26 @@ impl PatternStep {
                     })
                     .collect()
             }
+            // Polyrhythm: merge step info from all sub-patterns, cycle-aware
+            PatternStep::Polyrhythm(sub_patterns) => {
+                let mut merged_notes: Vec<NoteInfo> = Vec::new();
+                let mut merged_drums: Vec<DrumSound> = Vec::new();
+                for sub in sub_patterns {
+                    for step in sub {
+                        for (notes, drums, is_rest) in step.to_step_info_for_cycle(cycle) {
+                            if !is_rest {
+                                merged_notes.extend(notes);
+                                merged_drums.extend(drums);
+                            }
+                        }
+                    }
+                }
+                if merged_notes.is_empty() && merged_drums.is_empty() {
+                    vec![(vec![], vec![], true)]
+                } else {
+                    vec![(merged_notes, merged_drums, false)]
+                }
+            }
         }
     }
 
@@ -276,6 +356,12 @@ impl PatternStep {
             PatternStep::Euclidean(inner, pulses, steps) => {
                 PatternStep::Euclidean(Box::new(inner.transpose(semitones)), *pulses, *steps)
             }
+            PatternStep::Polyrhythm(sub_patterns) => PatternStep::Polyrhythm(
+                sub_patterns
+                    .iter()
+                    .map(|sub| sub.iter().map(|s| s.transpose(semitones)).collect())
+                    .collect(),
+            ),
         }
     }
 }
@@ -312,6 +398,21 @@ impl fmt::Display for PatternStep {
             }
             PatternStep::Euclidean(inner, pulses, steps) => {
                 write!(f, "{}({},{})", inner, pulses, steps)
+            }
+            PatternStep::Polyrhythm(sub_patterns) => {
+                write!(f, "{{")?;
+                for (i, sub) in sub_patterns.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    for (j, step) in sub.iter().enumerate() {
+                        if j > 0 {
+                            write!(f, " ")?;
+                        }
+                        write!(f, "{}", step)?;
+                    }
+                }
+                write!(f, "}}")
             }
         }
     }
