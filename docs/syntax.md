@@ -71,20 +71,85 @@ on 3 play "kick snare" loop
 Strings like `"C E G"` are interpreted as rhythmic patterns, inspired by TidalCycles.
 A pattern defines what happens in **one cycle** (default 4 beats).
 
-| Symbol | Description | Example |
-|--------|-------------|---------|
-| `Space` | Sequentially separates events | `"C E G"` (3 events in 1 cycle) |
-| `[ ]` | **Group**: Subdivides a step | `"C [E G] C"` (E & G share the middle beat) |
-| `_` | **Rest**: Silence | `"C _ G"` (Rest in middle) |
-| `*` | **Repeat**: Repeat step N times | `"C*4"` (Same as `"C C C C"`) |
-| `,` | **Chord**: Notes in a group | `"C [E,G] C"` (Plays chord E+G in middle) |
+### Operators Reference
 
-**Examples**:
+| Symbol | Name | Description | Example |
+|--------|------|-------------|---------|
+| ` ` (Space) | Sequence | Separates events, played in order | `"C E G"` → 3 events in 1 cycle |
+| `[ ]` | Group | Subdivides a step into equal parts | `"C [E G] C"` → E & G share middle beat |
+| `_` | Rest | Silence for one step | `"C _ G"` → Note, silence, note |
+| `*N` | Repeat | Repeat step N times | `"C*4"` → `C C C C` |
+| `,` | Chord | Play notes simultaneously | `"[C,E,G]"` → C+E+G chord |
+| `<>` | Alternation | Cycle through elements on each loop | `"<C D E>"` → C on loop 1, D on loop 2, E on loop 3 |
+| `(n,k)` | Euclidean | Distribute n pulses across k steps | `"C(3,8)"` → 3 C notes evenly in 8 slots |
+| `{}` | Polyrhythm | Overlay patterns at different tempos | `"{C D E, F G}"` → 3-step + 2-step simultaneously |
+| `(vel)` | Velocity | Set MIDI velocity | `"C5(100)"` → velocity 100; `"C5(0.5)"` → half velocity |
+| `@N` | Weighted | Step takes N units of duration | `"C@2 D"` → C gets 2/3, D gets 1/3 of time |
+
+### Basic Examples
 ```cadence
 "C E G B"       // 4 notes, 1 beat each (in 4/4)
-"C [E G] B"     // C(1), E(0.5), G(0.5), B(1)
+"C [E G] B"     // C(1 beat), E(0.5), G(0.5), B(1 beat)
 "C*2 G*2"       // C C G G
 "C _ G _"       // Note, Rest, Note, Rest
+```
+
+### Euclidean Rhythms
+Euclidean rhythms distribute pulses as evenly as possible using the Bjorklund algorithm. Common patterns:
+
+| Pattern | Rhythm | Description |
+|---------|--------|-------------|
+| `C(3,8)` | `x . . x . . x .` | Cuban tresillo |
+| `C(5,8)` | `x . x x . x x .` | Cinquillo |
+| `C(4,12)` | `x . . x . . x . . x . .` | 12/8 bell pattern |
+
+### Alternation
+The alternation operator `<>` cycles through its elements on each pattern loop:
+```cadence
+"<C D E> G"     // Loop 1: C G, Loop 2: D G, Loop 3: E G, Loop 4: C G, ...
+"<[C,E] [D,F]>" // Alternates between C minor and D minor chords
+```
+
+### Polyrhythms
+Polyrhythms overlay multiple patterns, each playing at its own tempo within the same cycle:
+```cadence
+"{C D E, F G}"     // 3-note pattern plays 3 notes/cycle, 2-note plays 2 notes/cycle
+"{kick _ _ _, snare _ snare _}"  // Cross-rhythm drum pattern
+```
+
+### Velocity
+Control MIDI velocity (note loudness) with parentheses after a note:
+```cadence
+"C(127) D(64) E(32)"   // Loud, medium, quiet (0-127 scale)
+"C(1.0) D(0.5) E(0.25)" // Same using 0.0-1.0 float scale
+```
+
+### Weighted Steps
+Use `@N` to give a step more time relative to others:
+```cadence
+"C@2 D"        // C plays for 2/3 of cycle, D for 1/3
+"C@3 D@1 E@2"  // C: 3/6, D: 1/6, E: 2/6 of cycle
+```
+
+### Drum Sounds
+Use drum names directly in patterns. All drums support multiple aliases:
+
+| Drum | Aliases | MIDI Note |
+|------|---------|-----------|
+| Kick | `kick`, `k`, `bd`, `bass` | 36 |
+| Snare | `snare`, `s`, `sn`, `sd` | 38 |
+| Hi-Hat | `hihat`, `hh`, `h`, `ch` | 42 |
+| Open Hi-Hat | `openhat`, `oh`, `ho` | 46 |
+| Clap | `clap`, `cp`, `cl` | 39 |
+| Tom | `tom`, `t`, `lt` | 45 |
+| Crash | `crash`, `cr`, `cc` | 49 |
+| Ride | `ride`, `rd`, `ri` | 51 |
+| Rim | `rim`, `rm`, `rs` | 37 |
+| Cowbell | `cowbell`, `cb`, `cow` | 56 |
+
+```cadence
+"kick snare hh hh"           // Basic 4/4 beat
+"kick(3,8) snare@2 hh*4"     // Euclidean kick, long snare, fast hats
 ```
 
 ## Functions & Methods

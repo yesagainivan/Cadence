@@ -1,6 +1,6 @@
 # Cadence
 
-A live-coding environment for musical patterns and algorave performances, written in Rust with a WebAssembly browser editor.
+A live-coding language for composing musical patterns. Cadence uses a TidalCycles-inspired mini-notation for rhythms and sequences, with a native Rust core and WebAssembly-powered browser editor.
 
 **[Try the Live Editor →](https://ivanowono.github.io/Cadence/)**
 
@@ -73,14 +73,17 @@ npm run dev
 
 | Syntax | Description |
 |--------|-------------|
-| `C E G` | Sequence — notes in order |
-| `[C E]` | Group — subdivide a step |
-| `[C, E, G]` | Chord — play together |
-| `C*4` | Repeat — `C C C C` |
-| `_` | Rest — silence |
-| `<C D E>` | Alternate — cycle through |
-| `C(3,8)` | Euclidean — 3 pulses in 8 steps |
-| `{A B, C D E}` | Polyrhythm — overlay patterns |
+| `C E G` | Sequence — play notes in order, evenly spaced |
+| `[C E]` | Group — subdivide a step into equal parts |
+| `[C, E, G]` | Chord — play notes simultaneously |
+| `C*4` | Repeat — repeat step N times (`C C C C`) |
+| `_` | Rest — silence for one step |
+| `<C D E>` | Alternate — play one element per cycle (C, then D, then E on loop) |
+| `C(3,8)` | Euclidean — distribute 3 pulses evenly across 8 steps |
+| `{A B, C D E}` | Polyrhythm — overlay patterns at their own tempos |
+| `C5(100)` | Velocity — set MIDI velocity (0–127 or 0.0–1.0) |
+| `C@2` | Weighted — step takes 2 units of duration |
+| `kick snare hh` | Drums — use drum names directly in patterns |
 
 See [docs/syntax.md](docs/syntax.md) for the full reference.
 

@@ -234,7 +234,7 @@ The following features are great candidates for community contributions:
 11. **MIDI Control Change** - CC messages for external control
 12. **Basic Effects** - reverb, delay, filter
 13. **modularize statement parser** - break down into smaller modules if needed
-14. **Web Editor** - See [ROADMAP-EDITOR.md](ROADMAP-EDITOR.md) for detailed phases
+14. **Web Editor** - See [editor/ROADMAP.md](editor/ROADMAP.md) for detailed phases
 15. **Queue N countdown** - Full N-beat countdown for `queue N` syntax
 16. **TidalCycles-style `every()`** - Pattern combinator that alternates by cycle. See [docs/handoff.md](docs/handoff.md)
 

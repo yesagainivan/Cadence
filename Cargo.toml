@@ -11,7 +11,6 @@ edition = "2021"
 cadence-core = { path = "cadence-core" }
 cpal = "0.15.2"
 anyhow = "1.0.98"
-clap = "4.5.41"
 colored = "3.0.0"
 # pest = "2.8.1"
 # pest_derive = "2.8.1"
@@ -19,3 +18,9 @@ rustyline = "16.0.0"
 crossbeam-channel = "0.5"
 notify = "8.2.0"
 midir = "0.10"
+
+# Optimize release builds for size (especially important for WASM)
+[profile.release]
+lto = true          # Link-Time Optimization - smaller binaries
+opt-level = "s"     # Optimize for size over speed
+codegen-units = 1   # Better optimization, slower compile
