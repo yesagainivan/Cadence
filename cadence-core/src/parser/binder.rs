@@ -143,27 +143,32 @@ impl Binder {
             }
 
             // Use statements - track imported symbols
-            Statement::Use { imports, path, .. } => {
-                if let Some(names) = imports {
-                    // Selective import: `use {x, y} from "file.cadence"`
-                    for name in names {
-                        self.table.add_variable(VariableSymbol {
-                            name: name.clone(),
-                            value_type: Some(format!("import from \"{}\"", path)),
-                            span: Span {
-                                start: spanned.start,
-                                end: spanned.end,
-                                utf16_start: spanned.utf16_start,
-                                utf16_end: spanned.utf16_end,
-                            },
-                            doc_comment: None,
-                        });
-                    }
+            Statement::Use {
+                imports: Some(names),
+                path,
+                ..
+            } => {
+                // Selective import: `use {x, y} from "file.cadence"`
+                for name in names {
+                    self.table.add_variable(VariableSymbol {
+                        name: name.clone(),
+                        value_type: Some(format!("import from \"{}\"", path)),
+                        span: Span {
+                            start: spanned.start,
+                            end: spanned.end,
+                            utf16_start: spanned.utf16_start,
+                            utf16_end: spanned.utf16_end,
+                        },
+                        doc_comment: None,
+                    });
                 }
                 // For `use "file.cadence"` without selective imports,
                 // we'd ideally resolve the module to find exported names,
                 // but that requires file I/O which isn't available during static analysis.
                 // The runtime will handle it.
+            }
+            Statement::Use { imports: None, .. } => {
+                // Wildcard import - no symbols to add statically
             }
 
             // Other statements don't define symbols

@@ -207,12 +207,12 @@ impl Pattern {
                                 duration: event_duration,
                                 is_rest,
                             });
-                            sub_current_beat = sub_current_beat + event_duration;
+                            sub_current_beat += event_duration;
                         }
                     }
                 }
                 // Advance past the entire polyrhythm step
-                current_beat = current_beat + step_duration;
+                current_beat += step_duration;
             } else {
                 // Normal step handling
                 let step_info_list = step.to_step_info();
@@ -231,7 +231,7 @@ impl Pattern {
                         duration: event_duration,
                         is_rest,
                     });
-                    current_beat = current_beat + event_duration;
+                    current_beat += event_duration;
                 }
             }
         }
@@ -293,12 +293,12 @@ impl Pattern {
                                 duration: event_duration,
                                 is_rest,
                             });
-                            sub_current_beat = sub_current_beat + event_duration;
+                            sub_current_beat += event_duration;
                         }
                     }
                 }
                 // Advance past the entire polyrhythm step
-                current_beat = current_beat + step_duration;
+                current_beat += step_duration;
             } else {
                 // Normal step handling
                 let step_info_list = step.to_step_info_for_cycle(cycle);
@@ -317,7 +317,7 @@ impl Pattern {
                         duration: event_duration,
                         is_rest,
                     });
-                    current_beat = current_beat + event_duration;
+                    current_beat += event_duration;
                 }
             }
         }
@@ -331,13 +331,13 @@ impl Pattern {
 
     /// Transform: speed up by factor (plays N times per cycle)
     pub fn fast(mut self, factor: usize) -> Self {
-        self.beats_per_cycle = self.beats_per_cycle / factor as i64;
+        self.beats_per_cycle /= factor as i64;
         self
     }
 
     /// Transform: slow down by factor (takes N cycles to complete)
     pub fn slow(mut self, factor: usize) -> Self {
-        self.beats_per_cycle = self.beats_per_cycle * factor as i64;
+        self.beats_per_cycle *= factor as i64;
         self
     }
 
@@ -374,7 +374,7 @@ impl Pattern {
 
     /// Set waveform from preset name (sine, saw, square, triangle)
     pub fn wave_preset(mut self, preset: &str) -> Self {
-        self.waveform = Waveform::from_str(preset);
+        self.waveform = Waveform::from_name(preset);
         self
     }
 
@@ -507,7 +507,7 @@ impl Pattern {
             steps: resolved_steps,
             beats_per_cycle: self.beats_per_cycle,
             envelope: self.envelope,
-            waveform: self.waveform.clone(),
+            waveform: self.waveform,
             pan: self.pan,
         })
     }
@@ -870,7 +870,7 @@ impl Pattern {
         let reversed: Vec<PatternStep> = self.steps.iter().rev().cloned().collect();
         self.steps.extend(reversed);
         // Double the cycle length to accommodate the palindrome
-        self.beats_per_cycle = self.beats_per_cycle * 2;
+        self.beats_per_cycle *= 2;
         self
     }
 
@@ -968,7 +968,7 @@ impl Pattern {
         // Use the cycle length of the first pattern
         let beats_per_cycle = patterns[0].beats_per_cycle;
         let envelope = patterns[0].envelope;
-        let waveform = patterns[0].waveform.clone();
+        let waveform = patterns[0].waveform;
         let pan = patterns[0].pan;
 
         Pattern {
@@ -996,7 +996,7 @@ impl Pattern {
         let steps = parse_steps(notation)?;
 
         // Check if pattern has actual content or only variables
-        let has_pattern_content = steps.iter().any(|step| has_non_variable_content(step));
+        let has_pattern_content = steps.iter().any(has_non_variable_content);
 
         if !has_pattern_content && !steps.is_empty() {
             // Pattern has ONLY variable references

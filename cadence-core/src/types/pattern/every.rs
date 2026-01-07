@@ -50,7 +50,7 @@ impl EveryPattern {
         // Transform on cycles where (cycle + 1) is divisible by interval
         // This gives: for interval 2, transform on cycles 1, 3, 5, 7...
         // For interval 3, transform on cycles 2, 5, 8...
-        if (cycle + 1) % self.interval == 0 {
+        if (cycle + 1).is_multiple_of(self.interval) {
             &self.transformed
         } else {
             &self.base

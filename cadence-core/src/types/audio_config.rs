@@ -17,7 +17,7 @@ pub enum Waveform {
 
 impl Waveform {
     /// Parse waveform from string (case-insensitive)
-    pub fn from_str(s: &str) -> Option<Waveform> {
+    pub fn from_name(s: &str) -> Option<Waveform> {
         match s.to_lowercase().as_str() {
             "sine" | "sin" => Some(Waveform::Sine),
             "saw" | "sawtooth" => Some(Waveform::Saw),
@@ -120,11 +120,11 @@ mod tests {
 
     #[test]
     fn test_waveform_parsing() {
-        assert_eq!(Waveform::from_str("sine"), Some(Waveform::Sine));
-        assert_eq!(Waveform::from_str("SAW"), Some(Waveform::Saw));
-        assert_eq!(Waveform::from_str("Square"), Some(Waveform::Square));
-        assert_eq!(Waveform::from_str("tri"), Some(Waveform::Triangle));
-        assert_eq!(Waveform::from_str("invalid"), None);
+        assert_eq!(Waveform::from_name("sine"), Some(Waveform::Sine));
+        assert_eq!(Waveform::from_name("SAW"), Some(Waveform::Saw));
+        assert_eq!(Waveform::from_name("Square"), Some(Waveform::Square));
+        assert_eq!(Waveform::from_name("tri"), Some(Waveform::Triangle));
+        assert_eq!(Waveform::from_name("invalid"), None);
     }
 
     #[test]

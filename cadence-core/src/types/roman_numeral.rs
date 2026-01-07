@@ -1,6 +1,6 @@
 // src/types/roman_numeral.rs
 use crate::types::{Chord, Note};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::fmt;
 
 /// Represents a Roman numeral chord analysis
@@ -219,15 +219,12 @@ impl RomanNumeral {
                     Ok(ChordQuality::Diminished)
                 } else if intervals.contains(&4) && intervals.contains(&8) {
                     Ok(ChordQuality::Augmented)
+                } else if intervals.contains(&3) {
+                    // Fallback based on third: minor
+                    Ok(ChordQuality::Minor)
                 } else {
-                    // Fallback based on third
-                    if intervals.contains(&3) {
-                        Ok(ChordQuality::Minor)
-                    } else if intervals.contains(&4) {
-                        Ok(ChordQuality::Major)
-                    } else {
-                        Ok(ChordQuality::Major) // default fallback
-                    }
+                    // default fallback (includes intervals.contains(&4))
+                    Ok(ChordQuality::Major)
                 }
             }
         }
@@ -341,7 +338,7 @@ impl RomanNumeral {
     }
 
     /// Get the Roman numeral representation as a string
-    pub fn to_string(&self) -> String {
+    pub fn as_string(&self) -> String {
         let mut result = String::new();
 
         // Add accidental if present
@@ -371,43 +368,33 @@ impl RomanNumeral {
             (ScaleDegree::VII, ChordQuality::Minor) => "vii",
 
             // Special cases for altered qualities
-            (_, ChordQuality::Diminished) => {
-                let base_roman = match (&self.degree, &self.quality) {
-                    (ScaleDegree::I, _) => "i°",
-                    (ScaleDegree::II, _) => "ii°",
-                    (ScaleDegree::III, _) => "iii°",
-                    (ScaleDegree::IV, _) => "iv°",
-                    (ScaleDegree::V, _) => "v°",
-                    (ScaleDegree::VI, _) => "vi°",
-                    (ScaleDegree::VII, _) => "vii°",
-                    // _ => "°",
-                };
-                base_roman
-            }
-            (_, ChordQuality::HalfDiminished) => {
-                let base_roman = match self.degree {
-                    ScaleDegree::I => "iø",
-                    ScaleDegree::II => "iiø",
-                    ScaleDegree::III => "iiiø",
-                    ScaleDegree::IV => "ivø",
-                    ScaleDegree::V => "vø",
-                    ScaleDegree::VI => "viø",
-                    ScaleDegree::VII => "viiø",
-                };
-                base_roman
-            }
-            (_, ChordQuality::Augmented) => {
-                let base_roman = match self.degree {
-                    ScaleDegree::I => "I+",
-                    ScaleDegree::II => "II+",
-                    ScaleDegree::III => "III+",
-                    ScaleDegree::IV => "IV+",
-                    ScaleDegree::V => "V+",
-                    ScaleDegree::VI => "VI+",
-                    ScaleDegree::VII => "VII+",
-                };
-                base_roman
-            }
+            (_, ChordQuality::Diminished) => match (&self.degree, &self.quality) {
+                (ScaleDegree::I, _) => "i°",
+                (ScaleDegree::II, _) => "ii°",
+                (ScaleDegree::III, _) => "iii°",
+                (ScaleDegree::IV, _) => "iv°",
+                (ScaleDegree::V, _) => "v°",
+                (ScaleDegree::VI, _) => "vi°",
+                (ScaleDegree::VII, _) => "vii°",
+            },
+            (_, ChordQuality::HalfDiminished) => match self.degree {
+                ScaleDegree::I => "iø",
+                ScaleDegree::II => "iiø",
+                ScaleDegree::III => "iiiø",
+                ScaleDegree::IV => "ivø",
+                ScaleDegree::V => "vø",
+                ScaleDegree::VI => "viø",
+                ScaleDegree::VII => "viiø",
+            },
+            (_, ChordQuality::Augmented) => match self.degree {
+                ScaleDegree::I => "I+",
+                ScaleDegree::II => "II+",
+                ScaleDegree::III => "III+",
+                ScaleDegree::IV => "IV+",
+                ScaleDegree::V => "V+",
+                ScaleDegree::VI => "VI+",
+                ScaleDegree::VII => "VII+",
+            },
             (_, ChordQuality::MajorMinor) => {
                 // Dominant 7th type - major triad with minor 7th
                 match self.degree {
@@ -441,10 +428,10 @@ impl RomanNumeral {
         // Add inversion notation
         match self.inversion {
             0 => {}
-            1 => result.push_str("⁶"),
+            1 => result.push('⁶'),
             2 => result.push_str("⁶₄"),
             3 => result.push_str("⁴₂"),
-            4 => result.push_str("₂"),
+            4 => result.push('₂'),
             _ => result.push_str(&format!("/{}", self.inversion)),
         }
 
@@ -455,7 +442,7 @@ impl RomanNumeral {
     pub fn detailed_analysis(&self) -> String {
         format!(
             "{} in {} major ({})",
-            self.to_string(),
+            self.as_string(),
             self.key,
             self.function_description()
         )
@@ -512,7 +499,7 @@ impl RomanNumeral {
 
 impl fmt::Display for RomanNumeral {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(f, "{}", self.as_string())
     }
 }
 
@@ -832,9 +819,9 @@ impl CommonProgressions {
     /// Parse numeric progression patterns with proper chord type handling
     pub fn parse_numeric_progression(pattern: &str) -> Result<Vec<(i8, ChordType)>> {
         let mut chord_specs = Vec::new();
-        let mut chars = pattern.chars().peekable();
+        let chars = pattern.chars();
 
-        while let Some(digit) = chars.next() {
+        for digit in chars {
             if !digit.is_ascii_digit() {
                 return Err(anyhow!("Invalid character in progression: {}", digit));
             }
@@ -1362,21 +1349,15 @@ mod tests {
 
         // Second chord should be Bb major (♭VII in C)
         let second_chord = &chords[1];
-        assert!(
-            second_chord
-                .notes()
-                .any(|n| n.pitch_class() == "Bb".parse::<Note>().unwrap().pitch_class())
-        );
-        assert!(
-            second_chord
-                .notes()
-                .any(|n| n.pitch_class() == "D".parse::<Note>().unwrap().pitch_class())
-        );
-        assert!(
-            second_chord
-                .notes()
-                .any(|n| n.pitch_class() == "F".parse::<Note>().unwrap().pitch_class())
-        );
+        assert!(second_chord
+            .notes()
+            .any(|n| n.pitch_class() == "Bb".parse::<Note>().unwrap().pitch_class()));
+        assert!(second_chord
+            .notes()
+            .any(|n| n.pitch_class() == "D".parse::<Note>().unwrap().pitch_class()));
+        assert!(second_chord
+            .notes()
+            .any(|n| n.pitch_class() == "F".parse::<Note>().unwrap().pitch_class()));
     }
 
     #[test]
@@ -1425,11 +1406,9 @@ mod tests {
         // Test chromatic alteration
         let fs_dim = Chord::from_note_strings(vec!["F#", "A", "C"]).unwrap();
         let analysis = RomanNumeral::analyze(&fs_dim, "C".parse().unwrap()).unwrap();
-        assert!(
-            analysis
-                .function_description()
-                .contains("Tritone substitution")
-        );
+        assert!(analysis
+            .function_description()
+            .contains("Tritone substitution"));
     }
 
     #[test]
@@ -1587,41 +1566,33 @@ mod numeric_progression_tests {
         // Invalid scale degrees
         let result = CommonProgressions::parse_numeric_progression("189");
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Invalid scale degree: 8")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid scale degree: 8"));
 
         let result = CommonProgressions::parse_numeric_progression("250");
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Invalid scale degree: 0")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid scale degree: 0"));
 
         // Invalid characters
         let result = CommonProgressions::parse_numeric_progression("25a1");
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Invalid character")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid character"));
 
         // Empty
         let result = CommonProgressions::parse_numeric_progression("");
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Empty progression")
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Empty progression"));
     }
 
     #[test]
@@ -1661,26 +1632,18 @@ mod numeric_progression_tests {
 
         // Second chord should be B diminished
         let second_chord = &chords[1];
-        assert!(
-            second_chord
-                .notes()
-                .any(|n| n.pitch_class() == "B".parse::<Note>().unwrap().pitch_class())
-        );
-        assert!(
-            second_chord
-                .notes()
-                .any(|n| n.pitch_class() == "D".parse::<Note>().unwrap().pitch_class())
-        );
-        assert!(
-            second_chord
-                .notes()
-                .any(|n| n.pitch_class() == "F".parse::<Note>().unwrap().pitch_class())
-        ); // F natural, not F#
-        assert!(
-            !second_chord
-                .notes()
-                .any(|n| n.pitch_class() == "F#".parse::<Note>().unwrap().pitch_class())
-        ); // Should NOT contain F#
+        assert!(second_chord
+            .notes()
+            .any(|n| n.pitch_class() == "B".parse::<Note>().unwrap().pitch_class()));
+        assert!(second_chord
+            .notes()
+            .any(|n| n.pitch_class() == "D".parse::<Note>().unwrap().pitch_class()));
+        assert!(second_chord
+            .notes()
+            .any(|n| n.pitch_class() == "F".parse::<Note>().unwrap().pitch_class())); // F natural, not F#
+        assert!(!second_chord
+            .notes()
+            .any(|n| n.pitch_class() == "F#".parse::<Note>().unwrap().pitch_class())); // Should NOT contain F#
 
         let analysis = analyze_progression(&pattern, key).unwrap();
         assert_eq!(analysis[0].to_string(), "I");
@@ -1698,26 +1661,18 @@ mod numeric_progression_tests {
 
         // Check that the last chord is B diminished [B, D, F], not B minor [B, D, F#]
         let last_chord = &chords[6];
-        assert!(
-            last_chord
-                .notes()
-                .any(|n| n.pitch_class() == "B".parse::<Note>().unwrap().pitch_class())
-        );
-        assert!(
-            last_chord
-                .notes()
-                .any(|n| n.pitch_class() == "D".parse::<Note>().unwrap().pitch_class())
-        );
-        assert!(
-            last_chord
-                .notes()
-                .any(|n| n.pitch_class() == "F".parse::<Note>().unwrap().pitch_class())
-        ); // F natural
-        assert!(
-            !last_chord
-                .notes()
-                .any(|n| n.pitch_class() == "F#".parse::<Note>().unwrap().pitch_class())
-        ); // Should NOT contain F#
+        assert!(last_chord
+            .notes()
+            .any(|n| n.pitch_class() == "B".parse::<Note>().unwrap().pitch_class()));
+        assert!(last_chord
+            .notes()
+            .any(|n| n.pitch_class() == "D".parse::<Note>().unwrap().pitch_class()));
+        assert!(last_chord
+            .notes()
+            .any(|n| n.pitch_class() == "F".parse::<Note>().unwrap().pitch_class())); // F natural
+        assert!(!last_chord
+            .notes()
+            .any(|n| n.pitch_class() == "F#".parse::<Note>().unwrap().pitch_class())); // Should NOT contain F#
 
         let analysis = analyze_progression(&pattern, key).unwrap();
         assert_eq!(analysis[6].to_string(), "vii°");
@@ -1958,21 +1913,15 @@ mod roman_numeral_parser_tests {
 
         // Second chord should be Bb major (♭VII in C)
         let second_chord = &chords[1];
-        assert!(
-            second_chord
-                .notes()
-                .any(|n| n.pitch_class() == "Bb".parse::<Note>().unwrap().pitch_class())
-        );
-        assert!(
-            second_chord
-                .notes()
-                .any(|n| n.pitch_class() == "D".parse::<Note>().unwrap().pitch_class())
-        );
-        assert!(
-            second_chord
-                .notes()
-                .any(|n| n.pitch_class() == "F".parse::<Note>().unwrap().pitch_class())
-        );
+        assert!(second_chord
+            .notes()
+            .any(|n| n.pitch_class() == "Bb".parse::<Note>().unwrap().pitch_class()));
+        assert!(second_chord
+            .notes()
+            .any(|n| n.pitch_class() == "D".parse::<Note>().unwrap().pitch_class()));
+        assert!(second_chord
+            .notes()
+            .any(|n| n.pitch_class() == "F".parse::<Note>().unwrap().pitch_class()));
     }
 
     #[test]
@@ -1994,7 +1943,7 @@ mod roman_numeral_parser_tests {
 
         let analysis = analyze_progression(&prog, key).unwrap();
         assert_eq!(analysis[0].to_string(), "ii"); // D minor
-        // Note: ♭V (Gb) may be analyzed as #IV or ♭V depending on enharmonic choice
+                                                   // Note: ♭V (Gb) may be analyzed as #IV or ♭V depending on enharmonic choice
         let tritone_sub = analysis[1].to_string();
         assert!(
             tritone_sub == "♭V" || tritone_sub == "#IV" || tritone_sub == "#iv°",

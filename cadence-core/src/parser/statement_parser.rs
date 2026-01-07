@@ -220,9 +220,9 @@ impl StatementParser {
                     }
                     Token::Comment(text) => {
                         // Doc comments start with / (making ///)
-                        if text.starts_with('/') {
+                        if let Some(stripped) = text.strip_prefix('/') {
                             // Strip the leading / and optional space
-                            let doc_text = text[1..].trim_start();
+                            let doc_text = stripped.trim_start();
                             doc_lines.push(doc_text.to_string());
                         }
                         // Skip all comments (doc or regular)
@@ -683,9 +683,7 @@ impl StatementParser {
     /// Also handles: on <n> <statement> (alias syntax)
     fn parse_track_statement(&mut self) -> Result<Statement, CadenceError> {
         // Accept either 'track' or 'on' as the prefix
-        if self.check(&Token::Track) {
-            self.advance();
-        } else if self.check(&Token::On) {
+        if self.check(&Token::Track) || self.check(&Token::On) {
             self.advance();
         } else {
             return Err(CadenceError::new(

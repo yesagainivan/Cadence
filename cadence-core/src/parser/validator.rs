@@ -41,7 +41,7 @@ impl<'a> Validator<'a> {
                             "Variable '{}' cannot reference itself in its definition",
                             name
                         ),
-                        span.clone(),
+                        span,
                     ));
                 }
                 self.visit_expression(value, span);
@@ -50,7 +50,7 @@ impl<'a> Validator<'a> {
             Statement::FunctionDef { body, .. } => {
                 // Validate function body
                 for inner_stmt in body {
-                    self.visit_unspanned_statement(inner_stmt, span.clone());
+                    self.visit_unspanned_statement(inner_stmt, span);
                 }
             }
             Statement::If {
@@ -58,43 +58,43 @@ impl<'a> Validator<'a> {
                 then_body,
                 else_body,
             } => {
-                self.visit_expression(condition, span.clone());
+                self.visit_expression(condition, span);
                 // Validate then branch
                 for inner_stmt in then_body {
-                    self.visit_unspanned_statement(inner_stmt, span.clone());
+                    self.visit_unspanned_statement(inner_stmt, span);
                 }
                 // Validate else branch
                 if let Some(else_stmts) = else_body {
                     for inner_stmt in else_stmts {
-                        self.visit_unspanned_statement(inner_stmt, span.clone());
+                        self.visit_unspanned_statement(inner_stmt, span);
                     }
                 }
             }
             Statement::Repeat { body, .. } | Statement::Loop { body } => {
                 // Validate loop body
                 for inner_stmt in body {
-                    self.visit_unspanned_statement(inner_stmt, span.clone());
+                    self.visit_unspanned_statement(inner_stmt, span);
                 }
             }
             Statement::For {
                 body, start, end, ..
             } => {
-                self.visit_expression(start, span.clone());
-                self.visit_expression(end, span.clone());
+                self.visit_expression(start, span);
+                self.visit_expression(end, span);
                 // Validate for loop body
                 for inner_stmt in body {
-                    self.visit_unspanned_statement(inner_stmt, span.clone());
+                    self.visit_unspanned_statement(inner_stmt, span);
                 }
             }
             Statement::Block(body) => {
                 // Validate block body
                 for inner_stmt in body {
-                    self.visit_unspanned_statement(inner_stmt, span.clone());
+                    self.visit_unspanned_statement(inner_stmt, span);
                 }
             }
             Statement::Track { body, .. } => {
                 // Validate track body (boxed statement)
-                self.visit_unspanned_statement(body, span.clone());
+                self.visit_unspanned_statement(body, span);
             }
             Statement::Play { target, .. } => self.visit_expression(target, span),
             Statement::Tempo(expr) | Statement::Volume(expr) | Statement::Wait { beats: expr } => {
@@ -114,7 +114,7 @@ impl<'a> Validator<'a> {
             Statement::Assign { value, .. } => self.visit_expression(value, parent_span),
             Statement::FunctionDef { body, .. } => {
                 for inner_stmt in body {
-                    self.visit_unspanned_statement(inner_stmt, parent_span.clone());
+                    self.visit_unspanned_statement(inner_stmt, parent_span);
                 }
             }
             Statement::If {
@@ -122,37 +122,37 @@ impl<'a> Validator<'a> {
                 then_body,
                 else_body,
             } => {
-                self.visit_expression(condition, parent_span.clone());
+                self.visit_expression(condition, parent_span);
                 for inner_stmt in then_body {
-                    self.visit_unspanned_statement(inner_stmt, parent_span.clone());
+                    self.visit_unspanned_statement(inner_stmt, parent_span);
                 }
                 if let Some(else_stmts) = else_body {
                     for inner_stmt in else_stmts {
-                        self.visit_unspanned_statement(inner_stmt, parent_span.clone());
+                        self.visit_unspanned_statement(inner_stmt, parent_span);
                     }
                 }
             }
             Statement::Repeat { body, .. } | Statement::Loop { body } => {
                 for inner_stmt in body {
-                    self.visit_unspanned_statement(inner_stmt, parent_span.clone());
+                    self.visit_unspanned_statement(inner_stmt, parent_span);
                 }
             }
             Statement::For {
                 body, start, end, ..
             } => {
-                self.visit_expression(start, parent_span.clone());
-                self.visit_expression(end, parent_span.clone());
+                self.visit_expression(start, parent_span);
+                self.visit_expression(end, parent_span);
                 for inner_stmt in body {
-                    self.visit_unspanned_statement(inner_stmt, parent_span.clone());
+                    self.visit_unspanned_statement(inner_stmt, parent_span);
                 }
             }
             Statement::Block(body) => {
                 for inner_stmt in body {
-                    self.visit_unspanned_statement(inner_stmt, parent_span.clone());
+                    self.visit_unspanned_statement(inner_stmt, parent_span);
                 }
             }
             Statement::Track { body, .. } => {
-                self.visit_unspanned_statement(body, parent_span.clone());
+                self.visit_unspanned_statement(body, parent_span);
             }
             Statement::Play { target, .. } => self.visit_expression(target, parent_span),
             Statement::Tempo(expr) | Statement::Volume(expr) | Statement::Wait { beats: expr } => {
@@ -166,9 +166,9 @@ impl<'a> Validator<'a> {
     fn visit_expression(&mut self, expr: &Expression, span: Span) {
         match expr {
             Expression::FunctionCall { name, args } => {
-                self.check_function_call(name, args, span.clone());
+                self.check_function_call(name, args, span);
                 for arg in args {
-                    self.visit_expression(arg, span.clone());
+                    self.visit_expression(arg, span);
                 }
             }
             Expression::BinaryOp { left, right, .. }
@@ -178,19 +178,19 @@ impl<'a> Validator<'a> {
             | Expression::Union { left, right }
             | Expression::Difference { left, right }
             | Expression::Comparison { left, right, .. } => {
-                self.visit_expression(left, span.clone());
-                self.visit_expression(right, span.clone());
+                self.visit_expression(left, span);
+                self.visit_expression(right, span);
             }
             Expression::LogicalNot(expr) | Expression::Transpose { target: expr, .. } => {
-                self.visit_expression(expr, span.clone());
+                self.visit_expression(expr, span);
             }
             Expression::Index { target, index } => {
-                self.visit_expression(target, span.clone());
-                self.visit_expression(index, span.clone());
+                self.visit_expression(target, span);
+                self.visit_expression(index, span);
             }
             Expression::Array(elements) => {
                 for elem in elements {
-                    self.visit_expression(elem, span.clone());
+                    self.visit_expression(elem, span);
                 }
             }
             // Pre-validate pattern strings for syntax errors
@@ -242,17 +242,15 @@ impl<'a> Validator<'a> {
         }
 
         // 3. Check common progressions (I-IV-V etc)
-        if CommonProgressions::is_valid_progression(name)
+        if (CommonProgressions::is_valid_progression(name)
             || CommonProgressions::is_numeric_progression(name)
-            || CommonProgressions::is_roman_numeral_progression(name)
+            || CommonProgressions::is_roman_numeral_progression(name))
+            && args.len() != 1
         {
-            if args.len() != 1 {
-                self.errors.push(CadenceError::new(
-                    format!("Progression '{}' expects 1 key argument", name),
-                    span,
-                ));
-            }
-            return;
+            self.errors.push(CadenceError::new(
+                format!("Progression '{}' expects 1 key argument", name),
+                span,
+            ));
         }
     }
 

@@ -88,7 +88,15 @@ impl FunctionRegistry {
         registry.register_all();
         registry
     }
+}
 
+impl Default for FunctionRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FunctionRegistry {
     fn register(
         &mut self,
         name: &str,
@@ -327,7 +335,7 @@ impl FunctionRegistry {
                                 len
                             ));
                         }
-                        Ok(Value::Note(notes[actual_idx as usize].clone()))
+                        Ok(Value::Note(notes[actual_idx as usize]))
                     }
                     Value::Array(arr) => {
                         let len = arr.len() as i32;
@@ -1699,7 +1707,7 @@ impl FunctionRegistry {
                     _ => return Err(anyhow!("wave() expects a string name")),
                 };
 
-                let waveform = crate::types::Waveform::from_str(&wave_name)
+                let waveform = crate::types::Waveform::from_name(&wave_name)
                     .ok_or_else(|| anyhow!("Unknown waveform: {}", wave_name))?;
 
                 pattern.waveform = Some(waveform);

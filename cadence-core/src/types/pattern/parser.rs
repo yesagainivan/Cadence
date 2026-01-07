@@ -126,7 +126,7 @@ pub fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
                 // or a drum name, or an identifier
                 let step = if let Ok(note) = token.parse::<Note>() {
                     PatternStep::Note(note)
-                } else if let Some(drum) = DrumSound::from_str(&token) {
+                } else if let Some(drum) = DrumSound::from_name(&token) {
                     PatternStep::Drum(drum)
                 } else {
                     // Not a valid note or drum, treat as variable
@@ -139,7 +139,7 @@ pub fn parse_steps(notation: &str) -> Result<Vec<PatternStep>> {
             'h'..='z' | 'H'..='Z' => {
                 let ident = take_identifier(&mut chars);
                 // Check if it's a drum name first
-                let step = if let Some(drum) = DrumSound::from_str(&ident) {
+                let step = if let Some(drum) = DrumSound::from_name(&ident) {
                     PatternStep::Drum(drum)
                 } else {
                     PatternStep::Variable(ident)
@@ -162,7 +162,7 @@ fn take_until_angle_bracket(chars: &mut std::iter::Peekable<std::str::Chars>) ->
     let mut content = String::new();
     let mut depth = 1;
 
-    while let Some(c) = chars.next() {
+    for c in chars.by_ref() {
         match c {
             '<' => {
                 depth += 1;
@@ -187,7 +187,7 @@ fn take_until_bracket(chars: &mut std::iter::Peekable<std::str::Chars>) -> Resul
     let mut content = String::new();
     let mut depth = 1;
 
-    while let Some(c) = chars.next() {
+    for c in chars.by_ref() {
         match c {
             '[' => {
                 depth += 1;
@@ -212,7 +212,7 @@ fn take_until_brace(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<
     let mut content = String::new();
     let mut depth = 1;
 
-    while let Some(c) = chars.next() {
+    for c in chars.by_ref() {
         match c {
             '{' => {
                 depth += 1;
@@ -417,7 +417,7 @@ fn parse_velocity_param(chars: &mut std::iter::Peekable<std::str::Chars>) -> Res
         let f: f32 = num_str
             .parse()
             .map_err(|_| anyhow!("Invalid velocity: {}", num_str))?;
-        if f < 0.0 || f > 1.0 {
+        if !(0.0..=1.0).contains(&f) {
             return Err(anyhow!("Velocity float must be 0.0-1.0, got {}", f));
         }
         (f * 127.0).round() as u8

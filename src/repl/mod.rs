@@ -256,7 +256,7 @@ impl Repl {
             InterpreterAction::SetWaveform { waveform, track_id } => {
                 // Parse waveform name and set it on the audio handle
                 use crate::types::Waveform;
-                if let Some(wf) = Waveform::from_str(&waveform) {
+                if let Some(wf) = Waveform::from_name(&waveform) {
                     self.dispatcher_handle.set_track_waveform(track_id, wf);
                 } else {
                     println!(

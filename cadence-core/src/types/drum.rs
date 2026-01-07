@@ -33,7 +33,7 @@ pub enum DrumSound {
 
 impl DrumSound {
     /// Parse drum sound from string (TidalCycles-style names)
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn from_name(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             // Kick / Bass drum
             "kick" | "k" | "bd" | "bass" => Some(DrumSound::Kick),
@@ -121,13 +121,13 @@ mod tests {
 
     #[test]
     fn test_drum_parsing() {
-        assert_eq!(DrumSound::from_str("kick"), Some(DrumSound::Kick));
-        assert_eq!(DrumSound::from_str("k"), Some(DrumSound::Kick));
-        assert_eq!(DrumSound::from_str("bd"), Some(DrumSound::Kick));
-        assert_eq!(DrumSound::from_str("snare"), Some(DrumSound::Snare));
-        assert_eq!(DrumSound::from_str("hh"), Some(DrumSound::HiHat));
-        assert_eq!(DrumSound::from_str("KICK"), Some(DrumSound::Kick)); // case insensitive
-        assert_eq!(DrumSound::from_str("invalid"), None);
+        assert_eq!(DrumSound::from_name("kick"), Some(DrumSound::Kick));
+        assert_eq!(DrumSound::from_name("k"), Some(DrumSound::Kick));
+        assert_eq!(DrumSound::from_name("bd"), Some(DrumSound::Kick));
+        assert_eq!(DrumSound::from_name("snare"), Some(DrumSound::Snare));
+        assert_eq!(DrumSound::from_name("hh"), Some(DrumSound::HiHat));
+        assert_eq!(DrumSound::from_name("KICK"), Some(DrumSound::Kick)); // case insensitive
+        assert_eq!(DrumSound::from_name("invalid"), None);
     }
 
     #[test]

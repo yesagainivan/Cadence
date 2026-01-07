@@ -114,7 +114,11 @@ impl EnvelopedOscillator {
     /// Alternates between -1 and 1
     #[inline]
     fn square(&self) -> f32 {
-        if self.phase < 0.5 { 1.0 } else { -1.0 }
+        if self.phase < 0.5 {
+            1.0
+        } else {
+            -1.0
+        }
     }
 
     /// Triangle wave: mellow, flute-like - odd harmonics, quieter
@@ -137,11 +141,11 @@ mod tests {
 
     #[test]
     fn test_waveform_parsing() {
-        assert_eq!(Waveform::from_str("sine"), Some(Waveform::Sine));
-        assert_eq!(Waveform::from_str("SAW"), Some(Waveform::Saw));
-        assert_eq!(Waveform::from_str("Square"), Some(Waveform::Square));
-        assert_eq!(Waveform::from_str("tri"), Some(Waveform::Triangle));
-        assert_eq!(Waveform::from_str("invalid"), None);
+        assert_eq!(Waveform::from_name("sine"), Some(Waveform::Sine));
+        assert_eq!(Waveform::from_name("SAW"), Some(Waveform::Saw));
+        assert_eq!(Waveform::from_name("Square"), Some(Waveform::Square));
+        assert_eq!(Waveform::from_name("tri"), Some(Waveform::Triangle));
+        assert_eq!(Waveform::from_name("invalid"), None);
     }
 
     #[test]

@@ -395,7 +395,7 @@ impl Evaluator {
                                 len
                             ));
                         }
-                        Ok(Value::Note(notes[actual_idx as usize].clone()))
+                        Ok(Value::Note(notes[actual_idx as usize]))
                     }
                     Value::Array(arr) => {
                         let len = arr.len() as i32;
@@ -731,7 +731,7 @@ impl Evaluator {
                         // Note: we don't support break/continue in pure evaluation
                         if let Ok(Value::Unit) = &result {
                             // Continue loop
-                        } else if let Ok(_) = &result {
+                        } else if result.is_ok() {
                             return result; // Return from function
                         } else {
                             return result; // Error
@@ -857,7 +857,7 @@ impl Evaluator {
             .chars()
             .filter_map(|c| {
                 if let Some(digit) = c.to_digit(10) {
-                    if digit >= 1 && digit <= 7 {
+                    if (1..=7).contains(&digit) {
                         Some(roman_numerals[(digit - 1) as usize].to_string())
                     } else {
                         None

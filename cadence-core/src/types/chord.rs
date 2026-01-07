@@ -148,7 +148,7 @@ impl Chord {
 
     /// Get the notes as a vector in input order (respects inversions)
     pub fn notes_vec(&self) -> Vec<Note> {
-        self.input_order.iter().copied().collect()
+        self.input_order.to_vec()
         // self.input_order.clone()
     }
 
