@@ -33,6 +33,7 @@ jobs:
         run: |
           cd cadence-core
           wasm-pack build --target web --features wasm
+          mkdir -p ../editor/src/wasm/
           cp -r pkg/* ../editor/src/wasm/
 
       - name: Setup Node.js
