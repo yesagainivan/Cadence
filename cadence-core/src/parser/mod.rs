@@ -19,7 +19,7 @@ mod evaluator_tests;
 pub use ast::{Expression, Program, Statement, Value};
 pub use environment::{Environment, SharedEnvironment};
 pub use error::CadenceError;
-pub use evaluator::{eval, Evaluator};
+pub use evaluator::{eval, EnvironmentRef, Evaluator};
 pub use interpreter::{ControlFlow, Interpreter, InterpreterAction};
 pub use lexer::{Lexer, Token};
 pub use statement_parser::{parse_expression as parse, parse_statements, StatementParser};

@@ -41,5 +41,5 @@ wasm-pack build --target web --features wasm --out-dir ../editor/src/wasm
 use cadence_core::{parse_and_evaluate, Environment};
 
 let env = Environment::new();
-let result = parse_and_evaluate("\"C E G\" |> fast 2", &env)?;
+let result = parse_and_evaluate("\"C E G\".fast(2)", &env)?;
 ```

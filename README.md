@@ -11,10 +11,10 @@ A live-coding language for composing musical patterns. Cadence uses a TidalCycle
 let chords = "[C, E, G] [F, A, C] [G, B, D]"
 
 // Play it with transformations
-play chords |> slow 2 |> wave "saw" loop
+play chords.slow(2).wave("saw") loop
 
 // Layer a melody
-on 2 play "C5 E5 G5 C6" |> fast 2 loop
+on 2 play "C5 E5 G5 C6".fast(2) loop
 ```
 
 ## Features
@@ -24,7 +24,7 @@ on 2 play "C5 E5 G5 C6" |> fast 2 loop
 - **Euclidean Rhythms** — `C(3,8)` distributes 3 hits across 8 steps
 - **Polyrhythms** — `{C D E, F G}` plays patterns simultaneously
 - **WebMIDI** — Send notes to external synths and DAWs
-- **Functional Transforms** — Chain with `|>`: `fast`, `slow`, `transpose`, `rev`
+- **Functional Transforms** — Chain with `.`: `fast`, `slow`, `transpose`, `rev`
 
 ## Project Structure
 

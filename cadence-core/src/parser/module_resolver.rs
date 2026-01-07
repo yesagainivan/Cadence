@@ -224,7 +224,7 @@ impl ModuleResolver {
             match stmt {
                 Statement::Let { name, value } => {
                     // Evaluate the expression to get the value
-                    match evaluator.eval_with_env(value.clone(), Some(&temp_env)) {
+                    match evaluator.eval_with_env(value.clone(), Some(crate::parser::evaluator::EnvironmentRef::Borrowed(&temp_env))) {
                         Ok(val) => {
                             temp_env.define(name.clone(), val.clone());
                             exports.values.insert(name.clone(), val);

@@ -4,7 +4,7 @@
 
 use crate::parser::ast::{Expression, Program, Statement, Value};
 use crate::parser::environment::{Environment, SharedEnvironment};
-use crate::parser::evaluator::Evaluator;
+use crate::parser::evaluator::{EnvironmentRef, Evaluator};
 use crate::parser::module_resolver::ModuleResolver;
 use crate::parser::statement_parser::parse_statements;
 use crate::types::{QueueMode, ScheduledAction, ScheduledEvent};
@@ -647,8 +647,11 @@ impl Interpreter {
     /// Evaluate an expression using the environment
     fn eval_expression(&self, expr: &crate::parser::ast::Expression) -> Result<Value> {
         // Use eval_with_env to enable variable resolution
-        let env_guard = self.environment.read().unwrap();
-        self.evaluator.eval_with_env(expr.clone(), Some(&env_guard))
+        // Use Shared ref to avoid holding the lock
+        self.evaluator.eval_with_env(
+            expr.clone(),
+            Some(EnvironmentRef::Shared(self.environment.clone())),
+        )
     }
 
     /// Execute a statement using a local (non-shared) environment.
@@ -664,7 +667,7 @@ impl Interpreter {
             Statement::Let { name, value } => {
                 let val = self
                     .evaluator
-                    .eval_with_env(value.clone(), Some(local_env))?;
+                    .eval_with_env(value.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
                 local_env.define(name.clone(), val);
                 Ok(ControlFlow::Normal)
             }
@@ -672,7 +675,7 @@ impl Interpreter {
             Statement::Assign { name, value } => {
                 let val = self
                     .evaluator
-                    .eval_with_env(value.clone(), Some(local_env))?;
+                    .eval_with_env(value.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
                 if local_env.is_defined(name) {
                     local_env
                         .set(name, val)
@@ -689,18 +692,19 @@ impl Interpreter {
             Statement::Expression(expr) => {
                 let _val = self
                     .evaluator
-                    .eval_with_env(expr.clone(), Some(local_env))?;
+                    .eval_with_env(expr.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
                 Ok(ControlFlow::Normal)
             }
 
             Statement::Return(expr_opt) => {
-                let value = match expr_opt {
-                    Some(expr) => Some(
-                        self.evaluator
-                            .eval_with_env(expr.clone(), Some(local_env))?,
-                    ),
-                    None => None,
-                };
+                let value =
+                    match expr_opt {
+                        Some(expr) => Some(self.evaluator.eval_with_env(
+                            expr.clone(),
+                            Some(EnvironmentRef::Borrowed(local_env)),
+                        )?),
+                        None => None,
+                    };
                 Ok(ControlFlow::Return(value))
             }
 
@@ -726,7 +730,7 @@ impl Interpreter {
             } => {
                 let cond_val = self
                     .evaluator
-                    .eval_with_env(condition.clone(), Some(local_env))?;
+                    .eval_with_env(condition.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
                 let is_true = match cond_val {
                     Value::Boolean(b) => b,
                     _ => return Err(anyhow::anyhow!("Condition must be a boolean")),
@@ -785,8 +789,10 @@ impl Interpreter {
             } => {
                 let start_val = self
                     .evaluator
-                    .eval_with_env(start.clone(), Some(local_env))?;
-                let end_val = self.evaluator.eval_with_env(end.clone(), Some(local_env))?;
+                    .eval_with_env(start.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
+                let end_val = self
+                    .evaluator
+                    .eval_with_env(end.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
 
                 let start_num = match start_val {
                     Value::Number(n) => n,
@@ -852,7 +858,7 @@ impl Interpreter {
             Statement::Tempo(expr) => {
                 let val = self
                     .evaluator
-                    .eval_with_env(expr.clone(), Some(local_env))?;
+                    .eval_with_env(expr.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
                 let bpm = match val {
                     Value::Number(n) => n as f32,
                     _ => return Err(anyhow!("Tempo requires a numeric value")),
@@ -865,7 +871,7 @@ impl Interpreter {
             Statement::Volume(expr) => {
                 let val = self
                     .evaluator
-                    .eval_with_env(expr.clone(), Some(local_env))?;
+                    .eval_with_env(expr.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
                 let vol = match val {
                     Value::Number(n) => (n as f32) / 100.0,
                     _ => return Err(anyhow!("Volume requires a numeric value")),
@@ -896,7 +902,7 @@ impl Interpreter {
                 // Evaluate target in local env
                 let val = self
                     .evaluator
-                    .eval_with_env(target.clone(), Some(local_env))?;
+                    .eval_with_env(target.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
                 self.actions.push(InterpreterAction::PlayExpression {
                     expression: target.clone(),
                     looping: *looping,
@@ -952,7 +958,7 @@ impl Interpreter {
             Statement::Wait { beats } => {
                 let val = self
                     .evaluator
-                    .eval_with_env(beats.clone(), Some(local_env))?;
+                    .eval_with_env(beats.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
                 let beat_count = match val {
                     Value::Number(n) => n as f64,
                     _ => return Err(anyhow!("wait requires a numeric value")),

@@ -11,8 +11,9 @@ pub use cadence_core::parser::statement_parser;
 
 // Re-export commonly used types
 pub use cadence_core::parser::{
-    eval, parse_statements, ControlFlow, Environment, Evaluator, Expression, Interpreter,
-    InterpreterAction, Lexer, Program, SharedEnvironment, Statement, StatementParser, Token, Value,
+    eval, parse_statements, ControlFlow, Environment, EnvironmentRef, Evaluator, Expression,
+    Interpreter, InterpreterAction, Lexer, Program, SharedEnvironment, Statement, StatementParser,
+    Token, Value,
 };
 
 // Re-export parse function (aliased from parse_expression)

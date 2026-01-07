@@ -11,7 +11,7 @@
 use crate::audio::audio::AudioPlayerHandle;
 use crate::audio::clock::ClockTick;
 use crate::audio::midi::{frequency_to_midi, MidiOutputHandle};
-use crate::parser::{Evaluator, Expression, SharedEnvironment, Value};
+use crate::parser::{EnvironmentRef, Evaluator, Expression, SharedEnvironment, Value};
 use crate::types::{DrumSound, QueueMode, Waveform};
 use cadence_core::types::{ScheduledAction, ScheduledEvent};
 use crossbeam_channel::{unbounded, Receiver, Sender};
@@ -91,7 +91,10 @@ impl LoopingPattern {
         }
 
         let env_guard = self.env.read().map_err(|e| anyhow::anyhow!("{}", e))?;
-        let value = evaluator.eval_with_env(self.expression.clone(), Some(&env_guard))?;
+        let value = evaluator.eval_with_env(
+            self.expression.clone(),
+            Some(EnvironmentRef::Borrowed(&env_guard)),
+        )?;
 
         match value {
             Value::Note(note) => {

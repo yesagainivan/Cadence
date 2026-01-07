@@ -3,9 +3,34 @@ use crate::{
     types::{Chord, CommonProgressions, Note},
 };
 // use crate::types::{chord::Chord, note::Note};
+use crate::parser::environment::{Environment, SharedEnvironment};
 use anyhow::{anyhow, Result};
 use std::cell::RefCell;
 use std::collections::HashSet;
+
+// Enum to handle different types of environment references
+// This avoids holding locks on SharedEnvironment when not actively looking up variables
+#[derive(Clone)]
+pub enum EnvironmentRef<'a> {
+    Shared(SharedEnvironment),
+    Borrowed(&'a Environment),
+}
+
+impl<'a> EnvironmentRef<'a> {
+    pub fn lookup(&self, name: &str) -> Option<Value> {
+        match self {
+            EnvironmentRef::Shared(env) => {
+                // Lock only for the duration of the lookup
+                if let Ok(guard) = env.read() {
+                    guard.get(name).cloned()
+                } else {
+                    None
+                }
+            }
+            EnvironmentRef::Borrowed(env) => env.get(name).cloned(),
+        }
+    }
+}
 
 // Thread-local set to track variables currently being evaluated (for cycle detection)
 thread_local! {
@@ -27,23 +52,19 @@ impl Evaluator {
     }
 
     /// Evaluate an expression with optional environment for variable resolution
-    pub fn eval_with_env(
-        &self,
-        expr: Expression,
-        env: Option<&crate::parser::environment::Environment>,
-    ) -> Result<Value> {
+    /// Evaluate an expression with optional environment for variable resolution
+    pub fn eval_with_env(&self, expr: Expression, env: Option<EnvironmentRef>) -> Result<Value> {
         match expr {
             Expression::Note(note) => Ok(Value::Note(note)),
             Expression::Chord(chord) => Ok(Value::Chord(chord)),
             Expression::Pattern(pattern) => {
                 // Resolve any variable references in the pattern
                 if pattern.has_variables() {
-                    if let Some(environment) = env {
+                    if let Some(ref environment) = env {
+                        // Use lookup which handles locking internally (and briefly)
                         let resolved = pattern.resolve_variables_with(|name| {
-                            // Look up the variable in the environment
-                            if let Some(value) = environment.get(name) {
-                                // Convert Value to PatternStep(s)
-                                value_to_pattern_steps(value)
+                            if let Some(value) = environment.lookup(name) {
+                                value_to_pattern_steps(&value)
                             } else {
                                 None
                             }
@@ -61,7 +82,7 @@ impl Evaluator {
             Expression::String(s) => Ok(Value::String(s)),
             Expression::Number(n) => Ok(Value::Number(n)),
             Expression::Transpose { target, semitones } => {
-                let target_value = self.eval_with_env(*target, env)?;
+                let target_value = self.eval_with_env(*target, env.clone())?;
                 match target_value {
                     Value::Note(note) => {
                         let transposed = note + semitones;
@@ -100,7 +121,10 @@ impl Evaluator {
                     } => {
                         // Evaluate thunk first, then transpose the result
                         let env_guard = thunk_env.read().map_err(|e| anyhow!("{}", e))?;
-                        let resolved = self.eval_with_env(*expression, Some(&env_guard))?;
+                        let resolved = self.eval_with_env(
+                            *expression,
+                            Some(EnvironmentRef::Borrowed(&env_guard)),
+                        )?;
                         // Recursively transpose the resolved value
                         self.eval_with_env(
                             Expression::Transpose {
@@ -113,7 +137,7 @@ impl Evaluator {
                 }
             }
             Expression::Intersection { left, right } => {
-                let left_value = self.eval_with_env(*left, env)?;
+                let left_value = self.eval_with_env(*left, env.clone())?;
                 let right_value = self.eval_with_env(*right, env)?;
 
                 match (left_value, right_value) {
@@ -125,7 +149,7 @@ impl Evaluator {
                 }
             }
             Expression::Union { left, right } => {
-                let left_value = self.eval_with_env(*left, env)?;
+                let left_value = self.eval_with_env(*left, env.clone())?;
                 let right_value = self.eval_with_env(*right, env)?;
 
                 match (left_value, right_value) {
@@ -137,7 +161,7 @@ impl Evaluator {
                 }
             }
             Expression::Difference { left, right } => {
-                let left_value = self.eval_with_env(*left, env)?;
+                let left_value = self.eval_with_env(*left, env.clone())?;
                 let right_value = self.eval_with_env(*right, env)?;
 
                 match (left_value, right_value) {
@@ -153,7 +177,7 @@ impl Evaluator {
             }
             Expression::Variable(name) => match env {
                 Some(e) => {
-                    match e.get(&name).cloned() {
+                    match e.lookup(&name) {
                         Some(Value::Thunk {
                             expression,
                             env: thunk_env,
@@ -176,7 +200,10 @@ impl Evaluator {
 
                             // Re-evaluate thunk with its captured environment
                             let env_guard = thunk_env.read().map_err(|e| anyhow!("{}", e))?;
-                            let result = self.eval_with_env(*expression, Some(&env_guard));
+                            let result = self.eval_with_env(
+                                *expression,
+                                Some(EnvironmentRef::Borrowed(&env_guard)),
+                            );
 
                             // Remove from evaluation stack (even on error)
                             EVALUATING_VARS.with(|ev| {
@@ -200,7 +227,7 @@ impl Evaluator {
                 right,
                 operator,
             } => {
-                let left_val = self.eval_with_env(*left, env)?;
+                let left_val = self.eval_with_env(*left, env.clone())?;
                 let right_val = self.eval_with_env(*right, env)?;
 
                 // For numeric comparisons, extract numbers
@@ -245,7 +272,7 @@ impl Evaluator {
 
             // Logical AND with short-circuit evaluation
             Expression::LogicalAnd { left, right } => {
-                let left_val = self.eval_with_env(*left, env)?;
+                let left_val = self.eval_with_env(*left, env.clone())?;
                 match left_val {
                     Value::Boolean(false) => Ok(Value::Boolean(false)), // Short-circuit
                     Value::Boolean(true) => {
@@ -267,7 +294,7 @@ impl Evaluator {
 
             // Logical OR with short-circuit evaluation
             Expression::LogicalOr { left, right } => {
-                let left_val = self.eval_with_env(*left, env)?;
+                let left_val = self.eval_with_env(*left, env.clone())?;
                 match left_val {
                     Value::Boolean(true) => Ok(Value::Boolean(true)), // Short-circuit
                     Value::Boolean(false) => {
@@ -298,7 +325,7 @@ impl Evaluator {
 
             // Index operation: pattern[0], chord[1], array[-1]
             Expression::Index { target, index } => {
-                let target_val = self.eval_with_env(*target, env)?;
+                let target_val = self.eval_with_env(*target, env.clone())?;
                 let index_val = self.eval_with_env(*index, env)?;
 
                 let idx = match index_val {
@@ -444,7 +471,7 @@ impl Evaluator {
             } => {
                 use crate::parser::ast::ArithmeticOp;
 
-                let left_val = self.eval_with_env(*left, env)?;
+                let left_val = self.eval_with_env(*left, env.clone())?;
                 let right_val = self.eval_with_env(*right, env)?;
 
                 match (left_val, right_val) {
@@ -514,7 +541,7 @@ impl Evaluator {
             Expression::Array(elements) => {
                 let values: Vec<Value> = elements
                     .into_iter()
-                    .map(|e| self.eval_with_env(e, env))
+                    .map(|e| self.eval_with_env(e, env.clone()))
                     .collect::<Result<Vec<_>>>()?;
 
                 // Check if ALL values are notes → construct a Chord
@@ -540,11 +567,11 @@ impl Evaluator {
         &self,
         name: &str,
         args: Vec<Expression>,
-        env: Option<&crate::parser::environment::Environment>,
+        env: Option<EnvironmentRef>,
     ) -> Result<Value> {
         // First, check for user-defined functions in the environment
-        if let Some(environment) = env {
-            if let Some(func_value) = environment.get(name) {
+        if let Some(environment) = &env {
+            if let Some(func_value) = environment.lookup(name) {
                 if let Value::Function {
                     params,
                     body,
@@ -564,16 +591,33 @@ impl Evaluator {
                     // Evaluate arguments
                     let mut arg_values = Vec::new();
                     for arg in args {
-                        arg_values.push(self.eval_with_env(arg, env)?);
+                        arg_values.push(self.eval_with_env(arg, env.clone())?);
                     }
 
                     // Create a new environment with parameters bound to argument values
                     let mut local_env = crate::parser::environment::Environment::new();
 
-                    // Copy outer environment bindings
-                    for var_name in environment.all_names() {
-                        if let Some(val) = environment.get(var_name) {
-                            local_env.define(var_name.clone(), val.clone());
+                    // Copy outer environment bindings (if we have access)
+                    if let Some(environment) = &env {
+                        // EnvironmentRef doesn't expose all_names() directly easily without locking
+                        // But for function calls we need to capture the scope
+                        match environment {
+                            EnvironmentRef::Borrowed(e) => {
+                                for var_name in e.all_names() {
+                                    if let Some(val) = e.get(var_name) {
+                                        local_env.define(var_name.clone(), val.clone());
+                                    }
+                                }
+                            }
+                            EnvironmentRef::Shared(e_lock) => {
+                                if let Ok(e) = e_lock.read() {
+                                    for var_name in e.all_names() {
+                                        if let Some(val) = e.get(var_name) {
+                                            local_env.define(var_name.clone(), val.clone());
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -628,7 +672,7 @@ impl Evaluator {
         &self,
         name: &str,
         arg_values: Vec<Value>,
-        env: Option<&crate::parser::environment::Environment>,
+        env: Option<EnvironmentRef>,
     ) -> Result<Value> {
         // Convert Values to Expressions by wrapping them
         let args: Vec<Expression> = arg_values
@@ -657,12 +701,14 @@ impl Evaluator {
         for stmt in statements {
             match stmt {
                 Statement::Let { name, value } => {
-                    let val = self.eval_with_env(value.clone(), Some(local_env))?;
+                    let val = self
+                        .eval_with_env(value.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
                     local_env.define(name.clone(), val);
                 }
 
                 Statement::Assign { name, value } => {
-                    let val = self.eval_with_env(value.clone(), Some(local_env))?;
+                    let val = self
+                        .eval_with_env(value.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
                     if local_env.is_defined(name) {
                         local_env.set(name, val).map_err(|e| anyhow!("{}", e))?;
                     } else {
@@ -671,12 +717,14 @@ impl Evaluator {
                 }
 
                 Statement::Expression(expr) => {
-                    last_value = self.eval_with_env(expr.clone(), Some(local_env))?;
+                    last_value = self
+                        .eval_with_env(expr.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
                 }
 
                 Statement::Return(expr_opt) => {
                     return match expr_opt {
-                        Some(expr) => self.eval_with_env(expr.clone(), Some(local_env)),
+                        Some(expr) => self
+                            .eval_with_env(expr.clone(), Some(EnvironmentRef::Borrowed(local_env))),
                         None => Ok(Value::Unit),
                     };
                 }
@@ -698,7 +746,10 @@ impl Evaluator {
                     then_body,
                     else_body,
                 } => {
-                    let cond_val = self.eval_with_env(condition.clone(), Some(local_env))?;
+                    let cond_val = self.eval_with_env(
+                        condition.clone(),
+                        Some(EnvironmentRef::Borrowed(local_env)),
+                    )?;
                     let is_true = match cond_val {
                         Value::Boolean(b) => b,
                         _ => return Err(anyhow!("Condition must be a boolean")),
@@ -759,8 +810,10 @@ impl Evaluator {
                     end,
                     body,
                 } => {
-                    let start_val = self.eval_with_env(start.clone(), Some(local_env))?;
-                    let end_val = self.eval_with_env(end.clone(), Some(local_env))?;
+                    let start_val = self
+                        .eval_with_env(start.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
+                    let end_val =
+                        self.eval_with_env(end.clone(), Some(EnvironmentRef::Borrowed(local_env)))?;
 
                     let start_num = match start_val {
                         Value::Number(n) => n,
@@ -903,8 +956,10 @@ fn value_to_pattern_steps(value: &Value) -> Option<Vec<crate::types::PatternStep
             // Evaluate the thunk and recursively convert the result
             let evaluator = Evaluator::new();
             if let Ok(env_guard) = env.read() {
-                if let Ok(resolved) = evaluator.eval_with_env(*expression.clone(), Some(&env_guard))
-                {
+                if let Ok(resolved) = evaluator.eval_with_env(
+                    *expression.clone(),
+                    Some(EnvironmentRef::Borrowed(&env_guard)),
+                ) {
                     return value_to_pattern_steps(&resolved);
                 }
             }
@@ -1333,7 +1388,7 @@ mod evaluator_numeric_tests {
         // Get 'x' and try to evaluate it
         let result = evaluator.eval_with_env(
             crate::parser::ast::Expression::Variable("x".to_string()),
-            Some(&env),
+            Some(EnvironmentRef::Borrowed(&env)),
         );
 
         assert!(result.is_err());
@@ -1360,7 +1415,7 @@ mod evaluator_numeric_tests {
 
         let result = evaluator.eval_with_env(
             crate::parser::ast::Expression::Variable("a".to_string()),
-            Some(&env),
+            Some(EnvironmentRef::Borrowed(&env)),
         );
 
         assert!(result.is_err());

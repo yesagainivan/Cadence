@@ -11,7 +11,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(feature = "wasm")]
 use crate::parser::ast::{Expression, Value};
 #[cfg(feature = "wasm")]
-use crate::parser::evaluator::Evaluator;
+use crate::parser::evaluator::{EnvironmentRef, Evaluator};
 #[cfg(feature = "wasm")]
 use crate::parser::interpreter::{Interpreter, InterpreterAction};
 use crate::parser::lexer::{Lexer, SpannedToken, Token};
@@ -797,7 +797,7 @@ fn convert_action(
         } => {
             // Evaluate the expression to get a Value
             let value = evaluator
-                .eval_with_env(expression.clone(), Some(env))
+                .eval_with_env(expression.clone(), Some(EnvironmentRef::Borrowed(env)))
                 .ok()?;
 
             // Extract events, envelope, waveform, and pan based on value type
@@ -883,7 +883,7 @@ fn convert_action(
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn run_script(input: &str) -> JsValue {
-    use crate::parser::evaluator::Evaluator;
+    use crate::parser::evaluator::{EnvironmentRef, Evaluator};
     use crate::parser::interpreter::Interpreter;
     use crate::parser::parse_statements;
 
@@ -939,7 +939,7 @@ pub fn run_script(input: &str) -> JsValue {
 #[wasm_bindgen]
 pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
     use crate::parser::ast::{Statement, Value};
-    use crate::parser::evaluator::Evaluator;
+    use crate::parser::evaluator::{EnvironmentRef, Evaluator};
     use crate::parser::interpreter::Interpreter;
     use crate::parser::statement_parser::parse_spanned_statements;
 
@@ -1015,7 +1015,7 @@ pub fn get_events_at_position(code: &str, position: usize) -> JsValue {
 
     // Evaluate the expression
     // Evaluate the expression
-    let value = match evaluator.eval_with_env(expr, Some(&env)) {
+    let value = match evaluator.eval_with_env(expr, Some(EnvironmentRef::Borrowed(&env))) {
         Ok(v) => v,
         Err(e) => {
             // Return error for display in editor
@@ -1195,7 +1195,7 @@ pub struct CursorContextJS {
 #[wasm_bindgen]
 pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
     use crate::parser::ast::{Statement, Value};
-    use crate::parser::evaluator::Evaluator;
+    use crate::parser::evaluator::{EnvironmentRef, Evaluator};
     use crate::parser::interpreter::Interpreter;
     use crate::parser::statement_parser::parse_spanned_statements;
 
@@ -1581,7 +1581,7 @@ pub fn get_context_at_cursor(code: &str, position: usize) -> JsValue {
 
     // If we have an expression, evaluate it to get properties
     let (value_type, properties) = if let Some(expr) = expr_opt {
-        match evaluator.eval_with_env(expr, Some(&env)) {
+        match evaluator.eval_with_env(expr, Some(EnvironmentRef::Borrowed(&env))) {
             Ok(value) => {
                 let (vt, props) = match value {
                     Value::Pattern(ref p) => {
@@ -1716,7 +1716,9 @@ impl WasmInterpreter {
         for stmt in &program.statements {
             match stmt {
                 crate::parser::Statement::Let { name, value } => {
-                    if let Ok(val) = evaluator.eval_with_env(value.clone(), Some(&env_guard)) {
+                    if let Ok(val) = evaluator
+                        .eval_with_env(value.clone(), Some(EnvironmentRef::Borrowed(&env_guard)))
+                    {
                         exports.values.insert(name.clone(), val);
                     }
                 }
@@ -1965,7 +1967,9 @@ impl WasmInterpreter {
             // We need to first evaluate to get pattern duration, then calculate cycle
             // For now, do an initial evaluation to get the pattern duration
             let env_read = self.interpreter.environment.read().unwrap();
-            let initial_value = match evaluator.eval_with_env(expr.clone(), Some(&env_read)) {
+            let initial_value = match evaluator
+                .eval_with_env(expr.clone(), Some(EnvironmentRef::Borrowed(&env_read)))
+            {
                 Ok(v) => v,
                 Err(_) => continue,
             };
@@ -2005,7 +2009,9 @@ impl WasmInterpreter {
 
             // Re-evaluate with the correct _cycle set
             let env_read = self.interpreter.environment.read().unwrap();
-            let value = match evaluator.eval_with_env(expr.clone(), Some(&env_read)) {
+            let value = match evaluator
+                .eval_with_env(expr.clone(), Some(EnvironmentRef::Borrowed(&env_read)))
+            {
                 Ok(v) => v,
                 Err(_) => continue, // Skip error
             };
@@ -2195,7 +2201,7 @@ impl WasmInterpreter {
     /// Unlike get_events_at_position (stateless), this uses resolved modules.
     pub fn get_events_for_statement(&self, code: &str, position: usize) -> JsValue {
         use crate::parser::ast::{Statement, Value};
-        use crate::parser::evaluator::Evaluator;
+        use crate::parser::evaluator::{EnvironmentRef, Evaluator};
         use crate::parser::statement_parser::parse_spanned_statements;
 
         // Parse with span tracking
@@ -2260,7 +2266,7 @@ impl WasmInterpreter {
         };
 
         // Evaluate using temp environment (has both imports and local vars)
-        let value = match evaluator.eval_with_env(expr, Some(&temp_env)) {
+        let value = match evaluator.eval_with_env(expr, Some(EnvironmentRef::Borrowed(&temp_env))) {
             Ok(v) => v,
             Err(e) => {
                 return serde_wasm_bindgen::to_value(&PatternEventsJS {
@@ -2386,7 +2392,7 @@ impl WasmInterpreter {
     /// Enables properties panel to work with imported symbols.
     pub fn get_context_for_statement(&self, code: &str, position: usize) -> JsValue {
         use crate::parser::ast::{Statement, Value};
-        use crate::parser::evaluator::Evaluator;
+        use crate::parser::evaluator::{EnvironmentRef, Evaluator};
         use crate::parser::statement_parser::parse_spanned_statements;
 
         // Parse with span tracking
@@ -2433,7 +2439,7 @@ impl WasmInterpreter {
             Statement::Expression(e) => ("expression".to_string(), Some(e.clone()), None),
             Statement::Tempo(e) => {
                 let tempo_val = evaluator
-                    .eval_with_env(e.clone(), Some(&temp_env))
+                    .eval_with_env(e.clone(), Some(EnvironmentRef::Borrowed(&temp_env)))
                     .ok()
                     .and_then(|v| {
                         if let Value::Number(n) = v {
@@ -2467,7 +2473,7 @@ impl WasmInterpreter {
 
         // Evaluate expression if we have one
         let (value_type, properties) = if let Some(expr) = expr_opt {
-            match evaluator.eval_with_env(expr, Some(&temp_env)) {
+            match evaluator.eval_with_env(expr, Some(EnvironmentRef::Borrowed(&temp_env))) {
                 Ok(value) => match value {
                     Value::Pattern(ref p) => {
                         let props = EditablePropertiesJS {

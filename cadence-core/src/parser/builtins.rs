@@ -1,6 +1,6 @@
 use crate::parser::ast::{Expression, Value};
-use crate::parser::environment::Environment;
-use crate::parser::evaluator::Evaluator;
+
+use crate::parser::evaluator::{Evaluator, EnvironmentRef};
 use crate::types::{
     analyze_progression, Chord, CommonProgressions, Note, RomanNumeral, VoiceLeading,
 };
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 pub type BuiltinHandler =
-    Arc<dyn Fn(&Evaluator, Vec<Expression>, Option<&Environment>) -> Result<Value> + Send + Sync>;
+    Arc<dyn Fn(&Evaluator, Vec<Expression>, Option<EnvironmentRef>) -> Result<Value> + Send + Sync>;
 
 static REGISTRY: OnceLock<FunctionRegistry> = OnceLock::new();
 
@@ -150,8 +150,8 @@ impl FunctionRegistry {
                     return Err(anyhow!("fast() expects 2 arguments: pattern, factor"));
                 }
 
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let factor_value = evaluator.eval_with_env(args[1].clone(), env)?;
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
+                let factor_value = evaluator.eval_with_env(args[1].clone(), env.clone())?;
 
                 let factor = match factor_value {
                     Value::Note(note) => (note.pitch_class() as usize).max(1),
@@ -203,8 +203,8 @@ impl FunctionRegistry {
                     return Err(anyhow!("slow() expects 2 arguments: pattern, factor"));
                 }
 
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let factor_value = evaluator.eval_with_env(args[1].clone(), env)?;
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
+                let factor_value = evaluator.eval_with_env(args[1].clone(), env.clone())?;
 
                 let factor = match factor_value {
                     Value::Note(note) => (note.pitch_class() as usize).max(1),
@@ -257,8 +257,8 @@ impl FunctionRegistry {
                     return Err(anyhow!("at() expects 2 arguments: target, index"));
                 }
 
-                let target_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let index_value = evaluator.eval_with_env(args[1].clone(), env)?;
+                let target_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
+                let index_value = evaluator.eval_with_env(args[1].clone(), env.clone())?;
 
                 let idx = match index_value {
                     Value::Number(n) => n,
@@ -371,8 +371,8 @@ impl FunctionRegistry {
                 }
                 // Read _beat from environment if available
                 if let Some(e) = env {
-                    if let Some(Value::Number(n)) = e.get("_beat") {
-                        return Ok(Value::Number(*n));
+                    if let Some(Value::Number(n)) = e.lookup("_beat") {
+                        return Ok(Value::Number(n));
                     }
                 }
                 Ok(Value::Number(0)) // Default if not in playback context
@@ -389,7 +389,7 @@ impl FunctionRegistry {
                     return Err(anyhow!("rev() expects 1 argument: pattern"));
                 }
 
-                let arg_value = evaluator.eval_with_env(args.into_iter().next().unwrap(), env)?;
+                let arg_value = evaluator.eval_with_env(args.into_iter().next().unwrap(), env.clone())?;
                 match arg_value {
                     Value::Pattern(p) => Ok(Value::Pattern(p.rev())),
                     Value::String(s) => {
@@ -421,8 +421,8 @@ impl FunctionRegistry {
                     return Err(anyhow!("rotate() expects 2 arguments: pattern, n"));
                 }
 
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let n_value = evaluator.eval_with_env(args[1].clone(), env)?;
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
+                let n_value = evaluator.eval_with_env(args[1].clone(), env.clone())?;
 
                 let pattern = match pattern_value {
                     Value::Pattern(p) => p,
@@ -451,8 +451,8 @@ impl FunctionRegistry {
                     return Err(anyhow!("take() expects 2 arguments: pattern, n"));
                 }
 
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let n_value = evaluator.eval_with_env(args[1].clone(), env)?;
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
+                let n_value = evaluator.eval_with_env(args[1].clone(), env.clone())?;
 
                 let pattern = match pattern_value {
                     Value::Pattern(p) => p,
@@ -481,8 +481,8 @@ impl FunctionRegistry {
                     return Err(anyhow!("chunk() expects 2 arguments: pattern, n"));
                 }
 
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let n_value = evaluator.eval_with_env(args[1].clone(), env)?;
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
+                let n_value = evaluator.eval_with_env(args[1].clone(), env.clone())?;
 
                 let pattern = match pattern_value {
                     Value::Pattern(p) => p,
@@ -511,8 +511,8 @@ impl FunctionRegistry {
                     return Err(anyhow!("drop() expects 2 arguments: pattern, n"));
                 }
 
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let n_value = evaluator.eval_with_env(args[1].clone(), env)?;
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
+                let n_value = evaluator.eval_with_env(args[1].clone(), env.clone())?;
 
                 let pattern = match pattern_value {
                     Value::Pattern(p) => p,
@@ -541,7 +541,7 @@ impl FunctionRegistry {
                     return Err(anyhow!("palindrome() expects 1 argument: pattern"));
                 }
 
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
 
                 match pattern_value {
                     Value::Pattern(p) => Ok(Value::Pattern(p.palindrome())),
@@ -574,8 +574,8 @@ impl FunctionRegistry {
                     return Err(anyhow!("stutter() expects 2 arguments: pattern, n"));
                 }
 
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let n_value = evaluator.eval_with_env(args[1].clone(), env)?;
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
+                let n_value = evaluator.eval_with_env(args[1].clone(), env.clone())?;
 
                 let n = match n_value {
                     Value::Number(n) => n.max(1) as usize,
@@ -614,7 +614,7 @@ impl FunctionRegistry {
                     return Err(anyhow!("len() expects 1 argument"));
                 }
 
-                let value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
 
                 let length = match value {
                     Value::Pattern(p) => p.len() as i32,
@@ -646,7 +646,7 @@ impl FunctionRegistry {
                 // Convert all args to patterns
                 let mut patterns: Vec<crate::types::Pattern> = Vec::new();
                 for (i, arg) in args.into_iter().enumerate() {
-                    let val = evaluator.eval_with_env(arg, env)?;
+                    let val = evaluator.eval_with_env(arg, env.clone())?;
                     let pattern = match val {
                         Value::Pattern(p) => p,
                         Value::String(s) => crate::types::Pattern::parse(&s)
@@ -679,8 +679,8 @@ impl FunctionRegistry {
                 if args.len() != 2 {
                     return Err(anyhow!("concat() expects 2 arguments"));
                 }
-                let p1_val = evaluator.eval_with_env(args[0].clone(), env)?;
-                let p2_val = evaluator.eval_with_env(args[1].clone(), env)?;
+                let p1_val = evaluator.eval_with_env(args[0].clone(), env.clone())?;
+                let p2_val = evaluator.eval_with_env(args[1].clone(), env.clone())?;
                 let p1 = match p1_val {
                     Value::Pattern(p) => p,
                     Value::String(s) => crate::types::Pattern::parse(&s)
@@ -711,7 +711,7 @@ impl FunctionRegistry {
                 // Convert all args to patterns
                 let mut patterns: Vec<crate::types::Pattern> = Vec::new();
                 for (i, arg) in args.into_iter().enumerate() {
-                    let val = evaluator.eval_with_env(arg, env)?;
+                    let val = evaluator.eval_with_env(arg, env.clone())?;
                     let pattern = match val {
                         Value::Pattern(p) => p,
                         Value::String(s) => crate::types::Pattern::parse(&s)
@@ -745,8 +745,8 @@ impl FunctionRegistry {
                     ));
                 }
 
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let semitones_value = evaluator.eval_with_env(args[1].clone(), env)?;
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
+                let semitones_value = evaluator.eval_with_env(args[1].clone(), env.clone())?;
 
                 let pattern = match pattern_value {
                     Value::Pattern(p) => p,
@@ -780,23 +780,23 @@ impl FunctionRegistry {
                 // Detect calling convention based on first argument type:
                 // - Function style: every(n, transform, pattern)
                 // - Method style:   every(pattern, n, transform) (desugared from pattern.every(n, transform))
-                let first_val = evaluator.eval_with_env(args[0].clone(), env)?;
+                let first_val = evaluator.eval_with_env(args[0].clone(), env.clone())?;
                 
                 let (n, transform_arg_idx, pattern_val) = match first_val {
                     // Function call style: every(n, transform, pattern)
                     Value::Number(num) => {
                         let n = num.max(1) as usize;
-                        let pattern_val = evaluator.eval_with_env(args[2].clone(), env)?;
+                        let pattern_val = evaluator.eval_with_env(args[2].clone(), env.clone())?;
                         (n, 1usize, pattern_val)
                     }
                     Value::Note(note) => {
                         let n = note.pitch_class() as usize;
-                        let pattern_val = evaluator.eval_with_env(args[2].clone(), env)?;
+                        let pattern_val = evaluator.eval_with_env(args[2].clone(), env.clone())?;
                         (n, 1usize, pattern_val)
                     }
                     // Method call style: every(pattern, n, transform)
                     Value::Pattern(_) | Value::String(_) => {
-                        let n_val = evaluator.eval_with_env(args[1].clone(), env)?;
+                        let n_val = evaluator.eval_with_env(args[1].clone(), env.clone())?;
                         let n = match n_val {
                             Value::Number(num) => num.max(1) as usize,
                             Value::Note(note) => note.pitch_class() as usize,
@@ -829,7 +829,7 @@ impl FunctionRegistry {
                     Value::String(s) => match crate::types::Pattern::parse(&s) {
                         Ok(p) => p,
                         Err(_) => match crate::parser::parse(&s) {
-                            Ok(expr) => match evaluator.eval_with_env(expr, env)? {
+                            Ok(expr) => match evaluator.eval_with_env(expr, env.clone())? {
                                 Value::Pattern(p) => p,
                                 _ => {
                                     return Err(anyhow!(
@@ -853,7 +853,7 @@ impl FunctionRegistry {
                     name: transform_name.clone(),
                     args: vec![Expression::Pattern(base_pattern.clone())],
                 };
-                let transformed_val = evaluator.eval_with_env(call_expr, env)?;
+                let transformed_val = evaluator.eval_with_env(call_expr, env.clone())?;
                 let transformed_pattern = match transformed_val {
                     Value::Pattern(p) => p,
                     _ => {
@@ -918,8 +918,8 @@ impl FunctionRegistry {
                 let chord_expr = arg_iter.next().unwrap();
                 let n_expr = arg_iter.next().unwrap();
 
-                let chord_value = evaluator.eval_with_env(chord_expr, env)?;
-                let n_value = evaluator.eval_with_env(n_expr, env)?;
+                let chord_value = evaluator.eval_with_env(chord_expr, env.clone())?;
+                let n_value = evaluator.eval_with_env(n_expr, env.clone())?;
 
                 match (chord_value, n_value) {
                     (Value::Chord(chord), Value::Note(note)) => {
@@ -1037,7 +1037,7 @@ impl FunctionRegistry {
                     }
                 };
 
-                let progression_value = evaluator.eval_with_env(progression_expr, env)?;
+                let progression_value = evaluator.eval_with_env(progression_expr, env.clone())?;
                 if let Value::Pattern(pattern) = progression_value {
                     // Extract chords from pattern
                     if let Some(chords) = pattern.as_chords() {
@@ -1047,7 +1047,7 @@ impl FunctionRegistry {
                             let result = evaluator.call_function_by_name(
                                 &func_name,
                                 vec![Value::Chord(chord.clone())],
-                                env,
+                                env.clone(),
                             )?;
                             
                             // Extract the chord from the result
@@ -1121,8 +1121,8 @@ impl FunctionRegistry {
                 let chord1_expr = arg_iter.next().unwrap();
                 let chord2_expr = arg_iter.next().unwrap();
 
-                let chord1_value = evaluator.eval_with_env(chord1_expr, env)?;
-                let chord2_value = evaluator.eval_with_env(chord2_expr, env)?;
+                let chord1_value = evaluator.eval_with_env(chord1_expr, env.clone())?;
+                let chord2_value = evaluator.eval_with_env(chord2_expr, env.clone())?;
 
                 match (chord1_value, chord2_value) {
                     (Value::Chord(chord1), Value::Chord(chord2)) => {
@@ -1165,8 +1165,8 @@ impl FunctionRegistry {
                 let chord1_expr = arg_iter.next().unwrap();
                 let chord2_expr = arg_iter.next().unwrap();
 
-                let chord1_value = evaluator.eval_with_env(chord1_expr, env)?;
-                let chord2_value = evaluator.eval_with_env(chord2_expr, env)?;
+                let chord1_value = evaluator.eval_with_env(chord1_expr, env.clone())?;
+                let chord2_value = evaluator.eval_with_env(chord2_expr, env.clone())?;
 
                 match (chord1_value, chord2_value) {
                     (Value::Chord(chord1), Value::Chord(chord2)) => {
@@ -1197,8 +1197,8 @@ impl FunctionRegistry {
                     return Err(anyhow!("ct() expects 2 arguments, got {}", args.len()));
                 }
                 let mut arg_iter = args.into_iter();
-                let chord1 = evaluator.eval_with_env(arg_iter.next().unwrap(), env)?;
-                let chord2 = evaluator.eval_with_env(arg_iter.next().unwrap(), env)?;
+                let chord1 = evaluator.eval_with_env(arg_iter.next().unwrap(), env.clone())?;
+                let chord2 = evaluator.eval_with_env(arg_iter.next().unwrap(), env.clone())?;
                 match (chord1, chord2) {
                     (Value::Chord(c1), Value::Chord(c2)) => {
                         let vl = VoiceLeading::analyze(&c1, &c2);
@@ -1356,7 +1356,7 @@ impl FunctionRegistry {
                     return Err(anyhow!("roman_numeral() expects 2 arguments: chord, key"));
                 }
 
-                let chord_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let chord_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
                 let key_value = evaluator.eval_with_env(args[1].clone(), env)?;
 
                 match (chord_value, key_value) {
@@ -1400,7 +1400,7 @@ impl FunctionRegistry {
                 if args.len() != 2 {
                     return Err(anyhow!("rn() expects 2 arguments: chord, key"));
                 }
-                let chord_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let chord_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
                 let key_value = evaluator.eval_with_env(args[1].clone(), env)?;
                 match (chord_value, key_value) {
                     (Value::Chord(chord), Value::Note(key)) => {
@@ -1441,7 +1441,7 @@ impl FunctionRegistry {
                         _ => return Err(anyhow!("progression() expects (progression_name, key)")),
                     };
 
-                    let key_value = evaluator.eval_with_env(args[1].clone(), env)?;
+                    let key_value = evaluator.eval_with_env(args[1].clone(), env.clone())?;
                     if let Value::Note(key) = key_value {
                         let underscore_name = prog_name.replace("-", "_");
                         let pattern = CommonProgressions::get_progression(&prog_name, key)
@@ -1495,7 +1495,7 @@ impl FunctionRegistry {
                     ));
                 }
 
-                let prog_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let prog_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
                 let key_value = evaluator.eval_with_env(args[1].clone(), env)?;
 
                 match (prog_value, key_value) {
@@ -1694,8 +1694,8 @@ impl FunctionRegistry {
                 if args.len() != 2 {
                     return Err(anyhow!("wave() expects 2 arguments: pattern, name"));
                 }
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let name_value = evaluator.eval_with_env(args[1].clone(), env)?;
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
+                let name_value = evaluator.eval_with_env(args[1].clone(), env.clone())?;
 
                 let mut pattern = match pattern_value {
                     Value::Pattern(p) => p,
@@ -1725,8 +1725,8 @@ impl FunctionRegistry {
                 if args.len() != 2 {
                     return Err(anyhow!("pan() expects 2 arguments: pattern, value"));
                 }
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
-                let pan_value = evaluator.eval_with_env(args[1].clone(), env)?;
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
+                let pan_value = evaluator.eval_with_env(args[1].clone(), env.clone())?;
 
                 let mut pattern = match pattern_value {
                     Value::Pattern(p) => p,
@@ -1757,7 +1757,7 @@ impl FunctionRegistry {
                     ));
                 }
 
-                let pattern_value = evaluator.eval_with_env(args[0].clone(), env)?;
+                let pattern_value = evaluator.eval_with_env(args[0].clone(), env.clone())?;
 
                 // Helper to apply envelope to a pattern
                 let apply_env = |p: crate::types::Pattern, preset: Option<&str>, adsr: Option<(f32, f32, f32, f32)>| -> crate::types::Pattern {
@@ -1770,7 +1770,7 @@ impl FunctionRegistry {
 
                 if args.len() == 2 {
                     // Preset mode: env(pattern, "pluck")
-                    let preset_val = evaluator.eval_with_env(args[1].clone(), env)?;
+                    let preset_val = evaluator.eval_with_env(args[1].clone(), env.clone())?;
                     let preset_name = match preset_val {
                         Value::String(s) => s,
                         _ => return Err(anyhow!("env() with 2 arguments expects a preset name string")),
@@ -1790,22 +1790,22 @@ impl FunctionRegistry {
                     }
                 } else if args.len() == 5 {
                     // Custom ADSR: env(pattern, attack, decay, sustain, release)
-                    let attack = match evaluator.eval_with_env(args[1].clone(), env)? {
+                    let attack = match evaluator.eval_with_env(args[1].clone(), env.clone())? {
                         Value::Number(n) => n as f32 / 100.0,
                         Value::Note(n) => n.pitch_class() as f32 / 100.0,
                         _ => return Err(anyhow!("env() attack must be a number")),
                     };
-                    let decay = match evaluator.eval_with_env(args[2].clone(), env)? {
+                    let decay = match evaluator.eval_with_env(args[2].clone(), env.clone())? {
                         Value::Number(n) => n as f32 / 100.0,
                         Value::Note(n) => n.pitch_class() as f32 / 100.0,
                         _ => return Err(anyhow!("env() decay must be a number")),
                     };
-                    let sustain = match evaluator.eval_with_env(args[3].clone(), env)? {
+                    let sustain = match evaluator.eval_with_env(args[3].clone(), env.clone())? {
                         Value::Number(n) => (n as f32 / 100.0).clamp(0.0, 1.0),
                         Value::Note(n) => (n.pitch_class() as f32 / 12.0).clamp(0.0, 1.0),
                         _ => return Err(anyhow!("env() sustain must be a number")),
                     };
-                    let release = match evaluator.eval_with_env(args[4].clone(), env)? {
+                    let release = match evaluator.eval_with_env(args[4].clone(), env.clone())? {
                         Value::Number(n) => n as f32 / 100.0,
                         Value::Note(n) => n.pitch_class() as f32 / 100.0,
                         _ => return Err(anyhow!("env() release must be a number")),
