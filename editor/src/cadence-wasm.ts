@@ -213,7 +213,7 @@ export async function initWasm(): Promise<void> {
         console.log('✓ WASM module initialized');
     });
 
-    return initPromise;
+    await initPromise;
 }
 
 /**

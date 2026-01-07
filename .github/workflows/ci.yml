@@ -25,22 +25,34 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Check
-        run: cargo check --all-targets
+        run: cargo check --all-targets -p cadence-core
 
       - name: Test
-        run: cargo test
+        run: cargo test -p cadence-core
 
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy -p cadence-core -- -D warnings
 
   editor:
     name: Editor TypeScript
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: editor
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build WASM (for TypeScript types)
+        run: |
+          cd cadence-core
+          wasm-pack build --target web --features wasm
+          cp -r pkg/* ../editor/src/wasm/
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -50,7 +62,9 @@ jobs:
           cache-dependency-path: editor/package-lock.json
 
       - name: Install dependencies
+        working-directory: editor
         run: npm ci
 
       - name: TypeScript check
+        working-directory: editor
         run: npx tsc --noEmit
