@@ -19,17 +19,33 @@ pub struct NoteInfo {
     pub pitch_class: u8,
     /// Octave in scientific pitch notation (4 = middle C octave)
     pub octave: i8,
+    /// MIDI velocity (0-127), default 100
+    pub velocity: u8,
 }
 
 impl NoteInfo {
-    /// Create NoteInfo from a Note
+    /// Create NoteInfo from a Note with default velocity
     pub fn from_note(note: &Note) -> Self {
+        Self::from_note_with_velocity(note, 100)
+    }
+
+    /// Create NoteInfo from a Note with specific velocity
+    pub fn from_note_with_velocity(note: &Note, velocity: u8) -> Self {
         NoteInfo {
             midi: note.midi_note(),
             frequency: note.frequency(),
             name: note.full_name(),
             pitch_class: note.pitch_class(),
             octave: note.octave(),
+            velocity,
+        }
+    }
+
+    /// Create a copy with a different velocity
+    pub fn with_velocity(&self, velocity: u8) -> Self {
+        NoteInfo {
+            velocity,
+            ..self.clone()
         }
     }
 }

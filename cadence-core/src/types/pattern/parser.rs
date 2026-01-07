@@ -18,6 +18,7 @@ pub fn has_non_variable_content(step: &PatternStep) -> bool {
         PatternStep::Polyrhythm(sub_patterns) => sub_patterns
             .iter()
             .any(|sub| sub.iter().any(has_non_variable_content)),
+        PatternStep::Velocity(inner, _) => has_non_variable_content(inner),
         PatternStep::Variable(_) => false,
     }
 }
@@ -297,17 +298,49 @@ fn take_identifier(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
     ident
 }
 
-/// Parse optional (n,k) Euclidean, @N weight, and *N repetition suffixes
-/// Order: Euclidean first, then weight, then repeat (e.g., C(3,8)@2*3)
+/// Parse optional (n,k) Euclidean, (vel) velocity, @N weight, and *N repetition suffixes
+/// Order: parens first (Euclidean or Velocity), then weight, then repeat (e.g., C(3,8)@2*3 or C5(0.5)@2)
+/// Euclidean: (pulses,steps) - two comma-separated integers
+/// Velocity: (vel) - single number (0.0-1.0 float or 0-127 integer)
 fn maybe_parse_weight_and_repeat(
     chars: &mut std::iter::Peekable<std::str::Chars>,
     step: PatternStep,
 ) -> Result<PatternStep> {
-    // Check for (n,k) Euclidean pattern first
+    // Check for ( which could be Euclidean or Velocity
     let step = if chars.peek() == Some(&'(') {
         chars.next(); // consume '('
-        let (pulses, steps) = parse_euclidean_params(chars)?;
-        PatternStep::Euclidean(Box::new(step), pulses, steps)
+
+        // Collect everything until closing paren to inspect
+        let mut content = String::new();
+        let mut depth = 1;
+
+        // Peek ahead by collecting chars but not consuming from original
+        let peeked: String = chars.clone().collect();
+        for c in peeked.chars() {
+            if c == '(' {
+                depth += 1;
+                content.push(c);
+            } else if c == ')' {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+                content.push(c);
+            } else {
+                content.push(c);
+            }
+        }
+
+        // Determine if this is Euclidean or Velocity by checking for comma
+        if content.contains(',') {
+            // Euclidean: (pulses,steps)
+            let (pulses, steps) = parse_euclidean_params(chars)?;
+            PatternStep::Euclidean(Box::new(step), pulses, steps)
+        } else {
+            // Velocity: single number
+            let velocity = parse_velocity_param(chars)?;
+            PatternStep::Velocity(Box::new(step), velocity)
+        }
     } else {
         step
     };
@@ -354,6 +387,52 @@ fn maybe_parse_weight_and_repeat(
     } else {
         Ok(step)
     }
+}
+
+/// Parse velocity parameter (single number: 0.0-1.0 float or 0-127 integer)
+fn parse_velocity_param(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<u8> {
+    let mut num_str = String::new();
+
+    // Consume digits and decimal point
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() || c == '.' {
+            num_str.push(chars.next().unwrap());
+        } else {
+            break;
+        }
+    }
+
+    if num_str.is_empty() {
+        return Err(anyhow!("Expected velocity value in parentheses"));
+    }
+
+    // Expect closing paren
+    if chars.next() != Some(')') {
+        return Err(anyhow!("Expected ')' to close velocity"));
+    }
+
+    // Parse as float or int
+    let velocity: u8 = if num_str.contains('.') {
+        // Float 0.0-1.0 → scale to 0-127
+        let f: f32 = num_str
+            .parse()
+            .map_err(|_| anyhow!("Invalid velocity: {}", num_str))?;
+        if f < 0.0 || f > 1.0 {
+            return Err(anyhow!("Velocity float must be 0.0-1.0, got {}", f));
+        }
+        (f * 127.0).round() as u8
+    } else {
+        // Integer 0-127
+        let n: u32 = num_str
+            .parse()
+            .map_err(|_| anyhow!("Invalid velocity: {}", num_str))?;
+        if n > 127 {
+            return Err(anyhow!("Velocity must be 0-127, got {}", n));
+        }
+        n as u8
+    };
+
+    Ok(velocity)
 }
 
 /// Parse the (pulses,steps) parameters for Euclidean rhythms

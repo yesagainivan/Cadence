@@ -308,6 +308,7 @@ impl FunctionRegistry {
                                         sub_patterns.clone(),
                                     )]),
                                 )),
+                                PatternStep::Velocity(inner, _) => step_to_value(inner),
                             }
                         }
                         step_to_value(&pattern.steps[actual_idx as usize])

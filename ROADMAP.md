@@ -93,6 +93,9 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] Pattern variable resolution: `"cmaj fmaj"` resolves variables at evaluation time
 - [x] Pattern modifiers with EventDispatcher: `env()`, `wave()` apply to playback
 - [x] Sub-beat timing for `fast()` and `slow()` (TidalCycles-style cycle tracking)
+- [x] Euclidean rhythms: `C(3,8)` - Bjorklund algorithm for even distribution
+- [x] Polyrhythm mini-notation: `{C D E, F G}` - each sub-pattern at own tempo
+- [x] Pattern combinators: `stack()`, `cat()`, extended `len()` for patterns/chords/arrays
 
 ### 3.4 Multiple Voices ✅
 - [x] Named tracks/voices (`track N { ... }`)
@@ -137,8 +140,8 @@ A production-ready music programming language for chord progressions and harmoni
 - [x] Note-on/note-off events (automatic from playback)
 - [x] Per-track and mono channel modes (`midi channel`)
 - [x] REPL commands: `midi connect`, `midi disconnect`, `midi status`, `midi panic`
-- [ ] Control change messages
-- [ ] Velocity from pattern dynamics
+- [x] Control change messages (`midi cc <controller> <value> [channel]`)
+- [x] Velocity syntax: `C5(0.5)` or `C5(100)` sets MIDI velocity
 
 ### 4.3 Recording & Export
 - [ ] Record session to WAV
@@ -147,6 +150,21 @@ A production-ready music programming language for chord progressions and harmoni
 ### 4.4 OSC Support
 - [ ] OSC input for external control
 - [ ] OSC output for visualization
+
+---
+
+## Community Contributions Welcome 🤝
+
+The following features are great candidates for community contributions:
+
+| Feature | Description | Difficulty |
+|---------|-------------|------------|
+| Audio Effects | Reverb, delay, filter | Medium-Hard |
+| Recording/Export | WAV recording, MIDI export | Medium |
+| OSC Support | Input/output for external control | Medium |
+| `every n beats {}` | Time-synced loops | Medium |
+| Pattern Matching | Match on chord qualities | Medium |
+| Closures | Pattern capture in functions | Hard |
 
 ---
 

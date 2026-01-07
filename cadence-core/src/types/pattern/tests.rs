@@ -924,15 +924,139 @@ fn test_euclidean_invalid_syntax() {
     // Missing closing paren
     assert!(Pattern::parse("C(3,8").is_err());
 
-    // Missing comma
-    assert!(Pattern::parse("C(38)").is_err());
+    // C(38) is now valid velocity (38 = MIDI velocity)
+    // So we only test truly invalid cases
 
-    // Missing numbers
+    // Missing numbers in Euclidean
     assert!(Pattern::parse("C(,8)").is_err());
     assert!(Pattern::parse("C(3,)").is_err());
 
     // Zero steps
     assert!(Pattern::parse("C(3,0)").is_err());
+}
+
+// ============================================================================
+// Velocity Syntax Tests
+// ============================================================================
+
+#[test]
+fn test_velocity_parse_integer() {
+    let p = Pattern::parse("C5(100)").unwrap();
+    assert_eq!(p.steps.len(), 1);
+    match &p.steps[0] {
+        PatternStep::Velocity(inner, vel) => {
+            assert_eq!(*vel, 100);
+            match inner.as_ref() {
+                PatternStep::Note(n) => assert_eq!(n.full_name(), "C5"),
+                _ => panic!("Expected Note inside Velocity"),
+            }
+        }
+        _ => panic!("Expected Velocity step, got {:?}", p.steps[0]),
+    }
+}
+
+#[test]
+fn test_velocity_parse_float() {
+    let p = Pattern::parse("C5(0.5)").unwrap();
+    assert_eq!(p.steps.len(), 1);
+    match &p.steps[0] {
+        PatternStep::Velocity(inner, vel) => {
+            // 0.5 * 127 = 63.5 → 64
+            assert_eq!(*vel, 64);
+            assert!(matches!(inner.as_ref(), PatternStep::Note(_)));
+        }
+        _ => panic!("Expected Velocity step"),
+    }
+}
+
+#[test]
+fn test_velocity_full_range() {
+    // 0.0 → 0
+    let p = Pattern::parse("C(0.0)").unwrap();
+    match &p.steps[0] {
+        PatternStep::Velocity(_, vel) => assert_eq!(*vel, 0),
+        _ => panic!("Expected Velocity"),
+    }
+
+    // 1.0 → 127
+    let p = Pattern::parse("C(1.0)").unwrap();
+    match &p.steps[0] {
+        PatternStep::Velocity(_, vel) => assert_eq!(*vel, 127),
+        _ => panic!("Expected Velocity"),
+    }
+
+    // 127 (integer)
+    let p = Pattern::parse("C(127)").unwrap();
+    match &p.steps[0] {
+        PatternStep::Velocity(_, vel) => assert_eq!(*vel, 127),
+        _ => panic!("Expected Velocity"),
+    }
+}
+
+#[test]
+fn test_velocity_with_weight() {
+    let p = Pattern::parse("C5(80)@2").unwrap();
+    match &p.steps[0] {
+        PatternStep::Weighted(inner, weight) => {
+            assert_eq!(*weight, 2);
+            match inner.as_ref() {
+                PatternStep::Velocity(_, vel) => assert_eq!(*vel, 80),
+                _ => panic!("Expected Velocity inside Weighted"),
+            }
+        }
+        _ => panic!("Expected Weighted step"),
+    }
+}
+
+#[test]
+fn test_velocity_with_repeat() {
+    let p = Pattern::parse("C5(80)*3").unwrap();
+    match &p.steps[0] {
+        PatternStep::Repeat(inner, count) => {
+            assert_eq!(*count, 3);
+            match inner.as_ref() {
+                PatternStep::Velocity(_, vel) => assert_eq!(*vel, 80),
+                _ => panic!("Expected Velocity inside Repeat"),
+            }
+        }
+        _ => panic!("Expected Repeat step"),
+    }
+}
+
+#[test]
+fn test_velocity_display() {
+    let p = Pattern::parse("C5(100)").unwrap();
+    let display = format!("{}", p);
+    assert!(
+        display.contains("(100)"),
+        "Display should show velocity: got {}",
+        display
+    );
+}
+
+#[test]
+fn test_velocity_invalid() {
+    // Velocity > 127
+    assert!(Pattern::parse("C(200)").is_err());
+
+    // Float > 1.0
+    assert!(Pattern::parse("C(1.5)").is_err());
+
+    // Negative float
+    // Note: parser doesn't handle negative numbers, so -0.5 would parse differently
+}
+
+#[test]
+fn test_velocity_applied_to_noteinfo() {
+    let p = Pattern::parse("C5(64)").unwrap();
+    let step = &p.steps[0];
+    let infos = step.to_step_info_for_cycle(0);
+
+    assert_eq!(infos.len(), 1);
+    let (notes, _, is_rest) = &infos[0];
+    assert!(!is_rest);
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].velocity, 64);
 }
 
 #[test]

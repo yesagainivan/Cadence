@@ -373,6 +373,10 @@ impl Evaluator {
                                         PatternStep::Polyrhythm(sub_patterns.clone()),
                                     ])))
                                 }
+                                PatternStep::Velocity(inner, _) => {
+                                    // Unwrap velocity step and return its value
+                                    step_to_value(inner)
+                                }
                             }
                         }
                         step_to_value(&pattern.steps[actual_idx as usize])

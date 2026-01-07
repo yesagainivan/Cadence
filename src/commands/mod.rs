@@ -133,6 +133,7 @@ pub fn create_registry() -> CommandRegistry {
     registry.register("midi channel", midi::cmd_midi_channel);
     registry.register("midi status", midi::cmd_midi_status);
     registry.register("midi panic", midi::cmd_midi_panic);
+    registry.register("midi cc", midi::cmd_midi_cc);
     registry.register("midi test", midi::cmd_midi_test);
     registry.register("output", midi::cmd_output_mode);
 

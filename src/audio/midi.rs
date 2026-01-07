@@ -477,6 +477,31 @@ impl MidiOutputHandle {
 
         Ok(())
     }
+
+    /// Send Control Change message for a track
+    /// controller: 0-127 (standard MIDI CC numbers)
+    /// value: 0-127
+    pub fn cc(&self, track_id: usize, controller: u8, value: u8) -> Result<()> {
+        let channel = self.channel_for_track(track_id);
+        self.command_tx
+            .send(MidiCommand::ControlChange {
+                channel,
+                controller: controller & 0x7F,
+                value: value & 0x7F,
+            })
+            .map_err(|e| anyhow!("Failed to send CC: {}", e))
+    }
+
+    /// Send Control Change on a specific channel (bypasses track mapping)
+    pub fn cc_on_channel(&self, channel: u8, controller: u8, value: u8) -> Result<()> {
+        self.command_tx
+            .send(MidiCommand::ControlChange {
+                channel: channel & 0x0F,
+                controller: controller & 0x7F,
+                value: value & 0x7F,
+            })
+            .map_err(|e| anyhow!("Failed to send CC: {}", e))
+    }
 }
 
 impl Drop for MidiOutputHandle {

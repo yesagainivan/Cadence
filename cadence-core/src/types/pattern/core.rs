@@ -801,6 +801,7 @@ impl Pattern {
                         }
                     }
                 }
+                PatternStep::Velocity(inner, _) => collect_notes(inner, notes),
             }
         }
 

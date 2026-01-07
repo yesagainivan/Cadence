@@ -230,15 +230,23 @@ The web editor was simplified from a multi-file IDE to a **single-file playgroun
 
 Additional mini-notation features from TidalCycles/Strudel to implement:
 
-| Feature | Syntax | Description | Priority |
-|---------|--------|-------------|----------|
+| Feature | Syntax | Description | Status |
+|---------|--------|-------------|--------|
 | **Slow alternation** | `<C D E>` | Cycle through elements, one per cycle | ✅ Implemented |
-| **Euclidean rhythms** | `C(3,8)` | Place 3 notes evenly in 8 slots | ⭐⭐⭐ High |
-| **Polyrhythm** | `{C D E, F G}` | Play sequences with different lengths | ⭐⭐ Medium |
+| **Euclidean rhythms** | `C(3,8)` | Place 3 notes evenly in 8 slots | ✅ Implemented |
+| **Polyrhythm** | `{C D E, F G}` | Play sequences with different lengths | ✅ Implemented |
 | **Stretch/Fit** | `C/2` or `C*0.5` | Stretch step over fractional slots | ⭐⭐ Medium |
 | **Random choice** | `C?` or `[C D]?` | Randomly include/exclude step | ⭐ Low |
 | **Degrade** | `degrade(pattern)` | Randomly drop events | ⭐ Low |
 | **Offset** | `C~0.5` | Offset timing by fraction | ⭐ Low |
+
+### Pattern Combinator Functions (Implemented)
+
+| Function | Description |
+|----------|-------------|
+| `stack(p1, p2, ...)` | Layer patterns at same tempo (notes become chords) |
+| `cat(p1, p2, ...)` | Concatenate patterns sequentially |
+| `len(x)` | Length of pattern, chord, or array |
 
 ### Current Mini-Notation (Implemented)
 
@@ -251,4 +259,8 @@ Additional mini-notation features from TidalCycles/Strudel to implement:
 - Variables: `myVar`
 - Drums: `kick`, `snare`, `hh`
 - Alternation: `<C D E>` (one per cycle)
+- Euclidean: `C(3,8)` (Bjorklund algorithm)
+- Polyrhythm: `{C D E, F G}` (each sub-pattern at own tempo)
+- **Velocity**: `C5(0.5)` or `C5(100)` (MIDI velocity 0-127)
+
 

@@ -31,6 +31,8 @@ pub enum PatternStep {
     /// Polyrhythm: {C D E, F G} plays multiple patterns simultaneously,
     /// each at its own tempo (3-step pattern plays 3 notes/cycle, 2-step plays 2 notes/cycle)
     Polyrhythm(Vec<Vec<PatternStep>>), // Each inner Vec is a sub-pattern's steps
+    /// Velocity modifier: C5(0.5) or C5(100) sets MIDI velocity (0-127)
+    Velocity(Box<PatternStep>, u8),
 }
 
 impl PatternStep {
@@ -106,6 +108,8 @@ impl PatternStep {
                     vec![(merged_freqs, false)]
                 }
             }
+            // Velocity: delegate to inner (velocity is handled in NoteInfo conversion)
+            PatternStep::Velocity(inner, _) => inner.to_frequencies(),
         }
     }
 
@@ -139,6 +143,7 @@ impl PatternStep {
                         name: d.short_name().to_string(),
                         pitch_class: d.midi_note() % 12,
                         octave: (d.midi_note() / 12) as i8 - 1,
+                        velocity: 100,
                     }],
                     false,
                 )]
@@ -182,6 +187,16 @@ impl PatternStep {
                     vec![(merged_notes, false)]
                 }
             }
+            // Velocity: apply velocity to all notes from inner step
+            PatternStep::Velocity(inner, vel) => inner
+                .to_note_infos()
+                .into_iter()
+                .map(|(notes, is_rest)| {
+                    let notes_with_vel: Vec<NoteInfo> =
+                        notes.into_iter().map(|n| n.with_velocity(*vel)).collect();
+                    (notes_with_vel, is_rest)
+                })
+                .collect(),
         }
     }
 
@@ -251,6 +266,16 @@ impl PatternStep {
                     vec![(merged_notes, merged_drums, false)]
                 }
             }
+            // Velocity: apply velocity to all notes from inner step
+            PatternStep::Velocity(inner, vel) => inner
+                .to_step_info()
+                .into_iter()
+                .map(|(notes, drums, is_rest)| {
+                    let notes_with_vel: Vec<NoteInfo> =
+                        notes.into_iter().map(|n| n.with_velocity(*vel)).collect();
+                    (notes_with_vel, drums, is_rest)
+                })
+                .collect(),
         }
     }
 
@@ -330,6 +355,16 @@ impl PatternStep {
                     vec![(merged_notes, merged_drums, false)]
                 }
             }
+            // Velocity: apply velocity to all notes from inner step
+            PatternStep::Velocity(inner, vel) => inner
+                .to_step_info_for_cycle(cycle)
+                .into_iter()
+                .map(|(notes, drums, is_rest)| {
+                    let notes_with_vel: Vec<NoteInfo> =
+                        notes.into_iter().map(|n| n.with_velocity(*vel)).collect();
+                    (notes_with_vel, drums, is_rest)
+                })
+                .collect(),
         }
     }
 
@@ -362,6 +397,9 @@ impl PatternStep {
                     .map(|sub| sub.iter().map(|s| s.transpose(semitones)).collect())
                     .collect(),
             ),
+            PatternStep::Velocity(inner, vel) => {
+                PatternStep::Velocity(Box::new(inner.transpose(semitones)), *vel)
+            }
         }
     }
 }
@@ -413,6 +451,9 @@ impl fmt::Display for PatternStep {
                     }
                 }
                 write!(f, "}}")
+            }
+            PatternStep::Velocity(inner, vel) => {
+                write!(f, "{}({})", inner, vel)
             }
         }
     }

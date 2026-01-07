@@ -168,6 +168,60 @@ pub fn cmd_midi_panic(_args: &str, ctx: &mut CommandContext) -> CommandResult {
     }
 }
 
+/// Handle `midi cc <controller> <value> [channel]` command - send Control Change message
+/// controller: 0-127 (standard MIDI CC numbers)
+/// value: 0-127
+/// channel: 1-16 (optional, defaults to 1)
+pub fn cmd_midi_cc(args: &str, ctx: &mut CommandContext) -> CommandResult {
+    let parts: Vec<&str> = args.split_whitespace().collect();
+
+    if parts.len() < 2 {
+        return CommandResult::Error(
+            "Usage: midi cc <controller> <value> [channel]\n  controller: 0-127 (CC number)\n  value: 0-127\n  channel: 1-16 (default: 1)\n\nCommon CC numbers:\n  1 = Mod Wheel, 7 = Volume, 10 = Pan, 64 = Sustain".to_string(),
+        );
+    }
+
+    let controller: u8 = match parts[0].parse() {
+        Ok(c) if c <= 127 => c,
+        _ => return CommandResult::Error("Controller must be 0-127".to_string()),
+    };
+
+    let value: u8 = match parts[1].parse() {
+        Ok(v) if v <= 127 => v,
+        _ => return CommandResult::Error("Value must be 0-127".to_string()),
+    };
+
+    let channel: u8 = if parts.len() >= 3 {
+        match parts[2].parse::<u8>() {
+            Ok(ch) if ch >= 1 && ch <= 16 => ch - 1, // Convert to 0-indexed
+            _ => return CommandResult::Error("Channel must be 1-16".to_string()),
+        }
+    } else {
+        0 // Default to channel 1 (0-indexed)
+    };
+
+    match &ctx.midi_handle {
+        Some(handle) => {
+            if !handle.is_connected() {
+                return CommandResult::Error(
+                    "Not connected to MIDI. Use 'midi connect <port>' first.".to_string(),
+                );
+            }
+
+            match handle.cc_on_channel(channel, controller, value) {
+                Ok(()) => CommandResult::Message(format!(
+                    "🎹 Sent CC: controller={}, value={}, channel={}",
+                    controller.to_string().cyan(),
+                    value.to_string().green(),
+                    (channel + 1).to_string().yellow()
+                )),
+                Err(e) => CommandResult::Error(format!("Failed to send CC: {}", e)),
+            }
+        }
+        None => CommandResult::Error("MIDI output not initialized".to_string()),
+    }
+}
+
 /// Handle `midi test [note]` command - send a test note to verify MIDI output
 /// Default note is 60 (C4), or specify a MIDI note number 0-127
 pub fn cmd_midi_test(args: &str, ctx: &mut CommandContext) -> CommandResult {
