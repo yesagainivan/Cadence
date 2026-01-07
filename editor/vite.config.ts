@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-    // Enable top-level await for WASM
+    // Base path is set via CLI: --base=/Cadence/ for GitHub Pages
     optimizeDeps: {
         exclude: ['./src/wasm/cadence_core_bg.wasm'],
     },

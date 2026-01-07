@@ -2,14 +2,12 @@
 /target
 /back
 
-# Cadence
-
+# Internal dev notes
+/docs/internal
+/logo
 
 # Other
 *.bin
 *.DS_Store
 *.png
-
-
-# all zip files
 *.zip

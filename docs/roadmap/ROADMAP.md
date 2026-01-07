@@ -1,6 +1,6 @@
 # Cadence Roadmap
 
-A Music Programming Language for chord progressions and harmonic exploration, inspired by TidalCycles and Sonic Pi.
+A production-ready music programming language for chord progressions and harmonic exploration, inspired by TidalCycles and Sonic Pi.
 
 ---
 
