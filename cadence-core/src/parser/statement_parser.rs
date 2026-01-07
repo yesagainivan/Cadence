@@ -765,30 +765,12 @@ impl StatementParser {
         self.expect(&Token::In)?;
 
         // Parse start value
-        let start = match self.current() {
-            Token::Number(n) => *n,
-            _ => {
-                return Err(CadenceError::new(
-                    "Expected number in range expression".to_string(),
-                    self.current_span(),
-                ))
-            }
-        };
-        self.advance();
+        let start = self.parse_expression()?;
 
         self.expect(&Token::DotDot)?;
 
         // Parse end value
-        let end = match self.current() {
-            Token::Number(n) => *n,
-            _ => {
-                return Err(CadenceError::new(
-                    "Expected number after '..' in range expression".to_string(),
-                    self.current_span(),
-                ))
-            }
-        };
-        self.advance();
+        let end = self.parse_expression()?;
 
         let body = self.parse_block()?;
 

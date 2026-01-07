@@ -195,8 +195,8 @@ pub enum Statement {
     /// For loop: for i in 0..10 { ... }
     For {
         var: String,
-        start: i32,
-        end: i32,
+        start: Expression,
+        end: Expression,
         body: Vec<Statement>,
     },
 

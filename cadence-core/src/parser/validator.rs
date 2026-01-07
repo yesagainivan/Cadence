@@ -76,7 +76,11 @@ impl<'a> Validator<'a> {
                     self.visit_unspanned_statement(inner_stmt, span.clone());
                 }
             }
-            Statement::For { body, .. } => {
+            Statement::For {
+                body, start, end, ..
+            } => {
+                self.visit_expression(start, span.clone());
+                self.visit_expression(end, span.clone());
                 // Validate for loop body
                 for inner_stmt in body {
                     self.visit_unspanned_statement(inner_stmt, span.clone());
@@ -133,7 +137,11 @@ impl<'a> Validator<'a> {
                     self.visit_unspanned_statement(inner_stmt, parent_span.clone());
                 }
             }
-            Statement::For { body, .. } => {
+            Statement::For {
+                body, start, end, ..
+            } => {
+                self.visit_expression(start, parent_span.clone());
+                self.visit_expression(end, parent_span.clone());
                 for inner_stmt in body {
                     self.visit_unspanned_statement(inner_stmt, parent_span.clone());
                 }

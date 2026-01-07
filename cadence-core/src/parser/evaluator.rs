@@ -749,7 +749,19 @@ impl Evaluator {
                     end,
                     body,
                 } => {
-                    for i in *start..*end {
+                    let start_val = self.eval_with_env(start.clone(), Some(local_env))?;
+                    let end_val = self.eval_with_env(end.clone(), Some(local_env))?;
+
+                    let start_num = match start_val {
+                        Value::Number(n) => n,
+                        _ => return Err(anyhow!("For loop start must be a number")),
+                    };
+                    let end_num = match end_val {
+                        Value::Number(n) => n,
+                        _ => return Err(anyhow!("For loop end must be a number")),
+                    };
+
+                    for i in start_num..end_num {
                         local_env.push_scope();
                         local_env.define(var.clone(), Value::Number(i));
                         let result = self.run_statements_in_local_env(body, local_env);
